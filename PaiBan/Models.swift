@@ -768,10 +768,16 @@ enum ChineseCalendar {
         let md = String(format: "%02d-%02d", comps.month ?? 1, comps.day ?? 1)
 
         // 阴历（中国日历算）。
-        let lunar = chinese.dateComponents([.month, .day, .isLeapMonth], from: date)
+        // 注意：.isLeapMonth 是 iOS 17 才有的 API，App 最低支持 iOS 16，不能用。
+        // 闰月与上一个月同号：取本月初一的前一天，若其阴历月份与本月相同，则本月是闰月。
+        let lunar = chinese.dateComponents([.month, .day], from: date)
         let lunarMonth = lunar.month ?? 1
         let lunarDay = lunar.day ?? 1
-        let isLeap = lunar.isLeapMonth == true
+        let isLeap: Bool = {
+            guard let interval = chinese.dateInterval(of: .month, for: date) else { return false }
+            let dayBefore = interval.start.addingTimeInterval(-86400)
+            return chinese.component(.month, from: dayBefore) == lunarMonth
+        }()
         let monthName = (isLeap ? "闰" : "") + lunarMonths[(lunarMonth - 1 + 12) % 12]
         let lunarText: String
         if lunarDay == 1 {
