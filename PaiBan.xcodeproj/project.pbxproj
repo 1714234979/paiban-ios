@@ -18,12 +18,14 @@
 		235BCEDEA970EB15AE73517C /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 805B111C41F0170E440FDF6A /* MainTabView.swift */; };
 		6C93CA9A4B573BD0B0553AC3 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B83D5E372F06A2F0C59E32A /* Models.swift */; };
 		6D1032CA382E7837CC13DB0F /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D5A28CEED4F5BC2141D939C /* OnboardingView.swift */; };
+		C4CCD80650FF49319C794FFA /* PayCalc.swift in Sources */ = {isa = PBXBuildFile; fileRef = 835B8CA20F8F4A969A2ABE96 /* PayCalc.swift */; };
+		522E7C624BF34A00895C3B18 /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22056AF6FDF54CB79CD8EA82 /* AppLogger.swift */; };
+		7377C9299E254ED4AFF24EDE /* FeedbackView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1C3B4EC7863B4A6198C6C06E /* FeedbackView.swift */; };
 		381BA405A2089E1C5D17D3E4 /* PayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 18F3B725C23B5FA09ABAF7AE /* PayView.swift */; };
 		5B1A8BC1A981A4CF7458E4EF /* RegisterView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB0A4500EE1059F2AED64096 /* RegisterView.swift */; };
 		4F8C8FC85C251146F93D6DD6 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1F64D1EF38CA194CABA82C4 /* SettingsView.swift */; };
 		4E40A5F3BEB30BD8BD06BC61 /* Store.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE48ED7CB11C49CDE38DBC43 /* Store.swift */; };
 		0832B97529F1958263FCFDA2 /* TeamChangeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED9CCFE310BC5F5DEE554FD1 /* TeamChangeView.swift */; };
-		263696810BC3DC7C6EBB8ABD /* TodayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B66023CA55EDA38551154EC5 /* TodayView.swift */; };
 		385075F4922623F648613F5E /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB520360AEB3A336C8749C5E /* UpdateChecker.swift */; };
 /* End PBXBuildFile section */
 
@@ -41,12 +43,14 @@
 		805B111C41F0170E440FDF6A /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
 		6B83D5E372F06A2F0C59E32A /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		2D5A28CEED4F5BC2141D939C /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
+		835B8CA20F8F4A969A2ABE96 /* PayCalc.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayCalc.swift; sourceTree = "<group>"; };
+		22056AF6FDF54CB79CD8EA82 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
+		1C3B4EC7863B4A6198C6C06E /* FeedbackView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FeedbackView.swift; sourceTree = "<group>"; };
 		18F3B725C23B5FA09ABAF7AE /* PayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayView.swift; sourceTree = "<group>"; };
 		BB0A4500EE1059F2AED64096 /* RegisterView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RegisterView.swift; sourceTree = "<group>"; };
 		D1F64D1EF38CA194CABA82C4 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		CE48ED7CB11C49CDE38DBC43 /* Store.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Store.swift; sourceTree = "<group>"; };
 		ED9CCFE310BC5F5DEE554FD1 /* TeamChangeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamChangeView.swift; sourceTree = "<group>"; };
-		B66023CA55EDA38551154EC5 /* TodayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TodayView.swift; sourceTree = "<group>"; };
 		FB520360AEB3A336C8749C5E /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -92,12 +96,14 @@
 				805B111C41F0170E440FDF6A /* MainTabView.swift */,
 				6B83D5E372F06A2F0C59E32A /* Models.swift */,
 				2D5A28CEED4F5BC2141D939C /* OnboardingView.swift */,
+				835B8CA20F8F4A969A2ABE96 /* PayCalc.swift */,
+				22056AF6FDF54CB79CD8EA82 /* AppLogger.swift */,
+				1C3B4EC7863B4A6198C6C06E /* FeedbackView.swift */,
 				18F3B725C23B5FA09ABAF7AE /* PayView.swift */,
 				BB0A4500EE1059F2AED64096 /* RegisterView.swift */,
 				D1F64D1EF38CA194CABA82C4 /* SettingsView.swift */,
 				CE48ED7CB11C49CDE38DBC43 /* Store.swift */,
 				ED9CCFE310BC5F5DEE554FD1 /* TeamChangeView.swift */,
-				B66023CA55EDA38551154EC5 /* TodayView.swift */,
 				FB520360AEB3A336C8749C5E /* UpdateChecker.swift */,
             );
             path = PaiBan;
@@ -182,12 +188,14 @@
 				235BCEDEA970EB15AE73517C /* MainTabView.swift in Sources */,
 				6C93CA9A4B573BD0B0553AC3 /* Models.swift in Sources */,
 				6D1032CA382E7837CC13DB0F /* OnboardingView.swift in Sources */,
+				C4CCD80650FF49319C794FFA /* PayCalc.swift in Sources */,
+				522E7C624BF34A00895C3B18 /* AppLogger.swift in Sources */,
+				7377C9299E254ED4AFF24EDE /* FeedbackView.swift in Sources */,
 				381BA405A2089E1C5D17D3E4 /* PayView.swift in Sources */,
 				5B1A8BC1A981A4CF7458E4EF /* RegisterView.swift in Sources */,
 				4F8C8FC85C251146F93D6DD6 /* SettingsView.swift in Sources */,
 				4E40A5F3BEB30BD8BD06BC61 /* Store.swift in Sources */,
 				0832B97529F1958263FCFDA2 /* TeamChangeView.swift in Sources */,
-				263696810BC3DC7C6EBB8ABD /* TodayView.swift in Sources */,
 				385075F4922623F648613F5E /* UpdateChecker.swift in Sources */,
             );
             runOnlyForDeploymentPostprocessing = 0;
