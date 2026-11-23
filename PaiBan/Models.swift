@@ -543,14 +543,22 @@ struct PayGlobalSettings: Codable, Equatable {
 }
 
 /// 某月录入数（config.pay.months[monthKey]）：attendance / allowance / deptPerf /
-/// perfCoef / tripleDays / overtimeDays，缺失即按排班表算。
+/// perfCoef / bonusCoef / tripleDays / overtimeDays / utilities，缺失即按排班表算。
+/// bonusCoef 与 utilities 是单月覆盖值：填了只影响当月，没填用原来的来源。
 struct PayMonthRecord: Codable, Equatable {
     var attendance: Double? = nil
     var allowance: Double? = nil
     var deptPerf: Double? = nil
     var perfCoef: Double? = nil
+    var bonusCoef: Double? = nil
     var tripleDays: Double? = nil
     var overtimeDays: Double? = nil
+    var utilities: Double? = nil
+}
+
+/// 当月录入数里可单月覆盖的字段（工资页 inline 编辑用；服务端 /me/pay/month 同名）。
+enum PayRecordField: String, CaseIterable {
+    case deptPerf, perfCoef, bonusCoef, overtimeDays, utilities
 }
 
 /// 按月生效的设置（config.pay.effective[monthKey]）：baseSalary / position / bonusCoef。
@@ -594,6 +602,7 @@ struct PayMonth: Codable, Equatable {
     var deptPerf: Double? = nil
     var deptPerfRecorded: Bool? = nil
     var perfCoef: Double? = nil
+    var bonusCoefRecorded: Bool? = nil
     var otherReward: Double? = nil
     var otherRewardFull: Bool? = nil
     var heat: Double? = nil
@@ -609,6 +618,7 @@ struct PayMonth: Codable, Equatable {
     var contributionTotal: Double? = nil
     var salaryPayable: Double? = nil
     var utilities: Double? = nil
+    var utilitiesRecorded: Bool? = nil
     var salaryNet: Double? = nil
     var tripleDates: [TripleDate]? = nil
     var tripleDays: Double? = nil
@@ -644,3 +654,180 @@ struct PayMonth: Codable, Equatable {
 }
 
 /// 全年工资视图已删（预估工资只按月看），PayYear 与睡眠窗口 QuietInfo 一并移除。
+
+// MARK: - 中国日历（阴历 / 节气 / 节日 / 法定假日）
+
+/// 中国日历：阴历、24 节气、节日、法定节假日（假/班），供排班日历格显示。
+/// 阴历用 iOS 自带的中国日历（Calendar(identifier: .chinese)）算；
+/// 24 节气 Foundation 不直接给，用按年份查表补齐；
+/// 法定节假日（假）与调休上班日（班）用公开放假安排表。
+/// 注意：三薪和法定节假日是两回事——日历上只标法定节假日（假/班），
+/// 三薪是工资计算里的概念（PayCalc 按 STATUTORY 算），不在日历上另标。
+/// 法定节假日表（STATUTORY，PayCalc.statutoryTable）只含法定那几天（如国庆 10/01–10/03），
+/// 日历上的“假”按整段公共假期标（如国庆 10/01–10/07），与参考图一致。
+enum ChineseCalendar {
+
+    /// 某天在日历格里的附加信息。
+    struct DayInfo {
+        /// 阴历小字：节气/节日名（红字）优先，其次阴历日（初二、廿九），
+        /// 阴历月初一显示月份名（九月、冬月）。
+        var lunarText: String
+        /// 是不是红字（节气或节日）。
+        var isRedText: Bool
+        /// 假/班角标：.holiday（绿“假”）、.workday（红“班”）、nil（无）。
+        var mark: Mark?
+        enum Mark { case holiday, workday }
+    }
+
+    private static let chinese = Calendar(identifier: .chinese)
+    private static let gregorian = Calendar(identifier: .gregorian)
+
+    private static let lunarMonths = ["正月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "冬月", "腊月"]
+    private static let lunarDays = ["初一", "初二", "初三", "初四", "初五", "初六", "初七", "初八", "初九", "初十",
+                                    "十一", "十二", "十三", "十四", "十五", "十六", "十七", "十八", "十九", "二十",
+                                    "廿一", "廿二", "廿三", "廿四", "廿五", "廿六", "廿七", "廿八", "廿九", "三十"]
+
+    /// 24 节气（阳历月-日，北京时间）。2026/2027 按万年历；其它年份没有表时返回 nil。
+    /// 已按参考图核对：2026 寒露 10-08、霜降 10-23、大雪 12-07、冬至 12-22；
+    /// 2027 小寒 01-05、大寒 01-20。
+    private static let solarTerms: [Int: [String: String]] = [
+        2026: ["01-05": "小寒", "01-20": "大寒", "02-04": "立春", "02-18": "雨水",
+               "03-05": "惊蛰", "03-20": "春分", "04-04": "清明", "04-20": "谷雨",
+               "05-05": "立夏", "05-21": "小满", "06-05": "芒种", "06-21": "夏至",
+               "07-07": "小暑", "07-22": "大暑", "08-07": "立秋", "08-23": "处暑",
+               "09-07": "白露", "09-23": "秋分", "10-08": "寒露", "10-23": "霜降",
+               "11-07": "立冬", "11-22": "小雪", "12-07": "大雪", "12-22": "冬至"],
+        2027: ["01-05": "小寒", "01-20": "大寒", "02-04": "立春", "02-18": "雨水",
+               "03-05": "惊蛰", "03-20": "春分", "04-04": "清明", "04-20": "谷雨",
+               "05-05": "立夏", "05-21": "小满", "06-05": "芒种", "06-21": "夏至",
+               "07-07": "小暑", "07-23": "大暑", "08-07": "立秋", "08-23": "处暑",
+               "09-07": "白露", "09-23": "秋分", "10-08": "寒露", "10-23": "霜降",
+               "11-07": "立冬", "11-22": "小雪", "12-07": "大雪", "12-22": "冬至"],
+    ]
+
+    /// 阳历固定节日（月-日 → 名）。国庆、劳动节走假期首日那条，不放这里。
+    private static let gregorianFestivals: [String: String] = [
+        "01-01": "元旦", "02-14": "情人节", "03-08": "妇女节", "04-01": "愚人节",
+        "06-01": "儿童节", "09-10": "教师节",
+        "10-31": "万圣节", "12-24": "平安夜", "12-25": "圣诞节",
+    ]
+
+    /// 阴历节日（农历月-日 → 名）。除夕是腊月最后一天，单独算。
+    private static let lunarFestivals: [String: String] = [
+        "1-1": "春节", "1-15": "元宵节", "2-2": "龙抬头",
+        "5-5": "端午", "7-7": "七夕", "7-15": "中元节",
+        "8-15": "中秋", "9-9": "重阳", "12-8": "腊八", "12-23": "小年",
+    ]
+
+    /// 法定节假日放假安排（整段假期标“假”）。2026 已按官方安排与参考图核对；
+    /// 2027 为公开日历推算，须核对官方安排。名字是日历上显示的短名（国庆、春节、元旦）。
+    private static let holidayPeriods: [Int: [(start: String, end: String, name: String)]] = [
+        2026: [("2026-01-01", "2026-01-01", "元旦"),
+               ("2026-02-15", "2026-02-21", "春节"),
+               ("2026-04-04", "2026-04-06", "清明"),
+               ("2026-05-01", "2026-05-05", "劳动节"),
+               ("2026-06-19", "2026-06-21", "端午"),
+               ("2026-09-25", "2026-09-27", "中秋"),
+               ("2026-10-01", "2026-10-07", "国庆")],
+        2027: [("2027-01-01", "2027-01-01", "元旦"),
+               ("2027-02-05", "2027-02-11", "春节"),
+               ("2027-04-04", "2027-04-06", "清明"),
+               ("2027-05-01", "2027-05-05", "劳动节"),
+               ("2027-06-18", "2027-06-20", "端午"),
+               ("2027-09-25", "2027-09-27", "中秋"),
+               ("2027-10-01", "2027-10-07", "国庆")],
+    ]
+
+    /// 调休上班日（标红“班”）。已在假期里的日子优先算“假”，不重复标“班”
+    /// （如 2026-09-27 是中秋假期最后一天，参考图里标“假”不标“班”，故不列入）。
+    private static let adjustedWorkdays: [Int: Set<String>] = [
+        2026: ["2026-02-14", "2026-02-22", "2026-04-26", "2026-05-09", "2026-10-10"],
+        2027: ["2027-01-30", "2027-02-13", "2027-04-25", "2027-05-08", "2027-09-26", "2027-10-09"],
+    ]
+
+    /// 某天的信息（带缓存：同一天只算一次，滑页时不重算）。
+    private static var cache: [String: DayInfo] = [:]
+
+    static func info(for dateString: String) -> DayInfo {
+        if let cached = cache[dateString] { return cached }
+        let result = compute(for: dateString)
+        cache[dateString] = result
+        return result
+    }
+
+    static func info(for date: Date) -> DayInfo {
+        info(for: DateUtil.string(from: date))
+    }
+
+    private static func compute(for dateString: String) -> DayInfo {
+        guard let date = DateUtil.date(from: dateString) else {
+            return DayInfo(lunarText: "", isRedText: false, mark: nil)
+        }
+        let comps = gregorian.dateComponents([.year, .month, .day], from: date)
+        let year = comps.year ?? 2026
+        let md = String(format: "%02d-%02d", comps.month ?? 1, comps.day ?? 1)
+
+        // 阴历（中国日历算）。
+        let lunar = chinese.dateComponents([.month, .day, .isLeapMonth], from: date)
+        let lunarMonth = lunar.month ?? 1
+        let lunarDay = lunar.day ?? 1
+        let isLeap = lunar.isLeapMonth == true
+        let monthName = (isLeap ? "闰" : "") + lunarMonths[(lunarMonth - 1 + 12) % 12]
+        let lunarText: String
+        if lunarDay == 1 {
+            lunarText = monthName
+        } else {
+            lunarText = lunarDays[(lunarDay - 1 + 30) % 30]
+        }
+
+        // 节气优先显示（红字）。
+        if let term = solarTerms[year]?[md] {
+            return DayInfo(lunarText: term, isRedText: true, mark: mark(for: dateString, year: year))
+        }
+        // 节日：阳历固定节日，其次阴历节日。
+        if let fest = gregorianFestivals[md] {
+            return DayInfo(lunarText: fest, isRedText: true, mark: mark(for: dateString, year: year))
+        }
+        let lunarKey = "\(lunarMonth)-\(lunarDay)"
+        if let fest = lunarFestivals[lunarKey] {
+            return DayInfo(lunarText: fest, isRedText: true, mark: mark(for: dateString, year: year))
+        }
+        // 除夕：腊月最后一天（即春节前一天）。
+        if isLunarNewYearsEve(date: date) {
+            return DayInfo(lunarText: "除夕", isRedText: true, mark: mark(for: dateString, year: year))
+        }
+        // 假期首日显示假期名（如国庆只在 10-01 显示，10-02 起显示阴历）。
+        if let holidayName = holidayNameIfFirstDay(dateString: dateString, year: year) {
+            return DayInfo(lunarText: holidayName, isRedText: true, mark: mark(for: dateString, year: year))
+        }
+        return DayInfo(lunarText: lunarText, isRedText: false, mark: mark(for: dateString, year: year))
+    }
+
+    /// 是不是腊月最后一天（除夕）：明天是农历正月初一就是除夕。
+    private static func isLunarNewYearsEve(date: Date) -> Bool {
+        guard let tomorrow = gregorian.date(byAdding: .day, value: 1, to: date) else { return false }
+        let next = chinese.dateComponents([.month, .day], from: tomorrow)
+        return next.month == 1 && next.day == 1
+    }
+
+    /// 假期首日的名字（如 2026-10-01 → 国庆），不是首日返回 nil。
+    private static func holidayNameIfFirstDay(dateString: String, year: Int) -> String? {
+        for period in holidayPeriods[year] ?? [] where period.start == dateString {
+            return period.name
+        }
+        return nil
+    }
+
+    /// 假/班角标：假期里标“假”，调休上班日标“班”，假期优先。
+    private static func mark(for dateString: String, year: Int) -> DayInfo.Mark? {
+        for period in holidayPeriods[year] ?? [] {
+            if dateString >= period.start && dateString <= period.end {
+                return .holiday
+            }
+        }
+        if adjustedWorkdays[year]?.contains(dateString) == true {
+            return .workday
+        }
+        return nil
+    }
+}

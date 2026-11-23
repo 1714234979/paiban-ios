@@ -5,11 +5,15 @@ import SwiftUI
 struct PayView: View {
     @EnvironmentObject private var store: AppStore
 
-    /// 改科室绩效：点奖金里的科室绩效行，弹出输入框改当月那个数。
-    @State private var editingDeptPerf = false
-    @State private var deptPerfText = ""
-    @State private var deptPerfSaving = false
-    @State private var deptPerfError: String?
+    /// 单月可改的 inline 编辑框：一次只改一行（科室绩效 / 绩效系数 / 奖金系数 / 加班天数 / 水电费），
+    /// 样式与收起规则五种字段完全一致。点外面或切页面就收起，丢弃未保存的改动。
+    @State private var editingField: PayRecordField? = nil
+    @State private var editText = ""
+    @State private var editSaving = false
+    @State private var editError: String?
+    @FocusState private var editFieldFocused: Bool
+    /// 横滑锁定：横向位移占优时锁成横滑、禁掉纵向滚动，斜滑按主导方向判定。
+    @State private var horizontalSwipeLocked = false
 
     var body: some View {
         ScrollView {
@@ -20,13 +24,29 @@ struct PayView: View {
                 noteCard
             }
             .padding(.bottom, 24)
+            // 点编辑框以外的地方就收起（丢弃未保存的改动）。Tap 手势只认轻点，
+            // 拖动（滚动/横滑）不会触发，不跟左右滑切月、上下滚动冲突。
+            .onTapGesture {
+                if editingField != nil { dismissEdit() }
+            }
         }
         .background(Color(.systemGroupedBackground))
-        // 左右滑动切月（与排班页的滑页体验一致）：横向滑动幅度明显大于竖向时才切月，
-        // 竖向滚动不受影响。左滑下个月、右滑上个月，到 2024-01 / 2030-12 的边就停。
+        .scrollDisabled(horizontalSwipeLocked)
+        // 左右滑动切月（与排班页的滑页体验一致）：横向位移明显大于竖向时才切月，
+        // 竖向滚动不受影响。横滑一旦锁定就禁掉纵向滚动，左右滑的时候上下不再跟着动；
+        // 左滑下个月、右滑上个月，到 2024-01 / 2030-12 的边就停。
+        // 切月用平滑过渡动画（0.25s），动画期间不重算——工资是本地算、切月秒出。
         .simultaneousGesture(
-            DragGesture(minimumDistance: 20)
+            DragGesture(minimumDistance: 12)
+                .onChanged { value in
+                    let w = abs(value.translation.width)
+                    let h = abs(value.translation.height)
+                    if w > 24 && w > h * 1.5 {
+                        horizontalSwipeLocked = true
+                    }
+                }
                 .onEnded { value in
+                    defer { horizontalSwipeLocked = false }
                     let w = value.translation.width
                     let h = value.translation.height
                     guard abs(w) > 60, abs(w) > abs(h) * 1.5 else { return }
@@ -35,6 +55,8 @@ struct PayView: View {
                     }
                 }
         )
+        // 切到别的页面（排班/设置）时，敞着的编辑框自动收起，丢弃未保存的改动。
+        .onDisappear { dismissEdit() }
         .task {
             if store.pay == nil {
                 await store.refreshPay()
@@ -84,6 +106,8 @@ struct PayView: View {
     }
 
     private func stepPayMonth(by offset: Int) {
+        // 切月时把敞着的编辑框收起（那是上个月的数，别留在新月上误触）。
+        dismissEdit()
         var year = store.payYearMonth.year
         var month = store.payYearMonth.month + offset
         while month < 1 { month += 12; year -= 1 }
@@ -103,21 +127,7 @@ struct PayView: View {
                 .padding()
         } else if let pay = store.pay {
             VStack(spacing: 16) {
-                paySection(title: "工资", rows: [
-                    ("基本工资", MoneyUtil.money(pay.baseSalary)),
-                    ("岗位", pay.position ?? "—"),
-                    ("早夜班补贴", MoneyUtil.money(pay.allowance)),
-                    ("高温费", MoneyUtil.money(pay.heat)),
-                    ("工龄津贴", MoneyUtil.money(pay.seniority)),
-                    ("应发工资", MoneyUtil.money(pay.salarySubtotal)),
-                    ("养老（8%）", MoneyUtil.money(pay.pension)),
-                    ("医疗（2%）", MoneyUtil.money(pay.medical)),
-                    ("失业（0.3%）", MoneyUtil.money(pay.unemployment)),
-                    ("五险一金合计", MoneyUtil.money(pay.contributionTotal)),
-                    ("公积金", MoneyUtil.money(pay.housingFund)),
-                    ("水电费", MoneyUtil.money(pay.utilities)),
-                    ("实发工资", MoneyUtil.money(pay.salaryNet)),
-                ])
+                salarySection(pay: pay)
                 bonusSection(pay: pay)
                 paySection(title: "合计", rows: [
                     ("实发工资 + 实发奖金", MoneyUtil.money(pay.grandTotal)),
@@ -182,25 +192,96 @@ struct PayView: View {
         .padding(.horizontal, 16)
     }
 
-    /// 奖金区：科室绩效那行点一下就能改当月那个数（只有老爷能改，改完存服务端、本地立刻重算）。
+    /// 奖金区：科室绩效、绩效系数、奖金系数、加班天数四行点一下就能改当月那个数
+    ///（只有老爷能改，改完存服务端、本地立刻重算）。其余行只看。行顺序跟原来一样。
     private func bonusSection(pay: PayMonth) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("奖金")
                 .font(.headline)
                 .padding(.bottom, 8)
-            // 科室绩效行：点一下改数（带“可改”小字提示）。
+            editableRow(title: "科室绩效", valueText: MoneyUtil.money(pay.deptPerf), field: .deptPerf,
+                        currentValue: pay.deptPerf.map { String(format: "%.2f", $0) } ?? "4000",
+                        placeholder: "科室绩效（如 3800）")
+            staticRow(title: "其他奖罚", valueText: MoneyUtil.money(pay.otherReward), bold: false)
+            editableRow(title: "绩效系数", valueText: MoneyUtil.number(pay.perfCoef), field: .perfCoef,
+                        currentValue: pay.perfCoef.map { String(format: "%.2f", $0) } ?? "1",
+                        placeholder: "绩效系数（如 1.2）")
+            editableRow(title: "奖金系数", valueText: MoneyUtil.number(pay.bonusCoef), field: .bonusCoef,
+                        currentValue: pay.bonusCoef.map { String(format: "%.2f", $0) } ?? "1",
+                        placeholder: "奖金系数（如 1.2）")
+            staticRow(title: "加班费（含三薪）", valueText: MoneyUtil.money(pay.overtimePay), bold: false)
+            staticRow(title: "三薪天数", valueText: pay.tripleDays.map { String(format: "%.1f 天", $0) } ?? "—", bold: false)
+            staticRow(title: "三薪金额", valueText: MoneyUtil.money(pay.triplePay), bold: false)
+            editableRow(title: "加班天数", valueText: pay.overtimeDays.map { String(format: "%.1f 天", $0) } ?? "—", field: .overtimeDays,
+                        currentValue: pay.overtimeDays.map { String(format: "%.1f", $0) } ?? "0",
+                        placeholder: "加班天数（如 2）")
+            staticRow(title: "税前奖金", valueText: MoneyUtil.money(pay.bonusTotal), bold: true)
+            staticRow(title: "个税（累计预扣，税从奖金里扣）", valueText: MoneyUtil.money(pay.incomeTax), bold: false)
+            staticRow(title: "实发奖金", valueText: MoneyUtil.money(pay.bonusAfterTax), bold: true)
+        }
+        .padding(14)
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .padding(.horizontal, 16)
+    }
+
+    /// 工资区：水电费那行点一下就能改当月那个数（只有老爷能改），其余行只看。
+    /// 行顺序跟原来 paySection 那张表一样。
+    private func salarySection(pay: PayMonth) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("工资")
+                .font(.headline)
+                .padding(.bottom, 8)
+            staticRow(title: "基本工资", valueText: MoneyUtil.money(pay.baseSalary), bold: false)
+            staticRow(title: "岗位", valueText: pay.position ?? "—", bold: false)
+            staticRow(title: "早夜班补贴", valueText: MoneyUtil.money(pay.allowance), bold: false)
+            staticRow(title: "高温费", valueText: MoneyUtil.money(pay.heat), bold: false)
+            staticRow(title: "工龄津贴", valueText: MoneyUtil.money(pay.seniority), bold: false)
+            staticRow(title: "应发工资", valueText: MoneyUtil.money(pay.salarySubtotal), bold: true)
+            staticRow(title: "养老（8%）", valueText: MoneyUtil.money(pay.pension), bold: false)
+            staticRow(title: "医疗（2%）", valueText: MoneyUtil.money(pay.medical), bold: false)
+            staticRow(title: "失业（0.3%）", valueText: MoneyUtil.money(pay.unemployment), bold: false)
+            staticRow(title: "五险一金合计", valueText: MoneyUtil.money(pay.contributionTotal), bold: true)
+            staticRow(title: "公积金", valueText: MoneyUtil.money(pay.housingFund), bold: false)
+            editableRow(title: "水电费", valueText: MoneyUtil.money(pay.utilities), field: .utilities,
+                        currentValue: pay.utilities.map { String(format: "%.2f", $0) } ?? "0",
+                        placeholder: "水电费（如 60）")
+            staticRow(title: "实发工资", valueText: MoneyUtil.money(pay.salaryNet), bold: true)
+        }
+        .padding(14)
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .padding(.horizontal, 16)
+    }
+
+    /// 只看的行（标签 + 值 + 分隔线），样式跟原来 paySection 里的一致。
+    private func staticRow(title: String, valueText: String, bold: Bool) -> some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text(title)
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text(valueText)
+                    .bold(bold)
+            }
+            .font(.subheadline)
+            .padding(.vertical, 5)
+            Divider()
+        }
+    }
+
+    /// 一行可改的数值：点“可改”弹出 inline 编辑框（输入框 + 保存/取消），下面再跟分隔线。
+    /// 只有老爷能改；点外面或切页面自动收起（dismissEdit）。
+    private func editableRow(title: String, valueText: String, field: PayRecordField, currentValue: String, placeholder: String) -> some View {
+        VStack(spacing: 0) {
             Button {
-                if store.isOwner {
-                    deptPerfText = pay.deptPerf.map { String(format: "%.2f", $0) } ?? "4000"
-                    deptPerfError = nil
-                    editingDeptPerf = true
-                }
+                openEdit(field, currentValue: currentValue)
             } label: {
                 HStack {
-                    Text("科室绩效")
+                    Text(title)
                         .foregroundColor(.secondary)
                     Spacer()
-                    Text(MoneyUtil.money(pay.deptPerf))
+                    Text(valueText)
                     if store.isOwner {
                         Text("可改")
                             .font(.caption)
@@ -215,71 +296,80 @@ struct PayView: View {
                 .padding(.vertical, 5)
             }
             .disabled(!store.isOwner)
-            Divider()
-            if editingDeptPerf {
+            if editingField == field {
                 VStack(spacing: 8) {
                     HStack {
-                        TextField("科室绩效（如 3800）", text: $deptPerfText)
+                        TextField(placeholder, text: $editText)
                             .keyboardType(.decimalPad)
                             .textFieldStyle(.roundedBorder)
-                        Button("保存") { Task { await saveDeptPerf() } }
+                            .focused($editFieldFocused)
+                        Button("保存") { Task { await saveEdit() } }
                             .buttonStyle(.borderedProminent)
-                            .disabled(deptPerfSaving)
-                        Button("取消") { editingDeptPerf = false }
+                            .disabled(editSaving)
+                        Button("取消") { dismissEdit() }
                             .buttonStyle(.bordered)
                     }
-                    if let deptPerfError {
-                        Text(deptPerfError)
+                    if let editError {
+                        Text(editError)
                             .font(.caption)
                             .foregroundColor(.red)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
                 .padding(.vertical, 8)
-                Divider()
             }
-            ForEach([
-                ("其他奖罚", MoneyUtil.money(pay.otherReward)),
-                ("绩效系数", MoneyUtil.number(pay.perfCoef)),
-                ("奖金系数", MoneyUtil.number(pay.bonusCoef)),
-                ("加班费（含三薪）", MoneyUtil.money(pay.overtimePay)),
-                ("三薪天数", pay.tripleDays.map { String(format: "%.1f 天", $0) } ?? "—"),
-                ("三薪金额", MoneyUtil.money(pay.triplePay)),
-                ("加班天数", pay.overtimeDays.map { String(format: "%.1f 天", $0) } ?? "—"),
-                ("税前奖金", MoneyUtil.money(pay.bonusTotal)),
-                ("个税（累计预扣，税从奖金里扣）", MoneyUtil.money(pay.incomeTax)),
-                ("实发奖金", MoneyUtil.money(pay.bonusAfterTax)),
-            ], id: \.0) { row in
-                HStack {
-                    Text(row.0)
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Text(row.1)
-                        .bold(row.0.hasPrefix("实发") || row.0.hasPrefix("税前"))
-                }
-                .font(.subheadline)
-                .padding(.vertical, 5)
-                Divider()
-            }
+            Divider()
         }
-        .padding(14)
-        .background(Color(.systemBackground))
-        .cornerRadius(12)
-        .padding(.horizontal, 16)
     }
 
-    private func saveDeptPerf() async {
-        deptPerfError = nil
-        guard let value = Double(deptPerfText.trimmingCharacters(in: .whitespaces)),
-              value >= 0, value <= 10000 else {
-            deptPerfError = "输个 0–10000 之间的数"
+    /// 打开某行的 inline 编辑框（只有老爷能改；打开时填当前值、弹键盘）。
+    private func openEdit(_ field: PayRecordField, currentValue: String) {
+        guard store.isOwner else { return }
+        editText = currentValue
+        editError = nil
+        editSaving = false
+        editingField = field
+        editFieldFocused = true
+    }
+
+    /// 收起编辑框（丢弃未保存的改动：输入框恢复成原来的值——下次打开时重新填当前值；同时收键盘）。
+    private func dismissEdit() {
+        editingField = nil
+        editText = ""
+        editError = nil
+        editSaving = false
+        editFieldFocused = false
+    }
+
+    /// 保存当前编辑框（按字段校验范围，写服务端，本地立刻重算；保存完收起）。
+    private func saveEdit() async {
+        guard let field = editingField else { return }
+        editError = nil
+        guard let value = Double(editText.trimmingCharacters(in: .whitespaces)) else {
+            editError = "输个数字"
             return
         }
-        deptPerfSaving = true
-        defer { deptPerfSaving = false }
+        let range: ClosedRange<Double>
+        let hint: String
+        switch field {
+        case .deptPerf:
+            range = 0...10000; hint = "0–10000"
+        case .perfCoef, .bonusCoef:
+            range = 0...3; hint = "0–3"
+        case .overtimeDays:
+            range = 0...31; hint = "0–31"
+        case .utilities:
+            range = 0...1000; hint = "0–1000"
+        }
+        guard range.contains(value) else {
+            editError = "输个 \(hint) 之间的数"
+            return
+        }
+        editSaving = true
         let key = String(format: "%04d-%02d", store.payYearMonth.year, store.payYearMonth.month)
-        await store.updateDeptPerf(monthKey: key, deptPerf: value)
-        editingDeptPerf = false
+        await store.updatePayMonthField(monthKey: key, field: field, value: value)
+        editSaving = false
+        dismissEdit()
     }
 
     /// 实际出勤可能是小数（如录入的 23.4、24.31）：整数按整数显示，小数保留 1 位。

@@ -124,7 +124,12 @@ struct SettingsView: View {
                     }
                 }
                 HStack {
-                    Text("水电费")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("水电费")
+                        Text("填平均每月水电费，某月单独改在工资页")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                     Spacer()
                     TextField("60", text: $utilitiesText)
                         .keyboardType(.decimalPad)
@@ -134,7 +139,7 @@ struct SettingsView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("科室绩效奖金")
-                        Text("默认科室绩效，0–10000；某月单独改在工资页")
+                        Text("填平均科室绩效奖金，0–10000；某月单独改在工资页")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -154,6 +159,9 @@ struct SettingsView: View {
                     }
                 }
                 .disabled(isSavingPay)
+                Text("每月工资均为预估，与实际发放有出入属正常")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
                 if let saveMessage {
                     Text(saveMessage)
                         .font(.caption)

@@ -701,12 +701,19 @@ final class AppStore: ObservableObject {
         syncInBackground { try await self.api.deleteOvertime(date: date) }
     }
 
-    /// 改当月科室绩效（只有老爷能改）：本地先改掉当月录入数、立刻重算，后台再同步到服务端。
-    func updateDeptPerf(monthKey: String, deptPerf: Double) async {
+    /// 改当月录入数里的某一个字段（只有老爷能改）：本地先改掉当月录入数、立刻重算，后台再同步到服务端。
+    /// value 传 nil 表示清掉该覆盖值（恢复公式计算）。
+    func updatePayMonthField(monthKey: String, field: PayRecordField, value: Double?) async {
         var cfg = payConfig ?? PayConfigData()
         var months = cfg.months ?? [:]
         var rec = months[monthKey] ?? PayMonthRecord()
-        rec.deptPerf = deptPerf
+        switch field {
+        case .deptPerf: rec.deptPerf = value
+        case .perfCoef: rec.perfCoef = value
+        case .bonusCoef: rec.bonusCoef = value
+        case .overtimeDays: rec.overtimeDays = value
+        case .utilities: rec.utilities = value
+        }
         months[monthKey] = rec
         cfg.months = months
         payConfig = cfg
@@ -714,10 +721,10 @@ final class AppStore: ObservableObject {
         persistCache()
         Task {
             do {
-                _ = try await api.postPayMonth(monthKey: monthKey, deptPerf: deptPerf)
+                _ = try await api.postPayMonthField(monthKey: monthKey, field: field, value: value)
             } catch {
                 errorMessage = (error as? APIError)?.message ?? error.localizedDescription
-                AppLogger.shared.log("科室绩效同步失败：\(errorMessage ?? "")", tag: "Sync")
+                AppLogger.shared.log("单月录入同步失败：\(errorMessage ?? "")", tag: "Sync")
                 await refreshPayInputs()
                 await refreshPay()
             }

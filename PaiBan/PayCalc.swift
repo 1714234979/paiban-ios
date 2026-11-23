@@ -162,7 +162,10 @@ enum PayCalc {
         func pick(_ user: Double?, _ g: Double?) -> Double? { user ?? g }
         let baseSalary = eff.baseSalary ?? pick(userSettings?.baseSalary, global.baseSalary) ?? 2420
         let position = eff.position ?? userSettings?.position ?? "员工"
-        let bonusCoef = eff.bonusCoef ?? userSettings?.bonusCoef ?? 1
+        // 奖金系数取值链：单月记录 > 生效表 > 用户设置 > 1（别写成 4 层 ?? 链，拆开写）。
+        var bonusCoef = userSettings?.bonusCoef ?? 1
+        if let v = eff.bonusCoef { bonusCoef = v }
+        if let v = record?.bonusCoef { bonusCoef = v }
 
         let monthPrefix = key + "-"
         let days = yearDays.filter { $0.date.hasPrefix(monthPrefix) }
@@ -224,8 +227,11 @@ enum PayCalc {
         let housingFund = floor(base * 0.068)
         let contributionTotal = round2(socialInsurance + housingFund)
         let salaryPayable = round2(salarySubtotal - contributionTotal)
-        // 水电费默认 0（没填就是没有；老爷自己的 60 存在他自己的 paySettings 里，不走这个默认）。
-        let utilities = userSettings?.utilities ?? global.utilities ?? 0
+        // 水电费取值链：单月记录 > 用户设置 > 全局默认 > 0（老爷自己的 60 存在他自己的 paySettings 里）。
+        // 单月覆盖只影响当月实发（salaryNet = salaryPayable − 当月水电费）。
+        var utilities = global.utilities ?? 0
+        if let v = userSettings?.utilities { utilities = v }
+        if let v = record?.utilities { utilities = v }
         let salaryNet = round2(salaryPayable - utilities)
 
         let bonusTotal = round2((deptPerf + otherReward) * perfCoef * bonusCoef + overtimePay)
@@ -260,6 +266,7 @@ enum PayCalc {
         pay.deptPerf = deptPerf
         pay.deptPerfRecorded = record?.deptPerf != nil
         pay.perfCoef = perfCoef
+        pay.bonusCoefRecorded = record?.bonusCoef != nil
         pay.otherReward = otherReward
         pay.otherRewardFull = attendance >= Double(bd)
         pay.heat = heat
@@ -277,6 +284,7 @@ enum PayCalc {
         pay.contributionTotal = contributionTotal
         pay.salaryPayable = salaryPayable
         pay.utilities = utilities
+        pay.utilitiesRecorded = record?.utilities != nil
         pay.salaryNet = salaryNet
         pay.tripleDates = tripleDates
         pay.tripleDays = tripleDays

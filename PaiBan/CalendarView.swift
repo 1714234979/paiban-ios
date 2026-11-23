@@ -1,5 +1,15 @@
 import SwiftUI
 
+/// 日历格固定高 64pt；网格外框总高固定 414pt（按 6 行 × 64 + 5 × 6 算），
+/// 行距按行数自适应：6 行紧（6pt）、5 行松（23.5pt）、4 行更松。
+/// 只调行内间距，外框总高度不变，左右滑动时页面尺寸不伸缩。
+private let calendarCellHeight: CGFloat = 64
+private let calendarGridHeight: CGFloat = 6 * 64 + 5 * 6
+private func calendarRowSpacing(weeks: Int) -> CGFloat {
+    guard weeks > 1 else { return 6 }
+    return (calendarGridHeight - CGFloat(weeks) * calendarCellHeight) / CGFloat(weeks - 1)
+}
+
 /// 排班页：原生月历。每个日期格里的班次 pill 都是同一固定高度（28pt、通栏圆角），
 /// 修掉网页版“日班绿块占满整格、别的班只是短 pill”的 bug。
 struct CalendarView: View {
@@ -10,8 +20,14 @@ struct CalendarView: View {
     // 滑页的页码 = 月份绝对序号（年*12 + 月-1），2026年11月 = 24322。
     // 用原生 TabView 分页滑，切月跟着手指走、左右月预渲染，不再整格闪白重画。
     @State private var pageIndex: Int = CalendarView.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
-    // 滑页范围 2024-01 ~ 2030-12（84 页），日常用够了，到边就停。
-    private let pageRange = (2024 * 12)..<(2031 * 12)
+    // 滑页范围：一次生成 12 个月，当前月居中（前后各 5–6 个月）。
+    // 现在是 2026 年 11 月，窗口就是 2026-06 ~ 2027-05，滑到边就停。
+    // 12 页比原来 84 页轻得多，滑页不再为几十页做布局，卡顿的根也去了。
+    @State private var windowStartIndex: Int = {
+        let now = DateUtil.yearMonth(of: Date())
+        return CalendarView.monthIndex(year: now.year, month: now.month) - 5
+    }()
+    private var pageRange: Range<Int> { windowStartIndex..<(windowStartIndex + 12) }
 
     static func monthIndex(year: Int, month: Int) -> Int { year * 12 + (month - 1) }
     private func yearMonth(from index: Int) -> (year: Int, month: Int) { (index / 12, index % 12 + 1) }
@@ -31,9 +47,9 @@ struct CalendarView: View {
         }
         .background(Color(.systemGroupedBackground))
         .task {
-            // 进页先对齐到 Store 正在看的月（恢复的缓存可能是别的月）。
+            // 进页先对齐到 Store 正在看的月（恢复的缓存可能是别的月），钳在 12 个月窗口里。
             let ym = store.currentYearMonth
-            pageIndex = Self.monthIndex(year: ym.year, month: ym.month)
+            pageIndex = min(max(Self.monthIndex(year: ym.year, month: ym.month), pageRange.lowerBound), pageRange.upperBound - 1)
             if store.month == nil {
                 await store.refreshMonth()
             }
@@ -174,8 +190,27 @@ struct CalendarView: View {
 
     // MARK: 日历滑页（原生分页，跟着手指走）
 
+    /// 周几行（固定在日历上方，不跟月份滑动）：日、六绿色，其余深色，与参考图一致。
+    private var weekdayHeader: some View {
+        HStack(spacing: 4) {
+            ForEach(Array(weekdayTitles.enumerated()), id: \.offset) { i, title in
+                Text(title)
+                    .font(.caption)
+                    .foregroundColor(i == 0 || i == 6 ? .green : .primary)
+                    .frame(maxWidth: .infinity)
+            }
+        }
+    }
+    private let weekdayTitles = ["日", "一", "二", "三", "四", "五", "六"]
+
     private var monthPager: some View {
         VStack(spacing: 4) {
+            // 周几固定在最上面，不跟月份一起滑（原来在每页里，滑走就没了）。
+            weekdayHeader
+            // 12 页 TabView：每页固定高（外框总高不变），行距按行数自适应。
+            // 滑页时不再重新布局、不再因周数不同伸缩，根治掉帧与页边忽大忽小。
+            // 月份数据走 store.monthFor：有缓存直接取，没缓存本地 8 天一轮算好缓存起来，
+            // 滑页时不再现算、不再发网络请求。
             TabView(selection: $pageIndex) {
                 ForEach(pageRange, id: \.self) { idx in
                     let ym = yearMonth(from: idx)
@@ -196,8 +231,7 @@ struct CalendarView: View {
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
-            .frame(height: pagerHeight)
-            .animation(.easeInOut(duration: 0.25), value: pagerHeight)
+            .frame(height: calendarGridHeight)
             if store.isLoadingMonth {
                 ProgressView("正在加载…")
                     .padding(.top, 8)
@@ -211,23 +245,6 @@ struct CalendarView: View {
         .padding(12)
         .background(Color(.systemBackground))
         .cornerRadius(16)
-    }
-
-    /// 日期格总高：日期行 + 28pt pill + 节假日名行，保持每格等高。
-    private var cellHeight: CGFloat { 26 + 28 + 14 + 6 }
-
-    /// 当前页的网格高度：周标题行 + 各周行高，随月份周数变（4–6 周），滑页时跟着动。
-    private var pagerHeight: CGFloat {
-        let ym = yearMonth(from: pageIndex)
-        let weeks = numberOfWeeks(year: ym.year, month: ym.month)
-        let header: CGFloat = 18 + 4
-        return header + CGFloat(weeks) * cellHeight + CGFloat(max(weeks - 1, 0)) * 4
-    }
-
-    private func numberOfWeeks(year: Int, month: Int) -> Int {
-        let first = DateUtil.firstWeekday(year: year, month: month)
-        let days = DateUtil.daysInMonth(year: year, month: month)
-        return Int(ceil(Double(first + days) / 7.0))
     }
 
     /// 汇总与记录看的月份：直接取当前页那份（缓存或本地算，秒出，不等网络）。
@@ -255,41 +272,40 @@ struct CalendarView: View {
     // MARK: 调班 / 请假记录
 
     private var recordsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("本月调班 / 请假")
-                .font(.headline)
-            if mergedSwapRows.isEmpty && store.leaves.isEmpty {
-                Text("本月没有调班和请假记录")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .padding(.vertical, 4)
-            }
-            ForEach(mergedSwapRows, id: \.key) { row in
-                swapRow(row)
-            }
-            ForEach(store.leaves, id: \.date) { leave in
-                HStack {
-                    Circle()
-                        .fill(Color.red)
-                        .frame(width: 8, height: 8)
-                    Text(leave.date)
-                        .font(.subheadline)
-                    Text(leave.type ?? "请假")
-                        .font(.subheadline)
-                        .foregroundColor(.red)
-                    Spacer()
-                    if let note = leave.note, !note.isEmpty {
-                        Text(note)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+        // 本月没有任何调班和请假记录时，整张卡片直接藏掉，不显示“没有记录”那行。
+        Group {
+            if !mergedSwapRows.isEmpty || !store.leaves.isEmpty {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("本月调班 / 请假")
+                        .font(.headline)
+                    ForEach(mergedSwapRows, id: \.key) { row in
+                        swapRow(row)
+                    }
+                    ForEach(store.leaves, id: \.date) { leave in
+                        HStack {
+                            Circle()
+                                .fill(Color.red)
+                                .frame(width: 8, height: 8)
+                            Text(leave.date)
+                                .font(.subheadline)
+                            Text(leave.type ?? "请假")
+                                .font(.subheadline)
+                                .foregroundColor(.red)
+                            Spacer()
+                            if let note = leave.note, !note.isEmpty {
+                                Text(note)
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                        .padding(.vertical, 4)
                     }
                 }
-                .padding(.vertical, 4)
+                .padding(12)
+                .background(Color(.systemBackground))
+                .cornerRadius(16)
             }
         }
-        .padding(12)
-        .background(Color(.systemBackground))
-        .cornerRadius(16)
     }
 
     /// 调班记录按“替班日 + 还班日”并成一条：coverDate / paybackDate 互相指向的算一对。
@@ -378,34 +394,31 @@ struct MonthPageView: View {
     let onSelectAdjacentMonth: (Int, Int) -> Void
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
-    private let weekdayTitles = ["日", "一", "二", "三", "四", "五", "六"]
-    private var cellHeight: CGFloat { 26 + 28 + 14 + 6 }
+
+    /// 本月占几行（4–6 周）。
+    private var numberOfWeeks: Int {
+        let first = DateUtil.firstWeekday(year: year, month: month)
+        let days = DateUtil.daysInMonth(year: year, month: month)
+        return Int(ceil(Double(first + days) / 7.0))
+    }
 
     var body: some View {
-        VStack(spacing: 4) {
-            HStack(spacing: 4) {
-                ForEach(weekdayTitles, id: \.self) { title in
-                    Text(title)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity)
-                }
+        // 行距按行数自适应（6 行紧、5 行松），外框总高固定，滑动不伸缩。
+        // 周几行已抽到 TabView 外面固定不动，这里只画日期网格。
+        LazyVGrid(columns: columns, spacing: calendarRowSpacing(weeks: numberOfWeeks)) {
+            // 上月末尾几天（灰色，点后跳到上月），第一周不再留空白格。
+            ForEach(leadingDays, id: \.date) { day in
+                DayCell(day: day, isToday: false, isSelected: false, isAdjacent: true)
+                    .onTapGesture { onSelectAdjacentMonth(prevYearMonth.year, prevYearMonth.month) }
             }
-            LazyVGrid(columns: columns, spacing: 4) {
-                // 上月末尾几天（灰色，点后跳到上月），第一周不再留空白格。
-                ForEach(leadingDays, id: \.date) { day in
-                    DayCell(day: day, isToday: false, isSelected: false, isAdjacent: true)
-                        .onTapGesture { onSelectAdjacentMonth(prevYearMonth.year, prevYearMonth.month) }
-                }
-                ForEach(monthData.days ?? [], id: \.date) { day in
-                    DayCell(day: day, isToday: day.date == DateUtil.string(from: Date()), isSelected: isSelected(day.date))
-                        .onTapGesture { onSelectDay(day) }
-                }
-                // 下月开头几天（灰色，点后跳到下月），最后一周补满，左右滑动无断层。
-                ForEach(trailingDays, id: \.date) { day in
-                    DayCell(day: day, isToday: false, isSelected: false, isAdjacent: true)
-                        .onTapGesture { onSelectAdjacentMonth(nextYearMonth.year, nextYearMonth.month) }
-                }
+            ForEach(monthData.days ?? [], id: \.date) { day in
+                DayCell(day: day, isToday: day.date == DateUtil.string(from: Date()), isSelected: isSelected(day.date))
+                    .onTapGesture { onSelectDay(day) }
+            }
+            // 下月开头几天（灰色，点后跳到下月），最后一周补满，左右滑动无断层。
+            ForEach(trailingDays, id: \.date) { day in
+                DayCell(day: day, isToday: false, isSelected: false, isAdjacent: true)
+                    .onTapGesture { onSelectAdjacentMonth(nextYearMonth.year, nextYearMonth.month) }
             }
         }
     }
@@ -444,8 +457,11 @@ struct MonthPageView: View {
 
 // MARK: - 日期格
 
+/// 日期格（参考图样式）：阳历大数字 + 阴历/节气/节日小字 + 班次色块；
+/// 法定节假日左上角绿“假”、调休上班日红“班”；当天描绿边。
 /// 关键：所有班次的 pill 都是同一固定高度 28pt、通栏、圆角；
 /// 双班时在同一个 28pt 高度里上下叠两个 13pt 小 pill，不撑高格子。
+/// 整格固定 64pt（日期行 28 + 间距 4 + pill 28 + 上下边距 4），行距自适应靠网格间距调。
 struct DayCell: View {
     let day: DaySchedule
     let isToday: Bool
@@ -455,19 +471,29 @@ struct DayCell: View {
 
     private let pillHeight: CGFloat = 28
 
+    /// 当天的阴历/节气/节日/假班信息（查表 + 中国日历算，带缓存，渲染时不重算）。
+    private var extra: ChineseCalendar.DayInfo {
+        ChineseCalendar.info(for: day.date)
+    }
+
     var body: some View {
-        VStack(spacing: 2) {
-            // 日期行：号数 + 请假红标（补的日期不显示请假标）
-            ZStack {
-                if isToday {
-                    Circle()
-                        .fill(Color(red: 0.11, green: 0.15, blue: 0.23))
-                        .frame(width: 24, height: 24)
+        VStack(spacing: 4) {
+            // 日期行（三栏，互不重叠）：左 假/班角标（10pt，没有留空、号数位置一致）
+            // + 中 阳历大数字（居中，请假红标跟在号数后）
+            // + 右 阴历/节气/节日小字（竖排两字，节气/节日红字、阴历灰字）。
+            HStack(alignment: .top, spacing: 1) {
+                if let mark = extra.mark, !isAdjacent {
+                    Text(mark == .holiday ? "假" : "班")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(mark == .holiday ? .green : .red)
+                        .frame(width: 10, alignment: .leading)
+                } else {
+                    Color.clear.frame(width: 10, height: 9)
                 }
-                HStack(spacing: 2) {
+                HStack(alignment: .top, spacing: 2) {
                     Text("\(day.dayNumber)")
-                        .font(.system(size: 13, weight: isToday ? .bold : .regular))
-                        .foregroundColor(isToday ? .white : (isAdjacent ? .secondary : .primary))
+                        .font(.system(size: 18, weight: isToday ? .bold : .semibold))
+                        .foregroundColor(isAdjacent ? .secondary : .primary)
                     if day.onLeave == true && !isAdjacent {
                         Text("假")
                             .font(.system(size: 9, weight: .bold))
@@ -476,56 +502,56 @@ struct DayCell: View {
                             .padding(.vertical, 1)
                             .background(Color.red)
                             .cornerRadius(4)
+                            .padding(.top, 2)
                     }
                 }
-            }
-            .frame(height: 26)
-
-            // 班次 pill：固定 28pt，所有班次一样高；补的日期用浅灰 pill。
-            if isAdjacent {
-                Text(day.isRest ? "休" : TeamInfo.shortName(day.shift))
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: pillHeight)
-                    .background(Color(.systemGray5))
-                    .cornerRadius(7)
-            } else if day.isDouble == true {
-                VStack(spacing: 2) {
-                    ForEach(ShiftStyle.parts(of: day.shift), id: \.self) { part in
-                        Text(TeamInfo.shortName(part))
-                            .font(.system(size: 10, weight: .bold))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 13)
-                            .background(ShiftStyle.color(for: part))
-                            .cornerRadius(4)
+                .frame(maxWidth: .infinity, alignment: .center)
+                VStack(spacing: 0) {
+                    ForEach(Array(extra.lunarText.enumerated()), id: \.offset) { _, ch in
+                        Text(String(ch))
+                            .font(.system(size: 9))
+                            .foregroundColor(extra.isRedText ? .red : .secondary)
                     }
                 }
-                .frame(height: pillHeight)
-            } else {
-                Text(day.isRest ? "休" : TeamInfo.shortName(day.shift))
-                    .font(.system(size: 12, weight: .bold))
-                    .foregroundColor(day.isRest ? ShiftStyle.color(for: "休息") : .white)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: pillHeight)
-                    .background(day.isRest ? ShiftStyle.background(for: "休息") : ShiftStyle.color(for: day.shift))
-                    .cornerRadius(7)
+                .frame(width: 9, alignment: .leading)
+                .padding(.top, 1)
             }
+            .frame(height: 28)
 
-            // 节假日名行：固定高度，没有就留空，保证每格等高；补的日期不显示。
-            Text(isAdjacent ? "" : (day.holiday ?? ""))
-                .font(.system(size: 9))
-                .foregroundColor(.secondary)
-                .lineLimit(1)
-                .frame(height: 14)
+            // 班次 pill：固定 28pt；补的日期用班次色但半透明（班次色不变，只是淡一点）。
+            Group {
+                if day.isDouble == true {
+                    VStack(spacing: 2) {
+                        ForEach(ShiftStyle.parts(of: day.shift), id: \.self) { part in
+                            Text(TeamInfo.shortName(part))
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: 13)
+                                .background(ShiftStyle.color(for: part))
+                                .cornerRadius(4)
+                        }
+                    }
+                    .frame(height: pillHeight)
+                } else {
+                    Text(day.isRest ? "休" : TeamInfo.shortName(day.shift))
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundColor(day.isRest ? ShiftStyle.color(for: "休息") : .white)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: pillHeight)
+                        .background(day.isRest ? ShiftStyle.background(for: "休息") : ShiftStyle.color(for: day.shift))
+                        .cornerRadius(7)
+                }
+            }
+            .opacity(isAdjacent ? 0.5 : 1.0)
         }
         .padding(2)
+        .frame(height: calendarCellHeight)
         .background(isSelected ? Color.blue.opacity(0.12) : Color.clear)
         .cornerRadius(8)
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(isSelected ? Color.blue : Color.clear, lineWidth: 1.5)
+                .stroke(isToday ? Color.green : (isSelected ? Color.blue : Color.clear), lineWidth: isToday ? 2 : 1.5)
         )
     }
 }
