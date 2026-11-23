@@ -176,8 +176,15 @@ enum PayCalc {
         let midRate = global.midRate ?? 30
         let allowanceAuto = Double(counts.early ?? 0) * earlyRate + Double(counts.mid ?? 0) * midRate
         let allowance = record?.allowance ?? allowanceAuto
-        let deptPerf = record?.deptPerf ?? userSettings?.deptPerf ?? userSettings?.deptPerfDefault ?? global.deptPerfDefault ?? 4000
-        let perfCoef = record?.perfCoef ?? userSettings?.perfCoefDefault ?? global.perfCoefDefault ?? 1
+        // 科室绩效取值链：单月记录 > 用户默认 > 用户全局默认 > 全局默认 > 4000。
+        // 注意：不要写成一条 5 层 ?? 链，Swift 编译器算不过来（2026-11-24 构建 e5001ea 在此报错）。
+        var deptPerf = global.deptPerfDefault ?? 4000
+        if let v = userSettings?.deptPerfDefault { deptPerf = v }
+        if let v = userSettings?.deptPerf { deptPerf = v }
+        if let v = record?.deptPerf { deptPerf = v }
+        var perfCoef = global.perfCoefDefault ?? 1
+        if let v = userSettings?.perfCoefDefault { perfCoef = v }
+        if let v = record?.perfCoef { perfCoef = v }
 
         // 法定节假日当天上班的天。
         let stat = statutoryMap(year: year)
