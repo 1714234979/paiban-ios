@@ -508,8 +508,8 @@ final class APIClient {
 
     // MARK: 版本清单（公开接口，不用认证）
 
-    /// GET <baseURL>/api/v1/version → {ok, data: {latestVersion, releaseNotes, downloadUrl}}。
-    /// 清单地址跟 baseURL 走（见 ServerConfig.versionPath），downloadUrl 由服务端配。
+    /// GET <baseURL>/api/v1/version → {ok, data: {latestVersion, releaseNotes, downloadUrl, extractionCode}}。
+    /// 清单地址跟 baseURL 走（见 ServerConfig.versionPath），downloadUrl 与 extractionCode 由服务端配。
     func fetchVersion() async throws -> VersionInfo {
         try await request(path: ServerConfig.versionPath)
     }

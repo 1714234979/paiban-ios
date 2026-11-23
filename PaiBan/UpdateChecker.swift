@@ -1,12 +1,14 @@
 import Foundation
 
 /// 版本清单里的一条记录：GET <baseURL>/api/v1/version 返回的 data。
-/// {latestVersion, releaseNotes, downloadUrl} —— downloadUrl 是服务端可配的
+/// {latestVersion, releaseNotes, downloadUrl, extractionCode} —— downloadUrl 是服务端可配的
 /// 网盘链接（服务端版本文件 / 管理端接口里改），App 里不要写死。
+/// extractionCode 是网盘提取码（服务端配，没有码时为空）；点「更新」时先复制到剪贴板再打开链接。
 struct VersionInfo: Codable, Equatable, Identifiable {
     var latestVersion: String
     var releaseNotes: String?
     var downloadUrl: String?
+    var extractionCode: String?
 
     var id: String { latestVersion }
 
@@ -14,6 +16,13 @@ struct VersionInfo: Codable, Equatable, Identifiable {
     var hasDownloadURL: Bool {
         guard let downloadUrl, !downloadUrl.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
         return URL(string: downloadUrl) != nil
+    }
+
+    /// 去掉空白后的提取码；没有码（字段缺失或空串）时为 nil。
+    /// 老版本服务端没有这个字段，解码时按 nil 处理，只打开链接、不复制、不报错。
+    var trimmedExtractionCode: String? {
+        guard let code = extractionCode?.trimmingCharacters(in: .whitespaces), !code.isEmpty else { return nil }
+        return code
     }
 }
 

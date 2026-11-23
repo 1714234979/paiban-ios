@@ -22,14 +22,14 @@ enum ServerConfig {
 
     // MARK: - App 内更新提示（版本清单）
     // canonical 接口：GET <baseURL>/api/v1/version（公开，不用认证），
-    // 返回 {ok, data: {latestVersion, releaseNotes, downloadUrl}}。
+    // 返回 {ok, data: {latestVersion, releaseNotes, downloadUrl, extractionCode}}。
     // 清单地址 = 当前 baseURL + "/api/v1/version"（跟 baseURL 走，不用另写一个域名）。
     // 约定：downloadUrl 为空表示没有更新——即使 latestVersion 高于当前版也不弹提示；
     // 只有 latestVersion 高于当前版且 downloadUrl 非空时才提示更新。
-    // downloadUrl 是服务端可配的（服务端版本文件 / 管理端接口里改），不要写死在 App 里；
+    // downloadUrl 与 extractionCode 是服务端可配的（服务端版本文件 / 管理端接口里改），不要写死在 App 里；
     // 老爷只需要在服务端把新版 IPA 的网盘链接填进 downloadUrl，App 就会提示更新。
-    // App 内不直接下载安装包：点「更新」只是在系统浏览器里打开 downloadUrl，
-    // 用户在网盘里下载新 IPA 再安装。
+    // App 内不直接下载安装包：点「更新」先把 extractionCode 复制到剪贴板，
+    // 再在系统浏览器里打开 downloadUrl，用户在网盘里粘贴提取码、下载新 IPA 再安装。
     static let versionPath = "/api/v1/version"
 
     /// 设置页里手动选的地址（UserDefaults 持久化）；为空表示自动选路。

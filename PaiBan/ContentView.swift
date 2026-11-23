@@ -69,13 +69,20 @@ struct ContentView: View {
         if !info.hasDownloadURL {
             text += "\n\n（暂无下载链接，请稍后再试）"
         }
+        if info.trimmedExtractionCode != nil {
+            text += "\n\n点「更新」后提取码会自动复制，打开网盘后粘贴即可。"
+        }
         return text
     }
 
-    /// 点「更新」：只在系统浏览器里打开清单里的 downloadUrl（网盘链接），
-    /// 用户在网盘里下载新 IPA 安装；不在 App 内直接下载安装包。
+    /// 点「更新」：先把网盘提取码复制到剪贴板（有码才复制，没码就只打开链接），
+    /// 再在系统浏览器里打开清单里的 downloadUrl（网盘链接），
+    /// 用户在网盘里粘贴提取码、下载新 IPA 安装；不在 App 内直接下载安装包。
     private func openDownloadURL(_ info: VersionInfo) {
         guard let urlString = info.downloadUrl, let url = URL(string: urlString) else { return }
+        if let code = info.trimmedExtractionCode {
+            UIPasteboard.general.string = code
+        }
         store.pendingUpdate = nil
         UIApplication.shared.open(url)
     }
