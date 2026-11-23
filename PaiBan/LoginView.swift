@@ -113,7 +113,7 @@ struct LoginView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             } else {
-                Text("服务器连不上：请检查网络或打开 Tailscale 后重试")
+                Text("服务器连不上：请检查网络后重试")
                     .font(.caption)
                     .foregroundColor(.red)
                     .multilineTextAlignment(.center)

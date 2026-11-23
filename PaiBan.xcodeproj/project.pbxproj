@@ -11,6 +11,7 @@
         F5DF790605E94944A722D54F /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 92778B1DFEE6492CB818D5B2 /* ContentView.swift */; };
         BE20C029FD69462A9DBB18A9 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8AC525F6F40A430B9132448D /* Assets.xcassets */; };
 		0ECA26AF890D5B50C6B9A561 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3DE502A0398732D8E0625920 /* APIClient.swift */; };
+		9D919DB86784C5B72CB5EBEA /* AdminWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 37568A99361D5E5FF7222CCC /* AdminWebView.swift */; };
 		ADDE94311684F77B7D0DD957 /* CalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3910D19A7A2272E67267D680 /* CalendarView.swift */; };
 		B46EBFFEC3C418D18106A41D /* Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C48BCB889F6644C77FA3C9E /* Config.swift */; };
 		B78EB2A832B8A0C080AAA1F1 /* DayDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 941B509D67EFA7290242F47B /* DayDetailView.swift */; };
@@ -36,6 +37,7 @@
         159259710115477D952158DE /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
         B6619A93AD2F4ECBA6E1D092 /* PaiBan.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PaiBan.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		3DE502A0398732D8E0625920 /* APIClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		37568A99361D5E5FF7222CCC /* AdminWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AdminWebView.swift; sourceTree = "<group>"; };
 		3910D19A7A2272E67267D680 /* CalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarView.swift; sourceTree = "<group>"; };
 		5C48BCB889F6644C77FA3C9E /* Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Config.swift; sourceTree = "<group>"; };
 		941B509D67EFA7290242F47B /* DayDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayDetailView.swift; sourceTree = "<group>"; };
@@ -89,6 +91,7 @@
                 8AC525F6F40A430B9132448D /* Assets.xcassets */,
                 159259710115477D952158DE /* Info.plist */,
 				3DE502A0398732D8E0625920 /* APIClient.swift */,
+				37568A99361D5E5FF7222CCC /* AdminWebView.swift */,
 				3910D19A7A2272E67267D680 /* CalendarView.swift */,
 				5C48BCB889F6644C77FA3C9E /* Config.swift */,
 				941B509D67EFA7290242F47B /* DayDetailView.swift */,
@@ -181,6 +184,7 @@
                 DC31FD569AC1468BB0CD38EA /* PaiBanApp.swift in Sources */,
                 F5DF790605E94944A722D54F /* ContentView.swift in Sources */,
 				0ECA26AF890D5B50C6B9A561 /* APIClient.swift in Sources */,
+				9D919DB86784C5B72CB5EBEA /* AdminWebView.swift in Sources */,
 				ADDE94311684F77B7D0DD957 /* CalendarView.swift in Sources */,
 				B46EBFFEC3C418D18106A41D /* Config.swift in Sources */,
 				B78EB2A832B8A0C080AAA1F1 /* DayDetailView.swift in Sources */,
@@ -209,7 +213,7 @@
                 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
                 ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
                 CODE_SIGN_STYLE = Automatic;
-                CURRENT_PROJECT_VERSION = 2;
+                CURRENT_PROJECT_VERSION = 3;
                 GENERATE_INFOPLIST_FILE = NO;
                 INFOPLIST_FILE = PaiBan/Info.plist;
                 INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -218,7 +222,7 @@
                     "$(inherited)",
                     "@executable_path/Frameworks",
                 );
-                MARKETING_VERSION = 1.1;
+                MARKETING_VERSION = 1.1.1;
                 PRODUCT_BUNDLE_IDENTIFIER = com.paiban.app;
                 PRODUCT_NAME = "$(TARGET_NAME)";
                 SWIFT_VERSION = 5.0;
@@ -232,7 +236,7 @@
                 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
                 ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
                 CODE_SIGN_STYLE = Automatic;
-                CURRENT_PROJECT_VERSION = 2;
+                CURRENT_PROJECT_VERSION = 3;
                 GENERATE_INFOPLIST_FILE = NO;
                 INFOPLIST_FILE = PaiBan/Info.plist;
                 INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -241,7 +245,7 @@
                     "$(inherited)",
                     "@executable_path/Frameworks",
                 );
-                MARKETING_VERSION = 1.1;
+                MARKETING_VERSION = 1.1.1;
                 PRODUCT_BUNDLE_IDENTIFIER = com.paiban.app;
                 PRODUCT_NAME = "$(TARGET_NAME)";
                 SWIFT_VERSION = 5.0;

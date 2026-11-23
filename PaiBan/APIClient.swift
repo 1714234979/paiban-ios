@@ -9,7 +9,7 @@ struct APIError: LocalizedError {
     let message: String
     var errorDescription: String? { message }
 
-    static let unreachable = APIError(message: "连不上服务器，请检查网络或 Tailscale 是否已连接")
+    static let unreachable = APIError(message: "连不上服务器（云服务器与 NAS 备份都试过了），请检查网络后再试")
     static let notLoggedIn = APIError(message: "未登录，请先登录")
     /// 管理账号不能进 App（CONTRACT.md 账号规矩）：服务端 403 与客户端拦截共用同一句提示。
     static let adminBlocked = APIError(message: "管理账号不能登录 App，请使用用户账号登录")
@@ -99,7 +99,7 @@ final class APIClient {
     var baseURL: String?
 
     /// 当前线路（展示用）。
-    var serverKind: ServerKind = .tailscale
+    var serverKind: ServerKind = .cloud
 
     private let session: URLSession
     private let decoder = JSONDecoder()
@@ -403,16 +403,19 @@ final class APIClient {
     }
 
     /// POST /api/v1/me/feedback — 提交反馈：正文 + 最近 24 小时运行日志，服务端写到 NAS 的反馈文件夹。
-    func sendFeedback(message: String, logs: String) async throws {
+    func sendFeedback(message: String, logs: String, type: String = "bug", location: String = "排班页", imageBase64: String? = nil) async throws {
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
         let device = "\(UIDevice.current.systemName) \(UIDevice.current.systemVersion) (\(UIDevice.current.model))"
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "message": message,
             "logs": logs,
             "appVersion": "\(appVersion) (\(build))",
             "device": device,
+            "type": type,
+            "location": location,
         ]
+        if let imageBase64 { body["image"] = imageBase64 }
         try await requestNoData(path: "/api/v1/me/feedback", method: "POST", jsonBody: body)
     }
 

@@ -176,7 +176,7 @@ enum PayCalc {
         let midRate = global.midRate ?? 30
         let allowanceAuto = Double(counts.early ?? 0) * earlyRate + Double(counts.mid ?? 0) * midRate
         let allowance = record?.allowance ?? allowanceAuto
-        let deptPerf = record?.deptPerf ?? userSettings?.deptPerfDefault ?? global.deptPerfDefault ?? 4000
+        let deptPerf = record?.deptPerf ?? userSettings?.deptPerf ?? userSettings?.deptPerfDefault ?? global.deptPerfDefault ?? 4000
         let perfCoef = record?.perfCoef ?? userSettings?.perfCoefDefault ?? global.perfCoefDefault ?? 1
 
         // 法定节假日当天上班的天。

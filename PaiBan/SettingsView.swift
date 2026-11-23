@@ -10,11 +10,13 @@ struct SettingsView: View {
     @State private var pensionText = ""
     @State private var position = "员工"
     @State private var utilitiesText = ""
+    @State private var deptPerfText = ""
     @State private var showLogoutConfirm = false
     @State private var isSavingPay = false
     @State private var saveMessage: String?
     @State private var isCheckingUpdate = false
     @State private var showFeedback = false
+    @State private var showAdminBackend = false
 
     private let positions = ["员工", "现场组长", "自控组长", "班长"]
 
@@ -38,6 +40,28 @@ struct SettingsView: View {
                     Spacer()
                     Text("\(store.myTeam)班")
                         .foregroundColor(.secondary)
+                }
+            }
+
+            // 管理后台切换：只有老爷（张晓文）能看到。点一下进管理后台（WebView），
+            // 返回后排班/工资页的状态、登录态、本地缓存都在，不用重新登录。
+            if store.isOwner {
+                Section("管理后台") {
+                    Button {
+                        showAdminBackend = true
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("切换管理员后台")
+                                Text("用最高权限打开管理端，可管账号、发 App 更新")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .foregroundColor(.secondary)
+                        }
+                    }
                 }
             }
 
@@ -103,6 +127,19 @@ struct SettingsView: View {
                     Text("水电费")
                     Spacer()
                     TextField("60", text: $utilitiesText)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 120)
+                }
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("科室绩效奖金")
+                        Text("默认科室绩效，0–10000；某月单独改在工资页")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    TextField("4000", text: $deptPerfText)
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)
                         .frame(width: 120)
@@ -230,6 +267,9 @@ struct SettingsView: View {
         .sheet(isPresented: $showFeedback) {
             FeedbackView()
         }
+        .fullScreenCover(isPresented: $showAdminBackend) {
+            AdminBackendView()
+        }
     }
 
     // MARK: 手动选线路的绑定
@@ -270,6 +310,7 @@ struct SettingsView: View {
         pensionText = moneyText(PayCalc.round2(base * 0.08))
         position = settings?.position ?? "员工"
         utilitiesText = settings?.utilities.map { moneyText($0) } ?? "0"
+        deptPerfText = settings?.deptPerf.map { moneyText($0) } ?? "4000"
     }
 
     private func moneyText(_ value: Double) -> String {
@@ -289,6 +330,14 @@ struct SettingsView: View {
         if let base = derivedBase { settings["contributionBase"] = base }
         settings["position"] = position
         if let value = Double(utilitiesText) { settings["utilities"] = value }
+        // 默认科室绩效奖金：0–10000，超出不保存并提示。
+        if let value = Double(deptPerfText) {
+            guard value >= 0, value <= 10000 else {
+                saveMessage = "科室绩效奖金要在 0–10000 之间"
+                return
+            }
+            settings["deptPerf"] = value
+        }
         do {
             try await store.saveProfile(paySettings: settings)
             saveMessage = "已保存，下个月的工资按新设置算"

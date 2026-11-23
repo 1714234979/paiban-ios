@@ -37,17 +37,23 @@ struct CalendarView: View {
             if store.month == nil {
                 await store.refreshMonth()
             }
+            // 进页就把前后月也预取好，第一次左右滑就不等网络。
+            let next = yearMonth(from: pageIndex + 1)
+            let prev = yearMonth(from: pageIndex - 1)
+            store.prefetchMonth(year: next.year, month: next.month)
+            store.prefetchMonth(year: prev.year, month: prev.month)
         }
         // 滑到哪页，Store 就跟到哪月（汇总、调班/请假记录都跟着走），并预取前后月。
+        // 相邻月预取不等当前月刷新完，并行发起，切月不再出现「加载中」。
         .onChange(of: pageIndex) { newIndex in
             let ym = yearMonth(from: newIndex)
             store.setCurrentMonth(year: ym.year, month: ym.month)
+            let next = yearMonth(from: newIndex + 1)
+            let prev = yearMonth(from: newIndex - 1)
+            store.prefetchMonth(year: next.year, month: next.month)
+            store.prefetchMonth(year: prev.year, month: prev.month)
             Task {
                 await store.refreshMonth()
-                let next = yearMonth(from: newIndex + 1)
-                let prev = yearMonth(from: newIndex - 1)
-                store.prefetchMonth(year: next.year, month: next.month)
-                store.prefetchMonth(year: prev.year, month: prev.month)
             }
         }
         .onChange(of: store.viewTeam) { _ in
@@ -83,7 +89,7 @@ struct CalendarView: View {
         let today = Date()
         let ym = DateUtil.yearMonth(of: today)
         let day = DateUtil.calendar.component(.day, from: today)
-        return "\(ym.year)年\(ym.month)月\(day)日 \(DateUtil.weekdayCN(of: today))"
+        return "\(DateUtil.yearMonthTitle(year: ym.year, month: ym.month))\(day)日 \(DateUtil.weekdayCN(of: today))"
     }
 
     /// 今天什么班，如“中班 16:00–24:00”；双班写“早班 + 中班 …”；休息写“休息”；请假写“请假（年假）”。
@@ -160,10 +166,10 @@ struct CalendarView: View {
         }
     }
 
-    /// 当前页的标题，如“2027年2月”（跟着滑页走，不用等网络）。
+    /// 当前页的标题，如“2027年2月”（跟着滑页走，不用等网络；年份纯数字不带逗号）。
     private var pagerTitle: String {
         let ym = yearMonth(from: pageIndex)
-        return "\(ym.year)年\(ym.month)月"
+        return DateUtil.yearMonthTitle(year: ym.year, month: ym.month)
     }
 
     // MARK: 日历滑页（原生分页，跟着手指走）
@@ -179,6 +185,11 @@ struct CalendarView: View {
                         onSelectDay: { day in
                             selectedDay = day
                             showDayDetail = true
+                        },
+                        onSelectAdjacentMonth: { y, m in
+                            withAnimation(.easeInOut(duration: 0.25)) {
+                                pageIndex = Self.monthIndex(year: y, month: m)
+                            }
                         }
                     )
                     .tag(idx)
@@ -363,6 +374,8 @@ struct MonthPageView: View {
     let month: Int
     let isSelected: (String) -> Bool
     let onSelectDay: (DaySchedule) -> Void
+    /// 点到上月/下月补的日期时跳到对应月。
+    let onSelectAdjacentMonth: (Int, Int) -> Void
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
     private let weekdayTitles = ["日", "一", "二", "三", "四", "五", "六"]
@@ -379,13 +392,19 @@ struct MonthPageView: View {
                 }
             }
             LazyVGrid(columns: columns, spacing: 4) {
-                ForEach(blankCells, id: \.self) { _ in
-                    Color.clear
-                        .frame(height: cellHeight)
+                // 上月末尾几天（灰色，点后跳到上月），第一周不再留空白格。
+                ForEach(leadingDays, id: \.date) { day in
+                    DayCell(day: day, isToday: false, isSelected: false, isAdjacent: true)
+                        .onTapGesture { onSelectAdjacentMonth(prevYearMonth.year, prevYearMonth.month) }
                 }
                 ForEach(monthData.days ?? [], id: \.date) { day in
                     DayCell(day: day, isToday: day.date == DateUtil.string(from: Date()), isSelected: isSelected(day.date))
                         .onTapGesture { onSelectDay(day) }
+                }
+                // 下月开头几天（灰色，点后跳到下月），最后一周补满，左右滑动无断层。
+                ForEach(trailingDays, id: \.date) { day in
+                    DayCell(day: day, isToday: false, isSelected: false, isAdjacent: true)
+                        .onTapGesture { onSelectAdjacentMonth(nextYearMonth.year, nextYearMonth.month) }
                 }
             }
         }
@@ -395,8 +414,31 @@ struct MonthPageView: View {
         store.monthFor(year: year, month: month)
     }
 
-    private var blankCells: [Int] {
-        Array(0..<DateUtil.firstWeekday(year: year, month: month))
+    /// 上月年月 / 下月年月。
+    private var prevYearMonth: (year: Int, month: Int) {
+        month == 1 ? (year - 1, 12) : (year, month - 1)
+    }
+    private var nextYearMonth: (year: Int, month: Int) {
+        month == 12 ? (year + 1, 1) : (year, month + 1)
+    }
+
+    /// 每月第一周前面补上月末尾几天。
+    private var leadingDays: [DaySchedule] {
+        let count = DateUtil.firstWeekday(year: year, month: month)
+        guard count > 0 else { return [] }
+        let prev = store.monthFor(year: prevYearMonth.year, month: prevYearMonth.month)
+        return Array((prev.days ?? []).suffix(count))
+    }
+
+    /// 每月最后一周后面补下月开头几天，补满整周。
+    private var trailingDays: [DaySchedule] {
+        let first = DateUtil.firstWeekday(year: year, month: month)
+        let days = DateUtil.daysInMonth(year: year, month: month)
+        let remainder = (first + days) % 7
+        let count = remainder == 0 ? 0 : 7 - remainder
+        guard count > 0 else { return [] }
+        let next = store.monthFor(year: nextYearMonth.year, month: nextYearMonth.month)
+        return Array((next.days ?? []).prefix(count))
     }
 }
 
@@ -408,12 +450,14 @@ struct DayCell: View {
     let day: DaySchedule
     let isToday: Bool
     let isSelected: Bool
+    /// 上月/下月补进来的日期：灰色显示，点后跳到对应月。
+    var isAdjacent: Bool = false
 
     private let pillHeight: CGFloat = 28
 
     var body: some View {
         VStack(spacing: 2) {
-            // 日期行：号数 + 请假红标
+            // 日期行：号数 + 请假红标（补的日期不显示请假标）
             ZStack {
                 if isToday {
                     Circle()
@@ -423,8 +467,8 @@ struct DayCell: View {
                 HStack(spacing: 2) {
                     Text("\(day.dayNumber)")
                         .font(.system(size: 13, weight: isToday ? .bold : .regular))
-                        .foregroundColor(isToday ? .white : .primary)
-                    if day.onLeave == true {
+                        .foregroundColor(isToday ? .white : (isAdjacent ? .secondary : .primary))
+                    if day.onLeave == true && !isAdjacent {
                         Text("假")
                             .font(.system(size: 9, weight: .bold))
                             .foregroundColor(.white)
@@ -437,8 +481,16 @@ struct DayCell: View {
             }
             .frame(height: 26)
 
-            // 班次 pill：固定 28pt，所有班次一样高
-            if day.isDouble == true {
+            // 班次 pill：固定 28pt，所有班次一样高；补的日期用浅灰 pill。
+            if isAdjacent {
+                Text(day.isRest ? "休" : TeamInfo.shortName(day.shift))
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: pillHeight)
+                    .background(Color(.systemGray5))
+                    .cornerRadius(7)
+            } else if day.isDouble == true {
                 VStack(spacing: 2) {
                     ForEach(ShiftStyle.parts(of: day.shift), id: \.self) { part in
                         Text(TeamInfo.shortName(part))
@@ -461,8 +513,8 @@ struct DayCell: View {
                     .cornerRadius(7)
             }
 
-            // 节假日名行：固定高度，没有就留空，保证每格等高
-            Text(day.holiday ?? "")
+            // 节假日名行：固定高度，没有就留空，保证每格等高；补的日期不显示。
+            Text(isAdjacent ? "" : (day.holiday ?? ""))
                 .font(.system(size: 9))
                 .foregroundColor(.secondary)
                 .lineLimit(1)

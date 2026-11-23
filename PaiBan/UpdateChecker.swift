@@ -25,7 +25,7 @@ enum UpdateChecker {
 
     private static let dismissedDateKey = "paiban.updateDismissedDate"
 
-    /// 当前版本：Bundle 的 CFBundleShortVersionString（Info.plist 里 1.0）。
+    /// 当前版本：Bundle 的 CFBundleShortVersionString（Info.plist 里 1.1.1）。
     static var currentVersion: String {
         (Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String) ?? "1.0"
     }

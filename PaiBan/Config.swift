@@ -1,22 +1,24 @@
 import Foundation
 
 /// 服务器地址配置 — 全 App 唯一的服务器地址来源。
-/// 选路顺序：Cloudflare Tunnel 公网地址（若已填）→ Tailscale → 局域网。
+/// 主备两条（老爷 2026-11-24 定）：
+///   ① 云服务器 http://47.97.168.14:3003（主用，平时只走它）
+///   ② NAS 公网隧道 https://warrant-maternity-fathers-idle.trycloudflare.com（备份，只有云连不上时才切）
+/// Tailscale（100.66.88.28:3003）与局域网（192.168.1.101:3003）不再进地址链。
+/// 选路：先试云（10 秒探活），云超时或明确失败才试 NAS 隧道；两条都不通就置离线、走本地缓存。
+/// 云优先：每次选路都先试云，所以切到 NAS 后云一恢复，下次启动/下次选路就切回云；平时不来回跳。
 /// 任何地方都不要再写死第二个地址；改地址只改这里。
 enum ServerConfig {
 
-    // MARK: - ★★★ 公网地址（Cloudflare Tunnel）★★★
-    // 溟月的容器隧道（paiban-tunnel，随 NAS 重启自动起），当前唯一公网地址。
-    // Quick Tunnel（临时地址）：cloudflared 一重启地址就变；
-    // 固定地址要 Cloudflare 账号＋域名，老爷现在没有，等他定。
+    // MARK: - ★★★ 云服务器（主用）★★★
+    // 阿里云试用服务器（2026-11-24），排班 API 已搬上云。
+    static let cloudBaseURL = "http://47.97.168.14:3003"
+
+    // MARK: - ★★★ NAS 公网隧道（备份）★★★
+    // 溟月的容器隧道（paiban-tunnel，随 NAS 重启自动起），只有云连不上时才用。
+    // Quick Tunnel（临时地址）：cloudflared 一重启地址就变，变了再改这里。
     // 注意：不要带末尾斜杠，不要带 /app 之类的路径，只要根地址。
-    static let tunnelBaseURL: String? = "https://warrant-maternity-fathers-idle.trycloudflare.com"
-
-    /// NAS 的 Tailscale 地址（100.66.88.28:3003）
-    static let tailscaleBaseURL = "http://100.66.88.28:3003"
-
-    /// 家里局域网地址（192.168.1.101:3003）
-    static let lanBaseURL = "http://192.168.1.101:3003"
+    static let nasTunnelBaseURL: String? = "https://warrant-maternity-fathers-idle.trycloudflare.com"
 
     // MARK: - App 内更新提示（版本清单）
     // canonical 接口：GET <baseURL>/api/v1/version（公开，不用认证），
@@ -44,18 +46,17 @@ enum ServerConfig {
         }
     }
 
-    /// 所有候选地址（按优先级），供设置页手动切换。
+    /// 所有候选地址（按优先级），供设置页手动切换：云 → NAS 隧道。
     static var allCandidates: [(kind: ServerKind, baseURL: String)] {
-        var list: [(ServerKind, String)] = []
-        if let tunnel = tunnelBaseURL, !tunnel.isEmpty {
-            list.append((.tunnel, tunnel))
+        var list: [(ServerKind, String)] = [(.cloud, cloudBaseURL)]
+        if let tunnel = nasTunnelBaseURL, !tunnel.isEmpty {
+            list.append((.nasTunnel, tunnel))
         }
-        list.append((.tailscale, tailscaleBaseURL))
-        list.append((.lan, lanBaseURL))
         return list
     }
 
     /// 依次对每个候选地址的 /health 做探测，返回第一个通的。
+    /// 云优先：每次都先试云，云通就用云；云不通才试 NAS 隧道；两条都不通返回 nil（离线）。
     /// 手动指定过地址时先试它，通了就用它。
     static func resolve() async -> (baseURL: String, kind: ServerKind)? {
         if let manual = manualOverride, !manual.isEmpty {
@@ -87,25 +88,22 @@ enum ServerConfig {
     }
 
     static func kind(for baseURL: String) -> ServerKind {
-        if baseURL == tunnelBaseURL { return .tunnel }
-        if baseURL == tailscaleBaseURL { return .tailscale }
-        if baseURL == lanBaseURL { return .lan }
+        if baseURL == cloudBaseURL { return .cloud }
+        if baseURL == nasTunnelBaseURL { return .nasTunnel }
         return .manual
     }
 }
 
 /// 服务器线路。
 enum ServerKind: String {
-    case tunnel
-    case tailscale
-    case lan
+    case cloud
+    case nasTunnel
     case manual
 
     var displayName: String {
         switch self {
-        case .tunnel: return "公网隧道"
-        case .tailscale: return "Tailscale"
-        case .lan: return "局域网"
+        case .cloud: return "云服务器"
+        case .nasTunnel: return "NAS 隧道（备份）"
         case .manual: return "手动指定"
         }
     }

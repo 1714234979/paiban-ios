@@ -66,7 +66,7 @@ final class AppStore: ObservableObject {
 
     // 服务器
     @Published var serverBaseURL: String?
-    @Published var serverKind: ServerKind = .tailscale
+    @Published var serverKind: ServerKind = .cloud
     @Published var serverReachable = false
 
     // 离线：服务器连不上时用缓存顶着，界面上显示“离线缓存”。
@@ -174,7 +174,7 @@ final class AppStore: ObservableObject {
                 isLoggedIn = true
                 isOffline = true
             } else {
-                startupError = "连不上服务器（隧道 / Tailscale / 局域网都试过了），请检查网络后再试。"
+                startupError = "连不上服务器（云服务器与 NAS 备份都试过了），请检查网络后再试。"
             }
             return
         }
@@ -416,10 +416,12 @@ final class AppStore: ObservableObject {
         return local
     }
 
-    /// 后台取某月的真数据（调班/请假都带上），到了写进缓存；已缓存或正在取的直接跳过。
+    /// 后台取某月的真数据（调班/请假都带上），到了写进缓存；月缓存与调班/请假
+    /// 缓存都齐了才跳过（缺任何一项都补取，免得记录一直空白），正在取的直接跳过。
     func prefetchMonth(year: Int, month: Int) {
         let key = monthCacheKey(team: myTeam, year: year, month: month)
-        guard monthCache[key] == nil, !fetchingMonths.contains(key) else { return }
+        let mk = payCacheKey(year: year, month: month)
+        guard monthCache[key] == nil || swapsCache[mk] == nil || leavesCache[mk] == nil, !fetchingMonths.contains(key) else { return }
         fetchingMonths.insert(key)
         Task {
             do {
@@ -761,15 +763,19 @@ final class AppStore: ObservableObject {
     // MARK: 月份切换
 
     /// 同步把当前月的缓存换到界面上（标题和网格不错位），再后台静默刷新。
+    /// 调班/请假/加班先读本地缓存立刻显示，没缓存就清空（绝不留上个月的记录）；
+    /// 网格没缓存先按本地 8 天一轮算顶上。后台刷新成功才更新缓存，失败保留旧缓存不弹错。
     private func applyCachedMonth() {
         let ym = currentYearMonth
         let key = monthCacheKey(team: viewTeam, year: ym.year, month: ym.month)
+        let mk = payCacheKey(year: ym.year, month: ym.month)
+        swaps = swapsCache[mk] ?? []
+        leaves = leavesCache[mk] ?? []
+        overtime = overtimeCache[mk] ?? []
         if let cached = monthCache[key] {
             month = cached
-            let mk = payCacheKey(year: ym.year, month: ym.month)
-            swaps = swapsCache[mk] ?? swaps
-            leaves = leavesCache[mk] ?? leaves
-            overtime = overtimeCache[mk] ?? overtime
+        } else {
+            month = ScheduleCalculator.localMonth(team: viewTeam, year: ym.year, month: ym.month)
         }
     }
 

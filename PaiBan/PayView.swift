@@ -22,6 +22,19 @@ struct PayView: View {
             .padding(.bottom, 24)
         }
         .background(Color(.systemGroupedBackground))
+        // 左右滑动切月（与排班页的滑页体验一致）：横向滑动幅度明显大于竖向时才切月，
+        // 竖向滚动不受影响。左滑下个月、右滑上个月，到 2024-01 / 2030-12 的边就停。
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 20)
+                .onEnded { value in
+                    let w = value.translation.width
+                    let h = value.translation.height
+                    guard abs(w) > 60, abs(w) > abs(h) * 1.5 else { return }
+                    withAnimation(.easeInOut(duration: 0.25)) {
+                        stepPayMonth(by: w < 0 ? 1 : -1)
+                    }
+                }
+        )
         .task {
             if store.pay == nil {
                 await store.refreshPay()
@@ -57,7 +70,7 @@ struct PayView: View {
                     .clipShape(Circle())
             }
             Spacer()
-            Text("\(store.payYearMonth.year)年\(store.payYearMonth.month)月")
+            Text(DateUtil.yearMonthTitle(year: store.payYearMonth.year, month: store.payYearMonth.month))
                 .font(.title3).bold()
             Spacer()
             Button { stepPayMonth(by: 1) } label: {
@@ -75,6 +88,9 @@ struct PayView: View {
         var month = store.payYearMonth.month + offset
         while month < 1 { month += 12; year -= 1 }
         while month > 12 { month -= 12; year += 1 }
+        // 滑页范围与排班页一致：2024-01 ~ 2030-12，到边就停。
+        let idx = year * 12 + (month - 1)
+        guard idx >= 2024 * 12, idx < 2031 * 12 else { return }
         store.payYearMonth = (year, month)
     }
 

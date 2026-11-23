@@ -22,6 +22,12 @@ enum DateUtil {
         return f
     }()
 
+    /// 年月标题，如“2027年1月”。年份直接拼纯数字，绝不走带千分位分组符的
+    /// NumberFormatter（1.0 曾把 2027 显示成 2,027）；金额里的千分位逗号不受影响。
+    static func yearMonthTitle(year: Int, month: Int) -> String {
+        "\(year)年\(month)月"
+    }
+
     static let fullFormatter: DateFormatter = {
         let f = DateFormatter()
         f.calendar = calendar
@@ -351,6 +357,8 @@ struct PaySettings: Codable, Equatable {
     var hireYear: Int?
     var hireMonth: Int?
     var deptPerfDefault: Double?
+    /// 设置里的默认科室绩效奖金（用户默认，0–10000；随 PUT /me/profile 保存）。
+    var deptPerf: Double?
     var perfCoefDefault: Double?
     var annualLeaveTotal: Int?
 }

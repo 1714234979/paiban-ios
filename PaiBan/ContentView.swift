@@ -96,7 +96,7 @@ struct OfflineView: View {
             Text(message)
                 .multilineTextAlignment(.center)
                 .foregroundColor(.secondary)
-            Text("手机要和 NAS 在同一个网络里：家里 Wi-Fi、Tailscale，或者等公网隧道地址填好。")
+            Text("平时走云服务器，云连不上时自动切 NAS 备份；两条都不通就是离线，本地缓存先顶着。")
                 .font(.caption)
                 .multilineTextAlignment(.center)
                 .foregroundColor(.secondary)
