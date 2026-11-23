@@ -17,6 +17,8 @@ struct CalendarView: View {
 
     @State private var selectedDay: DaySchedule?
     @State private var showDayDetail = false
+    /// 1.1.4：滑页刷新防抖任务（见 .onChange(of: pageIndex)）。
+    @State private var refreshTask: Task<Void, Never>?
     // 滑页的页码 = 月份绝对序号（年*12 + 月-1），2026年11月 = 24322。
     // 用原生 TabView 分页滑，切月跟着手指走、左右月预渲染，不再整格闪白重画。
     @State private var pageIndex: Int = CalendarView.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
@@ -76,6 +78,11 @@ struct CalendarView: View {
         }
         // 滑到哪页，Store 就跟到哪月（汇总、调班/请假记录都跟着走），并预取前后月。
         // 相邻月预取不等当前月刷新完，并行发起，切月不再出现「加载中」。
+        // 1.1.4：网络刷新防抖——原来每换一页就立即 Task { await store.refreshMonth() }，
+        // 回来写一串 @Published（month/swaps/leaves/monthCache…），正好落在滑动动画里，
+        // 整页重绘、正在滑的 TabView 被打断，就一卡一卡。现在等 0.4 秒没再滑页才刷新：
+        // 滑动中只改本地月份 + 预取（都是缓存、不写 @Published、不发网络），
+        // 手指停了、页面落定了再发网络；滑得快时前面的任务直接取消，只刷最后一页。
         .onChange(of: pageIndex) { newIndex in
             let ym = yearMonth(from: newIndex)
             store.setCurrentMonth(year: ym.year, month: ym.month)
@@ -83,7 +90,10 @@ struct CalendarView: View {
             let prev = yearMonth(from: newIndex - 1)
             store.prefetchMonth(year: next.year, month: next.month)
             store.prefetchMonth(year: prev.year, month: prev.month)
-            Task {
+            refreshTask?.cancel()
+            refreshTask = Task {
+                try? await Task.sleep(nanoseconds: 400_000_000)
+                guard !Task.isCancelled else { return }
                 await store.refreshMonth()
             }
         }
@@ -429,8 +439,6 @@ struct MonthPageView: View {
     /// 点到上月/下月补的日期时跳到对应月。
     let onSelectAdjacentMonth: (Int, Int) -> Void
 
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
-
     /// 本月占几行（4–6 周）。
     private var numberOfWeeks: Int {
         let first = DateUtil.firstWeekday(year: year, month: month)
@@ -438,24 +446,66 @@ struct MonthPageView: View {
         return Int(ceil(Double(first + days) / 7.0))
     }
 
+    /// 一格的身份：上月补的 / 本月 / 下月补的（点上月/下月补的跳到对应月）。
+    private enum GridDayKind { case leading, current, trailing }
+
+    /// 整页的格子（上月补 + 本月 + 下月补，拼满整周）：数据走 store.monthFor（缓存，
+    /// 只算一次），三薪标走 payFor（带 payCache 备忘），滑动时不再现算。
+    /// 1.1.4：原来是 LazyVGrid，滑页中预取回来写 @Published、视图重算，
+    /// LazyVGrid 懒加载重排、格子错位，2027-01 那页第一行就是这么混排的
+    ///（3、4、5、27、28、29、30 挤在一行）。改成固定 VStack + HStack：
+    /// 行数按月定、每格固定 64pt、7 列写死，格子永远在固定位置，
+    /// 滑动中就算重画也只换格子内容、不挪格子位置，混排的根就没了。
+    /// 格子总数恒等于 行数×7（上月补 + 本月 + 下月补正好拼满整周）。
+    private var gridDays: [(day: DaySchedule, kind: GridDayKind)] {
+        var result: [(DaySchedule, GridDayKind)] = []
+        for d in leadingDays { result.append((d, .leading)) }
+        for d in (monthData.days ?? []) { result.append((d, .current)) }
+        for d in trailingDays { result.append((d, .trailing)) }
+        return result
+    }
+
     var body: some View {
         // 行距按行数自适应（6 行紧、5 行松），外框总高固定，滑动不伸缩。
         // 周几行已抽到 TabView 外面固定不动，这里只画日期网格。
-        LazyVGrid(columns: columns, spacing: calendarRowSpacing(weeks: numberOfWeeks)) {
-            // 上月末尾几天（灰色，点后跳到上月），第一周不再留空白格。
-            ForEach(leadingDays, id: \.date) { day in
-                DayCell(day: day, isToday: false, isSelected: false, isAdjacent: true)
-                    .onTapGesture { onSelectAdjacentMonth(prevYearMonth.year, prevYearMonth.month) }
+        // 订阅 payInputsVersion：工资输入到齐时三薪标要出现，日历得重画
+        //（之前没订阅，输入到了也不重画，三薪标要等别的状态变了才冒出来）。
+        let _ = store.payInputsVersion
+        let days = gridDays
+        let weeks = numberOfWeeks
+        VStack(spacing: calendarRowSpacing(weeks: weeks)) {
+            ForEach(0..<weeks, id: \.self) { w in
+                HStack(spacing: 4) {
+                    ForEach(0..<7, id: \.self) { c in
+                        let idx = w * 7 + c
+                        if idx < days.count {
+                            gridCell(day: days[idx].day, kind: days[idx].kind)
+                        } else {
+                            Color.clear.frame(height: calendarCellHeight)
+                        }
+                    }
+                }
             }
-            ForEach(monthData.days ?? [], id: \.date) { day in
-                DayCell(day: day, isToday: day.date == DateUtil.string(from: Date()), isSelected: isSelected(day.date), isTriplePay: tripleDates.contains(day.date))
-                    .onTapGesture { onSelectDay(day) }
-            }
-            // 下月开头几天（灰色，点后跳到下月），最后一周补满，左右滑动无断层。
-            ForEach(trailingDays, id: \.date) { day in
-                DayCell(day: day, isToday: false, isSelected: false, isAdjacent: true)
-                    .onTapGesture { onSelectAdjacentMonth(nextYearMonth.year, nextYearMonth.month) }
-            }
+        }
+    }
+
+    /// 一格：按身份给不同的点按行为（本月点开详情，上月/下月补的跳到对应月）。
+    /// maxWidth 让格子在 HStack 里均分 7 列（原来 LazyVGrid 的 .flexible() 就是这个作用）。
+    @ViewBuilder
+    private func gridCell(day: DaySchedule, kind: GridDayKind) -> some View {
+        switch kind {
+        case .leading:
+            DayCell(day: day, isToday: false, isSelected: false, isAdjacent: true)
+                .frame(maxWidth: .infinity)
+                .onTapGesture { onSelectAdjacentMonth(prevYearMonth.year, prevYearMonth.month) }
+        case .current:
+            DayCell(day: day, isToday: day.date == DateUtil.string(from: Date()), isSelected: isSelected(day.date), isTriplePay: tripleDates.contains(day.date))
+                .frame(maxWidth: .infinity)
+                .onTapGesture { onSelectDay(day) }
+        case .trailing:
+            DayCell(day: day, isToday: false, isSelected: false, isAdjacent: true)
+                .frame(maxWidth: .infinity)
+                .onTapGesture { onSelectAdjacentMonth(nextYearMonth.year, nextYearMonth.month) }
         }
     }
 

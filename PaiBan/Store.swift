@@ -622,6 +622,23 @@ final class AppStore: ObservableObject {
         )
     }
 
+    /// 取某月工资（本地算，带缓存）：先看 payCache，没有就本地算并记进缓存。
+    /// 1.1.4：triplePayInfo 原来每次渲染都调 computeLocalPay 跑完整 PayCalc
+    ///（日历每页、底部统计、工资页都调），滑页时几页一起算、主线程被占满就掉帧。
+    /// 现在走 payCache 备忘，同一月只算一次；输入变了（refreshPayInputs 清年缓存、
+    /// updatePayMonthField 走 refreshPay 重算）缓存跟着失效，不会拿旧数。
+    /// 注意 payCache 不是 @Published，写缓存本身不触发重绘；真正要重画时靠
+    /// pay / monthCache / payInputsVersion 这些 @Published 驱动。
+    func payFor(year: Int, month: Int) -> PayMonth? {
+        let key = payCacheKey(year: year, month: month)
+        if let cached = payCache[key] { return cached }
+        if let local = computeLocalPay(year: year, month: month) {
+            payCache[key] = local
+            return local
+        }
+        return nil
+    }
+
     /// 切月（工资页）：同步改月份并立刻用本地算好的工资顶上（有输入时秒出），
     /// 让调用方的 withAnimation 能把「月份 + 内容」包在同一个动画事务里，
     /// 工资页切月才有真正的左右滑动动画；本地算不出时照旧走异步 refreshPay（onChange 兜底）。
@@ -659,7 +676,8 @@ final class AppStore: ObservableObject {
     /// 本地算（computeLocalPay，带缓存）；输入没到齐算不出时返回 nil（日历先不标，等输入到了重画）。
     func triplePayInfo(year: Int, month: Int) -> (tripleDates: Set<String>, tripleDays: Double, overtimeDays: Double)? {
         guard viewTeam == myTeam else { return nil }
-        guard let pay = computeLocalPay(year: year, month: month) else { return nil }
+        // 1.1.4：走 payFor（带 payCache 备忘），不再每次调 computeLocalPay 现算。
+        guard let pay = payFor(year: year, month: month) else { return nil }
         // 三薪按班次标：按时间顺序累加每一天的班次数，累计班次还没达到三薪数那几天都标
         // （双班那天 2 个班次，一天就占满 2 个三薪；只有部分班次算三薪那天也标）。
         let dates = pay.tripleDates ?? []

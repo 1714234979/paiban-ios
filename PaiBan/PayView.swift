@@ -2,6 +2,11 @@ import SwiftUI
 
 /// 预估工资页：月份步进（默认上个月），只按月看（全年视图已删）。
 /// 数字在手机本地算（服务端只给排班与工资配置原始数据），切月秒出。
+/// 1.1.4：切月改成原生 TabView 分页滑（和排班页一样，跟着手指走、左右月预渲染）。
+/// 原来是自定义 DragGesture（minimumDistance 12）+ onEnded 里才调 stepPayMonth，
+/// 手指拖动时内容完全不动、松手后才用 0.25s 动画切月——这就是「不跟手」。
+/// 现在 TabView 自己管滑动，内容跟着手指走；每页是自己的 ScrollView（竖滚），
+/// 横滑归 TabView、竖滚归页内 ScrollView，两边不抢手势。
 struct PayView: View {
     @EnvironmentObject private var store: AppStore
 
@@ -12,61 +17,61 @@ struct PayView: View {
     @State private var editSaving = false
     @State private var editError: String?
     @FocusState private var editFieldFocused: Bool
-    /// 横滑锁定：横向位移占优时锁成横滑、禁掉纵向滚动，斜滑按主导方向判定。
-    @State private var horizontalSwipeLocked = false
-    /// 切月滑动方向（1 = 下个月：左滑，新内容从右边滑入；-1 = 上个月：右滑，从左边滑入）。
-    @State private var slideDirection: Int = 1
+    /// 滑页的页码 = 月份绝对序号（年*12 + 月-1），与排班页同一套。
+    @State private var pageIndex: Int = PayView.monthIndex(year: DateUtil.lastMonth().year, month: DateUtil.lastMonth().month)
+    /// 滑页范围：一次生成 12 个月，当前月居中（前后各 5–6 个月），和排班页对齐。
+    @State private var windowStartIndex: Int = {
+        let lm = DateUtil.lastMonth()
+        return PayView.monthIndex(year: lm.year, month: lm.month) - 5
+    }()
+    private var pageRange: Range<Int> { windowStartIndex..<(windowStartIndex + 12) }
+
+    static func monthIndex(year: Int, month: Int) -> Int { year * 12 + (month - 1) }
+    private func yearMonth(from index: Int) -> (year: Int, month: Int) { (index / 12, index % 12 + 1) }
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                headerCard
-                monthStepper
-                // 1.1.3：切月动画——内容按月份给唯一 id，换月时旧内容滑出、新内容滑入；
-                // 方向由 slideDirection 定（左滑下个月从右入、右滑上个月从左入）。
-                // 之前只在 withAnimation 里改月份，工资内容是 onChange 里异步刷的、
-                // 不在同一个动画事务里，又没有 .transition，所以看着没有动画。
-                monthBreakdown
-                    .id("\(store.payYearMonth.year)-\(store.payYearMonth.month)")
-                    .transition(.asymmetric(
-                        insertion: .move(edge: slideDirection > 0 ? .trailing : .leading),
-                        removal: .move(edge: slideDirection > 0 ? .leading : .trailing)
-                    ))
-                noteCard
+        VStack(spacing: 16) {
+            headerCard
+            monthStepper
+            // 1.1.4：原生 TabView 分页（每页一个 ScrollView 竖滚）。
+            // 顶栏和月份步进固定在上面不滚动，工资明细在页内上下滚、左右滑切月；
+            // TabView 只预渲染当前页与相邻页，切月不整页重算（工资走 payFor 缓存）。
+            TabView(selection: $pageIndex) {
+                ForEach(pageRange, id: \.self) { idx in
+                    let ym = yearMonth(from: idx)
+                    ScrollView {
+                        VStack(spacing: 16) {
+                            monthBreakdown(year: ym.year, month: ym.month)
+                            noteCard
+                        }
+                        .padding(.bottom, 24)
+                        // 点编辑框以外的地方就收起（丢弃未保存的改动）。Tap 手势只认轻点，
+                        // 拖动（滚动/横滑）不会触发，不跟左右滑切月、上下滚动冲突。
+                        .onTapGesture {
+                            if editingField != nil { dismissEdit() }
+                        }
+                    }
+                    .tag(idx)
+                }
             }
-            .padding(.bottom, 24)
-            // 点编辑框以外的地方就收起（丢弃未保存的改动）。Tap 手势只认轻点，
-            // 拖动（滚动/横滑）不会触发，不跟左右滑切月、上下滚动冲突。
-            .onTapGesture {
-                if editingField != nil { dismissEdit() }
-            }
+            .tabViewStyle(.page(indexDisplayMode: .never))
         }
         .background(Color(.systemGroupedBackground))
-        .scrollDisabled(horizontalSwipeLocked)
-        // 左右滑动切月（与排班页的滑页体验一致）：横向位移明显大于竖向时才切月，
-        // 竖向滚动不受影响。横滑一旦锁定就禁掉纵向滚动，左右滑的时候上下不再跟着动；
-        // 左滑下个月、右滑上个月，到 2024-01 / 2030-12 的边就停。
-        // 切月用平滑过渡动画（0.25s），动画期间不重算——工资是本地算、切月秒出。
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 12)
-                .onChanged { value in
-                    let w = abs(value.translation.width)
-                    let h = abs(value.translation.height)
-                    if w > 24 && w > h * 1.5 {
-                        horizontalSwipeLocked = true
-                    }
-                }
-                .onEnded { value in
-                    defer { horizontalSwipeLocked = false }
-                    let w = value.translation.width
-                    let h = value.translation.height
-                    guard abs(w) > 60, abs(w) > abs(h) * 1.5 else { return }
-                    stepPayMonth(by: w < 0 ? 1 : -1)
-                }
-        )
+        // 滑到哪页，Store 就跟到哪月（setPayMonth 同步算好当月工资、写进缓存）；
+        // 切月时把敞着的编辑框收起（那是上个月的数，别留在新月上误触）。
+        .onChange(of: pageIndex) { newIndex in
+            let ym = yearMonth(from: newIndex)
+            dismissEdit()
+            store.setPayMonth(year: ym.year, month: ym.month)
+        }
         // 切到别的页面（排班/设置）时，敞着的编辑框自动收起，丢弃未保存的改动。
         .onDisappear { dismissEdit() }
         .task {
+            // 进页先对齐到 Store 正在看的月（恢复的缓存可能是别的月），
+            // 窗口以这个月为中心重定（默认就是上个月，和初始值一致，不闪）。
+            let ym = store.payYearMonth
+            windowStartIndex = Self.monthIndex(year: ym.year, month: ym.month) - 5
+            pageIndex = Self.monthIndex(year: ym.year, month: ym.month)
             if store.pay == nil {
                 await store.refreshPay()
             }
@@ -92,19 +97,29 @@ struct PayView: View {
         .padding(.top, 8)
     }
 
+    /// 月份步进：标题直接取当前页（跟着滑页走，不用等网络）；左右箭头改页码，
+    /// onChange 里 setPayMonth，同样有滑动动画。滑页范围与排班页一致（12 页窗口，到边就停）。
     private var monthStepper: some View {
         HStack {
-            Button { stepPayMonth(by: -1) } label: {
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    pageIndex = max(pageRange.lowerBound, pageIndex - 1)
+                }
+            } label: {
                 Image(systemName: "chevron.left")
                     .frame(width: 36, height: 36)
                     .background(Color(.systemBackground))
                     .clipShape(Circle())
             }
             Spacer()
-            Text(DateUtil.yearMonthTitle(year: store.payYearMonth.year, month: store.payYearMonth.month))
+            Text(DateUtil.yearMonthTitle(year: yearMonth(from: pageIndex).year, month: yearMonth(from: pageIndex).month))
                 .font(.title3).bold()
             Spacer()
-            Button { stepPayMonth(by: 1) } label: {
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    pageIndex = min(pageRange.upperBound - 1, pageIndex + 1)
+                }
+            } label: {
                 Image(systemName: "chevron.right")
                     .frame(width: 36, height: 36)
                     .background(Color(.systemBackground))
@@ -114,33 +129,14 @@ struct PayView: View {
         .padding(.horizontal, 16)
     }
 
-    private func stepPayMonth(by offset: Int) {
-        // 切月时把敞着的编辑框收起（那是上个月的数，别留在新月上误触）。
-        dismissEdit()
-        var year = store.payYearMonth.year
-        var month = store.payYearMonth.month + offset
-        while month < 1 { month += 12; year -= 1 }
-        while month > 12 { month -= 12; year += 1 }
-        // 滑页范围与排班页一致：2024-01 ~ 2030-12，到边就停。
-        let idx = year * 12 + (month - 1)
-        guard idx >= 2024 * 12, idx < 2031 * 12 else { return }
-        // 滑动方向：左滑下个月（新内容从右边滑入）、右滑上个月（从左边滑入）。
-        slideDirection = offset > 0 ? 1 : -1
-        // 1.1.3：月份 + 工资内容包在同一个动画事务里（setPayMonth 同步算好当月工资），
-        // 再靠 monthBreakdown 的 .id + .transition 做左右滑动；按钮切月也走这里，同样有动画。
-        withAnimation(.easeInOut(duration: 0.25)) {
-            store.setPayMonth(year: year, month: month)
-        }
-    }
-
     // MARK: 月度明细
 
+    /// 某月的工资明细：工资取 store.payFor（带 payCache 备忘，同一月只算一次），
+    /// 相邻月预渲染时直接读缓存、不现算、不发网络；输入没到齐算不出时先显示加载，
+    /// refreshPay 把输入补齐后重画。只看当前页这一份，不用等整页刷新。
     @ViewBuilder
-    private var monthBreakdown: some View {
-        if store.isLoadingPay && store.pay == nil {
-            ProgressView("正在加载…")
-                .padding()
-        } else if let pay = store.pay {
+    private func monthBreakdown(year: Int, month: Int) -> some View {
+        if let pay = store.payFor(year: year, month: month) {
             VStack(spacing: 16) {
                 salarySection(pay: pay)
                 bonusSection(pay: pay)
@@ -176,6 +172,9 @@ struct PayView: View {
                     .padding(.horizontal, 16)
                 }
             }
+        } else if store.isLoadingPay {
+            ProgressView("正在加载…")
+                .padding()
         } else {
             Text("暂无工资数据，稍后再试")
                 .foregroundColor(.secondary)
@@ -291,6 +290,8 @@ struct PayView: View {
     /// 之前整行都是 Button，左右滑切月时手指从行上划过、抬手还在行内，
     /// Button 就当成一次点按、把编辑框打开了。现在行本身不可点，横滑只会触发切月；
     /// 想改就点「可改」徽标（小目标，横滑起止很难同时落在它上面），误触基本杜绝。
+    /// 1.1.4：TabView 滑页时手指从行上划过也不会再打开编辑框（行本身不是按钮，
+    /// TabView 的横滑手势优先），这条保留、继续有效。
     private func editableRow(title: String, valueText: String, field: PayRecordField, currentValue: String, placeholder: String) -> some View {
         VStack(spacing: 0) {
             HStack {
