@@ -1,20 +1,28 @@
 import SwiftUI
 
-/// 设置页：账号、换班（永久换班入口）、工资设置、服务器、检查更新、关于、退出登录。
+/// 设置页：账号、换班（更换班组入口）、工资设置、检查更新、关于、退出登录。
+/// 服务器那节只给老爷（张晓文）看，同事看不到。
 struct SettingsView: View {
     @EnvironmentObject private var store: AppStore
 
     @State private var baseSalaryText = ""
     @State private var bonusCoefText = ""
-    @State private var contributionBaseText = ""
+    @State private var pensionText = ""
     @State private var position = "员工"
     @State private var utilitiesText = ""
     @State private var showLogoutConfirm = false
     @State private var isSavingPay = false
     @State private var saveMessage: String?
     @State private var isCheckingUpdate = false
+    @State private var showFeedback = false
 
     private let positions = ["员工", "现场组长", "自控组长", "班长"]
+
+    /// 养老月扣反推缴费基数：基数 = 养老月扣 ÷ 0.08（保留两位小数）。
+    private var derivedBase: Double? {
+        guard let pension = Double(pensionText.trimmingCharacters(in: .whitespaces)), pension > 0 else { return nil }
+        return PayCalc.round2(pension / 0.08)
+    }
 
     var body: some View {
         Form {
@@ -22,19 +30,13 @@ struct SettingsView: View {
                 HStack {
                     Text("账号")
                     Spacer()
-                    Text(store.user?.username ?? "—")
+                    Text(store.displayUsername)
                         .foregroundColor(.secondary)
                 }
                 HStack {
                     Text("班组")
                     Spacer()
                     Text("\(store.myTeam)班")
-                        .foregroundColor(.secondary)
-                }
-                HStack {
-                    Text("身份")
-                    Spacer()
-                    Text(store.user?.isAdmin == true ? "管理员" : "同事")
                         .foregroundColor(.secondary)
                 }
             }
@@ -44,7 +46,7 @@ struct SettingsView: View {
                     TeamChangeView()
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("永久换班")
+                        Text("更换班组")
                         Text("换到别的班组，从生效日零点起按新班组排班")
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -75,12 +77,22 @@ struct SettingsView: View {
                         .frame(width: 120)
                 }
                 HStack {
-                    Text("社保缴费基数")
+                    Text("养老月扣")
                     Spacer()
-                    TextField("5938", text: $contributionBaseText)
+                    TextField("475.04", text: $pensionText)
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)
                         .frame(width: 120)
+                }
+                if let base = derivedBase {
+                    HStack {
+                        Text("社保缴费基数")
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text("\(PayCalc.jsNum(base))（医疗 \(MoneyUtil.money(PayCalc.round2(base * 0.02))) · 失业 \(MoneyUtil.money(PayCalc.round2(base * 0.003)))）")
+                            .foregroundColor(.secondary)
+                    }
+                    .font(.caption)
                 }
                 Picker("岗位", selection: $position) {
                     ForEach(positions, id: \.self) { p in
@@ -112,23 +124,26 @@ struct SettingsView: View {
                 }
             }
 
-            Section("服务器") {
-                HStack {
-                    Text("当前线路")
-                    Spacer()
-                    Text(store.serverKind.displayName)
-                        .foregroundColor(.secondary)
-                }
-                Text(store.serverBaseURL ?? "未连接")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Picker("手动切换线路", selection: manualSelection) {
-                    Text("自动选路").tag("")
-                    ForEach(ServerConfig.allCandidates, id: \.baseURL) { candidate in
-                        Text("\(candidate.kind.displayName) · \(candidate.baseURL)").tag(candidate.baseURL)
+            // 服务器线路只给老爷看（调试用），同事不显示。
+            if store.isOwner {
+                Section("服务器") {
+                    HStack {
+                        Text("当前线路")
+                        Spacer()
+                        Text(store.serverKind.displayName)
+                            .foregroundColor(.secondary)
                     }
+                    Text(store.serverBaseURL ?? "未连接")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Picker("手动切换线路", selection: manualSelection) {
+                        Text("自动选路").tag("")
+                        ForEach(ServerConfig.allCandidates, id: \.baseURL) { candidate in
+                            Text("\(candidate.kind.displayName) · \(candidate.baseURL)").tag(candidate.baseURL)
+                        }
+                    }
+                    .pickerStyle(.menu)
                 }
-                .pickerStyle(.menu)
             }
 
             Section("更新") {
@@ -144,6 +159,20 @@ struct SettingsView: View {
                             Text("当前 \(UpdateChecker.currentVersion)")
                                 .foregroundColor(.secondary)
                         }
+                    }
+                }
+            }
+
+            Section("反馈") {
+                Button {
+                    showFeedback = true
+                } label: {
+                    HStack {
+                        Text("反馈问题")
+                        Spacer()
+                        Text("会附上最近 24 小时运行日志")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
                 }
             }
@@ -198,6 +227,9 @@ struct SettingsView: View {
         } message: {
             Text(store.updateNotice ?? "")
         }
+        .sheet(isPresented: $showFeedback) {
+            FeedbackView()
+        }
     }
 
     // MARK: 手动选线路的绑定
@@ -232,9 +264,12 @@ struct SettingsView: View {
         let settings = store.user?.paySettings
         baseSalaryText = settings?.baseSalary.map { moneyText($0) } ?? "2420"
         bonusCoefText = settings?.bonusCoef.map { String(format: "%.1f", $0) } ?? "1.0"
-        contributionBaseText = settings?.contributionBase.map { moneyText($0) } ?? "5938"
+        // 养老月扣框里显示的是“基数 × 8%”：老爷默认基数 5938 → 475.04；
+        // 同事没填过就按全局默认基数 5938 算。
+        let base = settings?.contributionBase ?? 5938
+        pensionText = moneyText(PayCalc.round2(base * 0.08))
         position = settings?.position ?? "员工"
-        utilitiesText = settings?.utilities.map { moneyText($0) } ?? "60"
+        utilitiesText = settings?.utilities.map { moneyText($0) } ?? "0"
     }
 
     private func moneyText(_ value: Double) -> String {
@@ -251,7 +286,7 @@ struct SettingsView: View {
         var settings: [String: Any] = [:]
         if let value = Double(baseSalaryText) { settings["baseSalary"] = value }
         if let value = Double(bonusCoefText) { settings["bonusCoef"] = value }
-        if let value = Double(contributionBaseText) { settings["contributionBase"] = value }
+        if let base = derivedBase { settings["contributionBase"] = base }
         settings["position"] = position
         if let value = Double(utilitiesText) { settings["utilities"] = value }
         do {

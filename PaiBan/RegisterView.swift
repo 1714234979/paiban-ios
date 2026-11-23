@@ -27,7 +27,7 @@ struct RegisterView: View {
                     .padding(.top, 16)
 
                     VStack(spacing: 16) {
-                        TextField("账号（不能含空格或冒号，最多 32 字）", text: $username)
+                        TextField("账号名（就是你的名字，可以用中文，最多 32 字）", text: $username)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .textFieldStyle(.roundedBorder)

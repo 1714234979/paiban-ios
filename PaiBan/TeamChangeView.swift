@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 永久换班（不是单日调班）：选新班组 + 生效日，从生效日零点起排班按新班组算，工资也跟着变。
+/// 更换班组（不是单日调班）：选新班组 + 生效日，从生效日零点起排班按新班组算，工资也跟着变。
 /// 历史可多条、可删（至少保留一条）。走 POST / DELETE /api/v1/me/team-history。
 struct TeamChangeView: View {
     @EnvironmentObject private var store: AppStore
@@ -73,7 +73,7 @@ struct TeamChangeView: View {
                 }
             }
         }
-        .navigationTitle("永久换班")
+        .navigationTitle("更换班组")
         .navigationBarTitleDisplayMode(.inline)
         .task {
             await loadHistory()
@@ -103,8 +103,8 @@ struct TeamChangeView: View {
             )
             doneMessage = "已保存：从 \(DateUtil.string(from: effectiveFrom)) 起按 \(newTeam)班排班"
             await store.refreshMonth()
+            await store.refreshPayInputs()
             await store.refreshPay()
-            await store.refreshToday()
         } catch {
             errorText = (error as? APIError)?.message ?? error.localizedDescription
         }
@@ -127,6 +127,7 @@ struct TeamChangeView: View {
             }
         }
         await store.refreshMonth()
+        await store.refreshPayInputs()
         await store.refreshPay()
     }
 

@@ -1,28 +1,16 @@
 import SwiftUI
 
-/// 工资页：月份步进（默认上个月），全部数字取自服务端 GET /me/pay，
-/// 客户端不重算公式。另有全年视图（GET /me/pay/year）。
+/// 预估工资页：月份步进（默认上个月），只按月看（全年视图已删）。
+/// 数字在手机本地算（服务端只给排班与工资配置原始数据），切月秒出。
 struct PayView: View {
     @EnvironmentObject private var store: AppStore
-
-    @State private var mode = 0 // 0 月度，1 全年
 
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
                 headerCard
-                Picker("视图", selection: $mode) {
-                    Text("月度").tag(0)
-                    Text("全年").tag(1)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 16)
                 monthStepper
-                if mode == 0 {
-                    monthBreakdown
-                } else {
-                    yearBreakdown
-                }
+                monthBreakdown
                 noteCard
             }
             .padding(.bottom, 24)
@@ -35,19 +23,14 @@ struct PayView: View {
         }
         .onChange(of: store.payYearMonth.year) { _ in Task { await store.refreshPay() } }
         .onChange(of: store.payYearMonth.month) { _ in Task { await store.refreshPay() } }
-        .onChange(of: mode) { newMode in
-            if newMode == 1 {
-                Task { await store.refreshPayYear() }
-            }
-        }
     }
 
     private var headerCard: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("工资奖金")
+            Text("预估工资")
                 .font(.title2).bold()
                 .foregroundColor(.white)
-            Text("数字以服务端计算为准")
+            Text("本地计算，仅供参考")
                 .font(.subheadline)
                 .foregroundColor(.white.opacity(0.75))
             if store.isOffline {
@@ -137,7 +120,7 @@ struct PayView: View {
                 ])
                 paySection(title: "出勤", rows: [
                     ("当月应出勤", pay.basicDays.map { "\($0) 天" } ?? "—"),
-                    ("实际出勤", pay.attendance.map { "\($0) 天" } ?? "—"),
+                    ("实际出勤", attendanceText(pay.attendance)),
                     ("日班 / 早班 / 中班", "\(MoneyUtil.int(pay.counts?.day)) / \(MoneyUtil.int(pay.counts?.early)) / \(MoneyUtil.int(pay.counts?.mid)) 个"),
                     ("请假", pay.leaveDays.map { "\($0) 天" } ?? "—"),
                     ("年假剩余", pay.annualLeaveRemaining.map { "\($0) 天（全年 \(pay.annualLeaveTotal ?? 5) 天，已用 \(pay.annualLeaveYearUsed ?? 0) 天）" } ?? "—"),
@@ -194,51 +177,11 @@ struct PayView: View {
         .padding(.horizontal, 16)
     }
 
-    // MARK: 全年视图
-
-    @ViewBuilder
-    private var yearBreakdown: some View {
-        if let yearData = store.payYearData, let months = yearData.months {
-            VStack(spacing: 8) {
-                ForEach(months, id: \.month) { month in
-                    Button {
-                        store.payYearMonth = (month.year ?? store.payYearMonth.year, month.month ?? 1)
-                        mode = 0
-                    } label: {
-                        HStack {
-                            Text("\(month.month ?? 0)月")
-                                .bold()
-                            Spacer()
-                            VStack(alignment: .trailing, spacing: 2) {
-                                Text("合计 \(MoneyUtil.money(month.grandTotal))")
-                                Text("工资 \(MoneyUtil.money(month.salaryNet)) · 奖金 \(MoneyUtil.money(month.bonusAfterTax))")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        .font(.subheadline)
-                        .padding(12)
-                        .background(Color(.systemBackground))
-                        .cornerRadius(10)
-                    }
-                    .buttonStyle(.plain)
-                }
-                let yearTotal = months.compactMap(\.grandTotal).reduce(0, +)
-                HStack {
-                    Text("全年合计").bold()
-                    Spacer()
-                    Text(MoneyUtil.money(yearTotal)).bold()
-                }
-                .font(.subheadline)
-                .padding(12)
-                .background(Color(.systemBackground))
-                .cornerRadius(10)
-            }
-            .padding(.horizontal, 16)
-        } else {
-            ProgressView("正在加载全年数据…")
-                .padding()
-        }
+    /// 实际出勤可能是小数（如录入的 23.4、24.31）：整数按整数显示，小数保留 1 位。
+    private func attendanceText(_ value: Double?) -> String {
+        guard let value else { return "—" }
+        if value == value.rounded() { return "\(Int(value)) 天" }
+        return String(format: "%.1f 天", value)
     }
 
     private var noteCard: some View {

@@ -7,9 +7,14 @@ struct CalendarView: View {
 
     @State private var selectedDay: DaySchedule?
     @State private var showDayDetail = false
+    // 滑页的页码 = 月份绝对序号（年*12 + 月-1），2026年11月 = 24322。
+    // 用原生 TabView 分页滑，切月跟着手指走、左右月预渲染，不再整格闪白重画。
+    @State private var pageIndex: Int = CalendarView.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
+    // 滑页范围 2024-01 ~ 2030-12（84 页），日常用够了，到边就停。
+    private let pageRange = (2024 * 12)..<(2031 * 12)
 
-    private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
-    private let weekdayTitles = ["日", "一", "二", "三", "四", "五", "六"]
+    static func monthIndex(year: Int, month: Int) -> Int { year * 12 + (month - 1) }
+    private func yearMonth(from index: Int) -> (year: Int, month: Int) { (index / 12, index % 12 + 1) }
 
     var body: some View {
         ScrollView {
@@ -17,7 +22,7 @@ struct CalendarView: View {
                 headerCard
                 teamSwitcher
                 monthNavigator
-                calendarGrid
+                monthPager
                 summaryLine
                 recordsSection
             }
@@ -26,12 +31,24 @@ struct CalendarView: View {
         }
         .background(Color(.systemGroupedBackground))
         .task {
+            // 进页先对齐到 Store 正在看的月（恢复的缓存可能是别的月）。
+            let ym = store.currentYearMonth
+            pageIndex = Self.monthIndex(year: ym.year, month: ym.month)
             if store.month == nil {
                 await store.refreshMonth()
             }
         }
-        .onChange(of: store.currentMonth) { _ in
-            Task { await store.refreshMonth() }
+        // 滑到哪页，Store 就跟到哪月（汇总、调班/请假记录都跟着走），并预取前后月。
+        .onChange(of: pageIndex) { newIndex in
+            let ym = yearMonth(from: newIndex)
+            store.setCurrentMonth(year: ym.year, month: ym.month)
+            Task {
+                await store.refreshMonth()
+                let next = yearMonth(from: newIndex + 1)
+                let prev = yearMonth(from: newIndex - 1)
+                store.prefetchMonth(year: next.year, month: next.month)
+                store.prefetchMonth(year: prev.year, month: prev.month)
+            }
         }
         .onChange(of: store.viewTeam) { _ in
             Task { await store.refreshMonth() }
@@ -45,24 +62,43 @@ struct CalendarView: View {
 
     // MARK: 头部
 
+    /// 顶栏黑框：今天的年月日、周几、什么班（切到别的月份也照样显示今天）。
     private var headerCard: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("排班空间")
+            Text(todayDateLine)
                 .font(.title2).bold()
                 .foregroundColor(.white)
-            Text("603车间 · 8天一轮倒班")
+            Text(todayShiftLine)
                 .font(.subheadline)
                 .foregroundColor(.white.opacity(0.75))
-            if store.isOffline {
-                Label("离线缓存", systemImage: "wifi.slash")
-                    .font(.caption)
-                    .foregroundColor(.yellow)
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .background(Color(red: 0.11, green: 0.15, blue: 0.23))
         .cornerRadius(16)
+    }
+
+    /// 今天的年月日 + 周几，如“2026年11月24日 星期二”。
+    private var todayDateLine: String {
+        let today = Date()
+        let ym = DateUtil.yearMonth(of: today)
+        let day = DateUtil.calendar.component(.day, from: today)
+        return "\(ym.year)年\(ym.month)月\(day)日 \(DateUtil.weekdayCN(of: today))"
+    }
+
+    /// 今天什么班，如“中班 16:00–24:00”；双班写“早班 + 中班 …”；休息写“休息”；请假写“请假（年假）”。
+    private var todayShiftLine: String {
+        guard let day = store.todaySchedule else { return "—" }
+        if day.onLeave == true {
+            let t = day.leaveType ?? ""
+            return t.isEmpty ? "请假" : "请假（\(t)）"
+        }
+        if day.isRest { return "休息" }
+        let parts = ShiftStyle.parts(of: day.shift)
+        if parts.count > 1 {
+            return parts.joined(separator: " + ") + " " + day.displayTime
+        }
+        return "\(day.shift) \(day.displayTime)"
     }
 
     private var teamSwitcher: some View {
@@ -85,17 +121,23 @@ struct CalendarView: View {
 
     private var monthNavigator: some View {
         HStack {
-            Button { store.moveMonth(by: -1) } label: {
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    pageIndex = max(pageRange.lowerBound, pageIndex - 1)
+                }
+            } label: {
                 Image(systemName: "chevron.left")
                     .frame(width: 36, height: 36)
                     .background(Color(.systemBackground))
                     .clipShape(Circle())
             }
             Spacer()
-            Text(DateUtil.monthFormatter.string(from: store.currentMonth))
+            Text(pagerTitle)
                 .font(.title3).bold()
             Button {
-                store.goToTodayMonth()
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    pageIndex = Self.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
+                }
             } label: {
                 Text("今天")
                     .font(.subheadline)
@@ -105,7 +147,11 @@ struct CalendarView: View {
                     .cornerRadius(14)
             }
             Spacer()
-            Button { store.moveMonth(by: 1) } label: {
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    pageIndex = min(pageRange.upperBound - 1, pageIndex + 1)
+                }
+            } label: {
                 Image(systemName: "chevron.right")
                     .frame(width: 36, height: 36)
                     .background(Color(.systemBackground))
@@ -114,41 +160,33 @@ struct CalendarView: View {
         }
     }
 
-    // MARK: 日历网格
+    /// 当前页的标题，如“2027年2月”（跟着滑页走，不用等网络）。
+    private var pagerTitle: String {
+        let ym = yearMonth(from: pageIndex)
+        return "\(ym.year)年\(ym.month)月"
+    }
 
-    private var calendarGrid: some View {
+    // MARK: 日历滑页（原生分页，跟着手指走）
+
+    private var monthPager: some View {
         VStack(spacing: 4) {
-            HStack(spacing: 4) {
-                ForEach(weekdayTitles, id: \.self) { title in
-                    Text(title)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            LazyVGrid(columns: columns, spacing: 4) {
-                ForEach(blankCells, id: \.self) { _ in
-                    Color.clear
-                        .frame(height: cellHeight)
-                }
-                ForEach(store.month?.days ?? [], id: \.date) { day in
-                    DayCell(day: day, isToday: isToday(day), isSelected: selectedDay?.date == day.date)
-                        .onTapGesture {
+            TabView(selection: $pageIndex) {
+                ForEach(pageRange, id: \.self) { idx in
+                    let ym = yearMonth(from: idx)
+                    MonthPageView(
+                        year: ym.year, month: ym.month,
+                        isSelected: { selectedDay?.date == $0 },
+                        onSelectDay: { day in
                             selectedDay = day
                             showDayDetail = true
                         }
+                    )
+                    .tag(idx)
                 }
             }
-            .gesture(
-                DragGesture(minimumDistance: 30)
-                    .onEnded { value in
-                        if value.translation.width < -50 {
-                            store.moveMonth(by: 1)
-                        } else if value.translation.width > 50 {
-                            store.moveMonth(by: -1)
-                        }
-                    }
-            )
+            .tabViewStyle(.page(indexDisplayMode: .never))
+            .frame(height: pagerHeight)
+            .animation(.easeInOut(duration: 0.25), value: pagerHeight)
             if store.isLoadingMonth {
                 ProgressView("正在加载…")
                     .padding(.top, 8)
@@ -167,21 +205,31 @@ struct CalendarView: View {
     /// 日期格总高：日期行 + 28pt pill + 节假日名行，保持每格等高。
     private var cellHeight: CGFloat { 26 + 28 + 14 + 6 }
 
-    private var blankCells: [Int] {
-        let ym = store.currentYearMonth
-        let count = DateUtil.firstWeekday(year: ym.year, month: ym.month)
-        return Array(0..<count)
+    /// 当前页的网格高度：周标题行 + 各周行高，随月份周数变（4–6 周），滑页时跟着动。
+    private var pagerHeight: CGFloat {
+        let ym = yearMonth(from: pageIndex)
+        let weeks = numberOfWeeks(year: ym.year, month: ym.month)
+        let header: CGFloat = 18 + 4
+        return header + CGFloat(weeks) * cellHeight + CGFloat(max(weeks - 1, 0)) * 4
     }
 
-    private func isToday(_ day: DaySchedule) -> Bool {
-        day.date == DateUtil.string(from: Date())
+    private func numberOfWeeks(year: Int, month: Int) -> Int {
+        let first = DateUtil.firstWeekday(year: year, month: month)
+        let days = DateUtil.daysInMonth(year: year, month: month)
+        return Int(ceil(Double(first + days) / 7.0))
+    }
+
+    /// 汇总与记录看的月份：直接取当前页那份（缓存或本地算，秒出，不等网络）。
+    private var displayedMonth: MonthSchedule? {
+        let ym = store.currentYearMonth
+        return store.monthFor(year: ym.year, month: ym.month)
     }
 
     // MARK: 月度汇总
 
     private var summaryLine: some View {
         Group {
-            if let stats = store.month?.stats {
+            if let stats = displayedMonth?.stats {
                 Text("当月应出勤 \(MoneyUtil.int(stats.basicDays)) 天 · 实际出勤 \(MoneyUtil.int(stats.actualShifts)) 个班 · 双班 \(MoneyUtil.int(stats.doubleDays)) 天 · 请假 \(MoneyUtil.int(stats.leaveDays)) 天 · 休息 \(MoneyUtil.int(stats.restDays)) 天")
                     .font(.subheadline)
                     .multilineTextAlignment(.center)
@@ -302,6 +350,53 @@ struct CalendarView: View {
             }
         }
         .padding(.vertical, 4)
+    }
+}
+
+// MARK: - 一页月历
+
+/// 滑页里的一页：只画某年某月的网格。数据走 store.monthFor——有缓存用缓存，
+/// 没缓存先按本地 8 天一轮算顶上（秒出、不闪白），真数据到了页面自己刷新。
+struct MonthPageView: View {
+    @EnvironmentObject private var store: AppStore
+    let year: Int
+    let month: Int
+    let isSelected: (String) -> Bool
+    let onSelectDay: (DaySchedule) -> Void
+
+    private let columns = Array(repeating: GridItem(.flexible(), spacing: 4), count: 7)
+    private let weekdayTitles = ["日", "一", "二", "三", "四", "五", "六"]
+    private var cellHeight: CGFloat { 26 + 28 + 14 + 6 }
+
+    var body: some View {
+        VStack(spacing: 4) {
+            HStack(spacing: 4) {
+                ForEach(weekdayTitles, id: \.self) { title in
+                    Text(title)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity)
+                }
+            }
+            LazyVGrid(columns: columns, spacing: 4) {
+                ForEach(blankCells, id: \.self) { _ in
+                    Color.clear
+                        .frame(height: cellHeight)
+                }
+                ForEach(monthData.days ?? [], id: \.date) { day in
+                    DayCell(day: day, isToday: day.date == DateUtil.string(from: Date()), isSelected: isSelected(day.date))
+                        .onTapGesture { onSelectDay(day) }
+                }
+            }
+        }
+    }
+
+    private var monthData: MonthSchedule {
+        store.monthFor(year: year, month: month)
+    }
+
+    private var blankCells: [Int] {
+        Array(0..<DateUtil.firstWeekday(year: year, month: month))
     }
 }
 

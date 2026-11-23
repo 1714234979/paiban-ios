@@ -71,11 +71,12 @@ enum ServerConfig {
         return nil
     }
 
-    /// 探一个地址的 /health，200 即为可达。3 秒超时。
+    /// 探一个地址的 /health，200 即为可达。10 秒超时：
+    /// 公网隧道首启常要 DNS + TLS 握手，3 秒太紧、手机 5G 下容易误判连不上。
     static func probe(baseURL: String) async -> Bool {
         guard let url = URL(string: baseURL + "/health") else { return false }
         var request = URLRequest(url: url)
-        request.timeoutInterval = 3
+        request.timeoutInterval = 10
         request.httpMethod = "GET"
         do {
             let (_, response) = try await URLSession.shared.data(for: request)

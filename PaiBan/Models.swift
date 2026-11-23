@@ -57,6 +57,11 @@ enum DateUtil {
         return range.count
     }
 
+    /// 是不是闰年（全年天数 366 还是 365）。
+    static func isLeapYear(_ year: Int) -> Bool {
+        (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+    }
+
     /// 当月 1 号是星期几（0=周日 … 6=周六），日历从周日开始排。
     static func firstWeekday(year: Int, month: Int) -> Int {
         guard let first = firstDayOfMonth(year: year, month: month) else { return 0 }
@@ -350,7 +355,7 @@ struct PaySettings: Codable, Equatable {
     var annualLeaveTotal: Int?
 }
 
-/// 永久换班记录：从 effectiveFrom 起按 team 排班。
+/// 更换班组记录：从 effectiveFrom 起按 team 排班。
 struct TeamHistoryEntry: Codable, Equatable, Identifiable {
     var team: String
     var effectiveFrom: String
@@ -433,8 +438,13 @@ struct MonthSchedule: Codable, Equatable {
     }
 }
 
-/// GET /api/v1/me/range 返回：连续若干天的 day 对象数组。
-typealias DayRange = [DaySchedule]
+/// GET /api/v1/me/range 返回：{team, start, days:[DaySchedule]}。
+/// （服务端返回的是对象不是数组，旧版按数组解会一直失败、走兜底。）
+struct RangeResponse: Decodable {
+    var team: String?
+    var start: String?
+    var days: [DaySchedule]?
+}
 
 // MARK: - 调班 / 请假记录
 
@@ -467,93 +477,125 @@ struct TripleDate: Codable, Equatable {
 
 // MARK: - 工资
 
-/// GET /api/v1/me/pay 返回的单月工资奖金（服务端算好，客户端只展示不重算）。
+/// GET /api/v1/config 返回的工资配置（pay 一节）：本地算工资的输入。
+/// 全部可选，缺失时用与服务端一致的默认值。
+struct PayGlobalSettings: Codable, Equatable {
+    var annualLeaveTotal: Int? = nil
+    var annualLeaveUsedOffset: [String: Int]?
+    var baseSalary: Double? = nil
+    var contributionBase: Double? = nil
+    var deptPerfDefault: Double? = nil
+    var earlyRate: Double? = nil
+    var heatMonthly: Double? = nil
+    var hireMonth: Int? = nil
+    var hireYear: Int? = nil
+    var mealRate: Double? = nil
+    var midRate: Double? = nil
+    var otherRewardFull: Double? = nil
+    var perfCoefDefault: Double? = nil
+    var seniorityPerYear: Double? = nil
+    var utilities: Double? = nil
+}
+
+/// 某月录入数（config.pay.months[monthKey]）：attendance / allowance / deptPerf /
+/// perfCoef / tripleDays / overtimeDays，缺失即按排班表算。
+struct PayMonthRecord: Codable, Equatable {
+    var attendance: Double? = nil
+    var allowance: Double? = nil
+    var deptPerf: Double? = nil
+    var perfCoef: Double? = nil
+    var tripleDays: Double? = nil
+    var overtimeDays: Double? = nil
+}
+
+/// 按月生效的设置（config.pay.effective[monthKey]）：baseSalary / position / bonusCoef。
+struct PayEffective: Codable, Equatable {
+    var baseSalary: Double? = nil
+    var position: String? = nil
+    var bonusCoef: Double? = nil
+}
+
+/// GET /api/v1/config 的 pay 一节。
+struct PayConfigData: Codable, Equatable {
+    var settings: PayGlobalSettings? = nil
+    var months: [String: PayMonthRecord]?
+    var effective: [String: PayEffective]?
+}
+
+/// GET /api/v1/config 返回的 data（只解 pay 一节，其余字段忽略）。
+struct ServerConfigData: Decodable {
+    var pay: PayConfigData?
+}
+
+/// 单月工资奖金（服务端 /me/pay 返回与本地 PayCalc 算出同形）。
 /// 字段名与服务端 monthPay / computePay 返回一致；全部可选以兼容字段缺失。
+/// 注意 attendance 是 Double：录入的实际出勤可能是小数（如 23.4、24.31）。
 struct PayMonth: Codable, Equatable {
-    var year: Int?
-    var month: Int?
-    var monthKey: String?
-    var baseSalary: Double?
-    var position: String?
-    var bonusCoef: Double?
-    var basicDays: Int?
-    var rosterTotalWork: Int?
-    var rosterWork: Int?
-    var attendance: Int?
-    var attendanceRecorded: Bool?
-    var counts: ShiftCounts?
-    var allowance: Double?
-    var allowanceAuto: Double?
-    var allowanceRecorded: Bool?
-    var deptPerf: Double?
-    var deptPerfRecorded: Bool?
-    var perfCoef: Double?
-    var otherReward: Double?
-    var otherRewardFull: Bool?
-    var heat: Double?
-    var heatNote: String?
-    var seniority: Double?
-    var salarySubtotal: Double?
-    var contributionBase: Double?
-    var pension: Double?
-    var medical: Double?
-    var unemployment: Double?
-    var socialInsurance: Double?
-    var housingFund: Double?
-    var contributionTotal: Double?
-    var salaryPayable: Double?
-    var utilities: Double?
-    var salaryNet: Double?
-    var tripleDates: [TripleDate]?
-    var tripleDays: Double?
-    var triplePay: Double?
-    var tripleRecorded: Bool?
-    var convertedTripleDays: Double?
-    var overtimeDays: Double?
-    var overtimePay: Double?
-    var overtimePayPart: Double?
-    var overtimeRecorded: Bool?
-    var bonusTotal: Double?
-    var leaveDays: Int?
-    var excessDays: Int?
-    var mealAllowance: Double?
-    var dailyRate: Double?
-    var annualLeaveTotal: Int?
-    var annualLeaveYearUsed: Int?
-    var annualLeaveRemaining: Int?
-    var annualLeaveMonth: Int?
-    var annualLeaveApplied: Bool?
-    var annualLeaveOffsetUsed: Int?
+    var year: Int? = nil
+    var month: Int? = nil
+    var monthKey: String? = nil
+    var baseSalary: Double? = nil
+    var position: String? = nil
+    var bonusCoef: Double? = nil
+    var basicDays: Int? = nil
+    var rosterTotalWork: Int? = nil
+    var rosterWork: Int? = nil
+    var attendance: Double? = nil
+    var attendanceRecorded: Bool? = nil
+    var counts: ShiftCounts? = nil
+    var allowance: Double? = nil
+    var allowanceAuto: Double? = nil
+    var allowanceRecorded: Bool? = nil
+    var deptPerf: Double? = nil
+    var deptPerfRecorded: Bool? = nil
+    var perfCoef: Double? = nil
+    var otherReward: Double? = nil
+    var otherRewardFull: Bool? = nil
+    var heat: Double? = nil
+    var heatNote: String? = nil
+    var seniority: Double? = nil
+    var salarySubtotal: Double? = nil
+    var contributionBase: Double? = nil
+    var pension: Double? = nil
+    var medical: Double? = nil
+    var unemployment: Double? = nil
+    var socialInsurance: Double? = nil
+    var housingFund: Double? = nil
+    var contributionTotal: Double? = nil
+    var salaryPayable: Double? = nil
+    var utilities: Double? = nil
+    var salaryNet: Double? = nil
+    var tripleDates: [TripleDate]? = nil
+    var tripleDays: Double? = nil
+    var triplePay: Double? = nil
+    var tripleRecorded: Bool? = nil
+    var convertedTripleDays: Double? = nil
+    var overtimeDays: Double? = nil
+    var overtimePay: Double? = nil
+    var overtimePayPart: Double? = nil
+    var overtimeRecorded: Bool? = nil
+    var bonusTotal: Double? = nil
+    var leaveDays: Int? = nil
+    var excessDays: Int? = nil
+    var mealAllowance: Double? = nil
+    var dailyRate: Double? = nil
+    var annualLeaveTotal: Int? = nil
+    var annualLeaveYearUsed: Int? = nil
+    var annualLeaveRemaining: Int? = nil
+    var annualLeaveMonth: Int? = nil
+    var annualLeaveApplied: Bool? = nil
+    var annualLeaveOffsetUsed: Int? = nil
     // 累计预扣个税字段（computePay 追加）。
-    var cumulativeGross: Double?
-    var cumulativeContributions: Double?
-    var cumulativeMonths: Int?
-    var cumulativeTaxableIncome: Double?
-    var cumulativeTaxTotal: Double?
-    var previousCumulativeTaxTotal: Double?
-    var incomeTax: Double?
-    var bonusAfterTax: Double?
-    var grandTotal: Double?
-    var taxableIncome: Double?
+    var cumulativeGross: Double? = nil
+    var cumulativeContributions: Double? = nil
+    var cumulativeMonths: Int? = nil
+    var cumulativeTaxableIncome: Double? = nil
+    var cumulativeTaxTotal: Double? = nil
+    var previousCumulativeTaxTotal: Double? = nil
+    var incomeTax: Double? = nil
+    var bonusAfterTax: Double? = nil
+    var grandTotal: Double? = nil
+    var taxableIncome: Double? = nil
 }
 
-/// GET /api/v1/me/pay/year 返回：{year, months:[PayMonth × 12]}。
-struct PayYear: Codable, Equatable {
-    var year: Int?
-    var months: [PayMonth]?
-}
-
-// MARK: - 睡眠窗口
-
-/// GET /api/v1/me/quiet 返回。
-struct QuietInfo: Codable, Equatable {
-    var at: String?
-    var date: String?
-    var team: String?
-    var shiftToday: String?
-    var shiftTomorrow: String?
-    var quiet: Bool?
-    var canDisturb: Bool?
-    var status: String?
-    var reason: String?
-}
+/// 全年工资视图已删（预估工资只按月看），PayYear 与睡眠窗口 QuietInfo 一并移除。

@@ -1,5 +1,6 @@
 import Foundation
 import Security
+import UIKit
 
 // MARK: - 错误
 
@@ -159,6 +160,7 @@ final class APIClient {
         do {
             (data, response) = try await session.data(for: req)
         } catch {
+            AppLogger.shared.log("\(method) \(path) 联不上服务器", tag: "API")
             throw APIError.unreachable
         }
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -173,8 +175,12 @@ final class APIClient {
             } catch let apiError as APIError {
                 throw apiError
             } catch {
+                AppLogger.shared.log("\(method) \(path) Basic 重试也联不上服务器", tag: "API")
                 throw APIError.unreachable
             }
+        }
+        if status >= 400 {
+            AppLogger.shared.log("\(method) \(path) HTTP \(status)", tag: "API")
         }
         return try decodeEnvelope(data: data, status: status)
     }
@@ -185,6 +191,7 @@ final class APIClient {
             envelope = try decoder.decode(Envelope<T>.self, from: data)
         } catch {
             if status == 401 { throw APIError.notLoggedIn }
+            AppLogger.shared.log("解码失败（HTTP \(status)，\(data.count) 字节）", tag: "API")
             throw APIError(message: "服务器返回了看不懂的数据（HTTP \(status)）")
         }
         if envelope.ok, let value = envelope.data {
@@ -388,21 +395,39 @@ final class APIClient {
                           query: ["year": String(year), "month": String(month)])
     }
 
-    /// GET /api/v1/me/range?start=YYYY-MM-DD&days=N
-    func fetchRange(start: String, days: Int) async throws -> [DaySchedule] {
-        try await request(path: "/api/v1/me/range",
-                          query: ["start": start, "days": String(days)])
+    /// GET /api/v1/config —— 工资配置（pay 一节），本地算工资的输入。
+    /// 注意此接口要认证（无会话会 401，走 Basic 重试）；返回的 data 只取 pay。
+    func fetchPayConfig() async throws -> PayConfigData {
+        let resp: ServerConfigData = try await request(path: "/api/v1/config")
+        return resp.pay ?? PayConfigData()
     }
 
-    /// GET /api/v1/me/pay?year=&month= —— 工资奖金以服务端为准，客户端不重算。
+    /// POST /api/v1/me/feedback — 提交反馈：正文 + 最近 24 小时运行日志，服务端写到 NAS 的反馈文件夹。
+    func sendFeedback(message: String, logs: String) async throws {
+        let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
+        let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+        let device = "\(UIDevice.current.systemName) \(UIDevice.current.systemVersion) (\(UIDevice.current.model))"
+        let body: [String: Any] = [
+            "message": message,
+            "logs": logs,
+            "appVersion": "\(appVersion) (\(build))",
+            "device": device,
+        ]
+        try await requestNoData(path: "/api/v1/me/feedback", method: "POST", jsonBody: body)
+    }
+
+    /// GET /api/v1/me/range?start=YYYY-MM-DD&days=N —— 连续若干天的 day 对象。
+    /// 服务端返回 {team, start, days} 对象（旧版按数组解会一直失败、走兜底）。
+    func fetchRangeDays(start: String, days: Int) async throws -> [DaySchedule] {
+        let resp: RangeResponse = try await request(path: "/api/v1/me/range",
+                          query: ["start": start, "days": String(days)])
+        return resp.days ?? []
+    }
+
+    /// GET /api/v1/me/pay?year=&month= —— 仅作本地算的兜底（本地算不出时才走服务端）。
     func fetchPay(year: Int, month: Int) async throws -> PayMonth {
         try await request(path: "/api/v1/me/pay",
                           query: ["year": String(year), "month": String(month)])
-    }
-
-    /// GET /api/v1/me/pay/year?year= — data: {year, months:[PayMonth × 12]}。
-    func fetchPayYear(year: Int) async throws -> PayYear {
-        try await request(path: "/api/v1/me/pay/year", query: ["year": String(year)])
     }
 
     /// GET /api/v1/me/swaps?year=&month=
@@ -450,11 +475,6 @@ final class APIClient {
     /// DELETE /api/v1/me/leave?date=YYYY-MM-DD
     func deleteLeave(date: String) async throws {
         try await requestNoData(path: "/api/v1/me/leave", method: "DELETE", query: ["date": date])
-    }
-
-    /// GET /api/v1/me/quiet?at=YYYY-MM-DDTHH:MM
-    func fetchQuiet(at: String) async throws -> QuietInfo {
-        try await request(path: "/api/v1/me/quiet", query: ["at": at])
     }
 
     // MARK: 版本清单（公开接口，不用认证）

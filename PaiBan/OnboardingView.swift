@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// 新用户引导（注册后、onboardingDone=false 时只显示一次）：
-/// (1) 哪个班组 (2) 基本工资 (3) 奖金系数 (4) 社保缴费基数。
+/// (1) 哪个班组 (2) 基本工资 (3) 奖金系数 (4) 养老月扣 → 系统反推社保缴费基数。
 /// 每步都可跳过（用默认值），最后 PUT /me/profile 保存并标记 onboardingDone=true。
 struct OnboardingView: View {
     @EnvironmentObject private var store: AppStore
@@ -10,9 +10,16 @@ struct OnboardingView: View {
     @State private var team = "B"
     @State private var baseSalaryText = "2420"
     @State private var bonusCoef = 1.0
-    @State private var contributionBaseText = "5938"
+    @State private var pensionText = "475.04"
     @State private var errorText: String?
     @State private var isBusy = false
+
+    /// 养老月扣反推缴费基数：基数 = 养老月扣 ÷ 0.08（保留两位小数）。
+    /// 医疗 = 基数 × 2%、失业 = 基数 × 0.3%，当场算出来对照工资条。
+    private var derivedBase: Double? {
+        guard let pension = Double(pensionText.trimmingCharacters(in: .whitespaces)), pension > 0 else { return nil }
+        return PayCalc.round2(pension / 0.08)
+    }
 
     private let totalSteps = 4
 
@@ -162,25 +169,35 @@ struct OnboardingView: View {
 
     private var stepContributionBase: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("社保缴费基数")
+            Text("养老月扣")
                 .font(.title2).bold()
-            Text("用来算养老、医疗、失业和公积金的基数（元/月）。")
+            Text("直接输工资条上的养老月扣（元/月），系统自动反推社保缴费基数。")
                 .foregroundColor(.secondary)
-            TextField("缴费基数", text: $contributionBaseText)
+            TextField("养老月扣", text: $pensionText)
                 .keyboardType(.decimalPad)
                 .textFieldStyle(.roundedBorder)
                 .font(.title3)
-            VStack(alignment: .leading, spacing: 8) {
-                Text("不知道基数？看工资条：")
-                    .bold()
-                Text("养老月扣 ÷ 0.08 = 基数，再验算医疗 = 基数 × 2%、失业 = 基数 × 0.3%，都对上才算准；示例数字不能直接抄。")
+            if let base = derivedBase {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("算出来的数，对照工资条：")
+                        .bold()
+                    Text("社保缴费基数 \(PayCalc.jsNum(base)) 元/月")
+                    Text("医疗 \(MoneyUtil.money(PayCalc.round2(base * 0.02)))（基数 × 2%）")
+                    Text("失业 \(MoneyUtil.money(PayCalc.round2(base * 0.003)))（基数 × 0.3%）")
+                    Text("三项都和工资条对上才算准。")
+                        .foregroundColor(.secondary)
+                }
+                .font(.subheadline)
+                .padding(14)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.green.opacity(0.10))
+                .cornerRadius(12)
+            } else {
+                Text("输一个大于 0 的数，比如 475.04。")
+                    .font(.subheadline)
+                    .foregroundColor(.red)
             }
-            .font(.subheadline)
-            .padding(14)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.yellow.opacity(0.12))
-            .cornerRadius(12)
-            Text("默认 5938（养老 475.04、医疗 118.76、失业 17.81）。")
+            Text("不填就按默认 5938（养老 475.04、医疗 118.76、失业 17.81）。")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
@@ -207,7 +224,7 @@ struct OnboardingView: View {
         let settings: [String: Any] = [
             "baseSalary": parsedDouble(baseSalaryText, fallback: 2420),
             "bonusCoef": (bonusCoef * 10).rounded() / 10,
-            "contributionBase": parsedDouble(contributionBaseText, fallback: 5938),
+            "contributionBase": derivedBase ?? 5938,
         ]
         do {
             try await store.saveProfile(team: team, paySettings: settings, onboardingDone: true)

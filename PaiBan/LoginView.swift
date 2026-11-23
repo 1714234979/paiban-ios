@@ -60,7 +60,7 @@ struct LoginView: View {
 
     private var formCard: some View {
         VStack(spacing: 16) {
-            TextField("账号", text: $username)
+            TextField("账号（注册时的名字，可以用中文）", text: $username)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)
