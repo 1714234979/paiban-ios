@@ -16,6 +16,7 @@ struct DayDetailView: View {
     @State private var showSwapForm = false
     @State private var showLeaveForm = false
     @State private var showLeaveRangeForm = false
+    @State private var showOvertimeForm = false
 
     @State private var newShift = "日班"
     @State private var partnerTeam = ""
@@ -27,7 +28,11 @@ struct DayDetailView: View {
     @State private var rangeStart = Date()
     @State private var rangeEnd = Date()
 
-    @State private var isBusy = false
+    /// 记加班：开始 / 结束时间（DatePicker 只取时分），时长当场算出来。
+    @State private var overtimeStart = Calendar.current.date(bySettingHour: 16, minute: 0, second: 0, of: Date()) ?? Date()
+    @State private var overtimeEnd = Calendar.current.date(bySettingHour: 20, minute: 0, second: 0, of: Date()) ?? Date()
+    @State private var overtimeNote = ""
+
     @State private var errorText: String?
     @State private var doneMessage: String?
 
@@ -54,6 +59,7 @@ struct DayDetailView: View {
                     if showSwapForm { swapForm }
                     if showLeaveForm { leaveForm }
                     if showLeaveRangeForm { leaveRangeForm }
+                    if showOvertimeForm { overtimeForm }
                 }
                 .padding(20)
             }
@@ -105,6 +111,9 @@ struct DayDetailView: View {
             if shownDay.onLeave == true {
                 row("请假", (shownDay.leaveType ?? "请假") + (shownDay.leaveNote.map { " · \($0)" } ?? ""))
             }
+            if let ot = store.overtime(for: shownDay.date) {
+                row("加班", "\(ot.start)–\(ot.end)（\(ot.durationText)）" + (ot.note.map { " · \($0)" } ?? ""))
+            }
             if shownDay.overridden == true {
                 row("已调班", (shownDay.note ?? "调班"))
                 if let partner = shownDay.partner, !partner.isEmpty {
@@ -136,57 +145,131 @@ struct DayDetailView: View {
     }
 
     private var banHint: some View {
-        Text("连班禁令：① 中班接次日早班不行；② 一天不能上两个相同的班（早班 + 日班不行）。违反时服务端会拒绝并提示原因。")
+        Text("连班禁令：中班接次日早班不行；一天不能上两个相同的班。")
             .font(.caption)
             .foregroundColor(.secondary)
-            .padding(12)
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color.yellow.opacity(0.10))
             .cornerRadius(10)
     }
 
     // MARK: 操作
 
+    /// 四个操作并排两列（调班 / 请假 / 请一段假 / 记加班），一次只开一个表单；
+    /// 取消类操作单独放一行红色文字按钮，不跟主操作抢位置。
     private var actionButtons: some View {
-        VStack(spacing: 10) {
-            Button("调班") {
-                newShift = shownDay.shift
-                showSwapForm.toggle()
-                showLeaveForm = false
-                showLeaveRangeForm = false
+        VStack(spacing: 12) {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
+                Button("调班") {
+                    newShift = shownDay.shift
+                    showSwapForm.toggle()
+                    showLeaveForm = false
+                    showLeaveRangeForm = false
+                    showOvertimeForm = false
+                }
+                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity)
+                Button("请假") {
+                    showLeaveForm.toggle()
+                    showSwapForm = false
+                    showLeaveRangeForm = false
+                    showOvertimeForm = false
+                }
+                .buttonStyle(.bordered)
+                .frame(maxWidth: .infinity)
+                Button("请一段假") {
+                    rangeStart = DateUtil.date(from: shownDay.date) ?? Date()
+                    rangeEnd = rangeStart
+                    showLeaveRangeForm.toggle()
+                    showSwapForm = false
+                    showLeaveForm = false
+                    showOvertimeForm = false
+                }
+                .buttonStyle(.bordered)
+                .frame(maxWidth: .infinity)
+                Button("记加班") {
+                    if let ot = store.overtime(for: shownDay.date) {
+                        overtimeStart = timeDate(ot.start) ?? overtimeStart
+                        overtimeEnd = timeDate(ot.end) ?? overtimeEnd
+                        overtimeNote = ot.note ?? ""
+                    }
+                    showOvertimeForm.toggle()
+                    showSwapForm = false
+                    showLeaveForm = false
+                    showLeaveRangeForm = false
+                }
+                .buttonStyle(.bordered)
+                .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.borderedProminent)
-            .frame(maxWidth: .infinity)
-            Button("请假") {
-                showLeaveForm.toggle()
-                showSwapForm = false
-                showLeaveRangeForm = false
-            }
-            .buttonStyle(.bordered)
-            .frame(maxWidth: .infinity)
-            Button("请一段假") {
-                rangeStart = DateUtil.date(from: shownDay.date) ?? Date()
-                rangeEnd = rangeStart
-                showLeaveRangeForm.toggle()
-                showSwapForm = false
-                showLeaveForm = false
-            }
-            .buttonStyle(.bordered)
-            .frame(maxWidth: .infinity)
-            if shownDay.overridden == true {
-                Button("取消调班") { Task { await cancelOverride() } }
-                    .buttonStyle(.bordered)
-                    .tint(.red)
-                    .frame(maxWidth: .infinity)
-                    .disabled(isBusy)
-            }
-            if shownDay.onLeave == true {
-                Button("取消请假") { Task { await cancelLeave() } }
-                    .buttonStyle(.bordered)
-                    .tint(.red)
-                    .frame(maxWidth: .infinity)
-                    .disabled(isBusy)
+            if shownDay.overridden == true || shownDay.onLeave == true || store.overtime(for: shownDay.date) != nil {
+                HStack(spacing: 20) {
+                    if shownDay.overridden == true {
+                        Button("取消调班") { Task { await cancelOverride() } }
+                            .foregroundColor(.red)
+                            
+                    }
+                    if shownDay.onLeave == true {
+                        Button("取消请假") { Task { await cancelLeave() } }
+                            .foregroundColor(.red)
+                            
+                    }
+                    if store.overtime(for: shownDay.date) != nil {
+                        Button("删除加班") { Task { await deleteOvertime() } }
+                            .foregroundColor(.red)
+                            
+                    }
+                }
+                .font(.subheadline)
             }
         }
+    }
+
+    /// "HH:MM" 转成今天那个时间的 Date（只取时分，供 DatePicker 用）。
+    private func timeDate(_ hhmm: String) -> Date? {
+        let p = hhmm.split(separator: ":").compactMap { Int($0) }
+        guard p.count == 2 else { return nil }
+        return Calendar.current.date(bySettingHour: p[0], minute: p[1], second: 0, of: Date())
+    }
+
+    /// 记加班表单：开始 / 结束时间 + 当场算出的时长，跨夜自动加 24 小时。
+    private var overtimeForm: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("记加班")
+                .font(.headline)
+            DatePicker("开始", selection: $overtimeStart, displayedComponents: .hourAndMinute)
+            DatePicker("结束", selection: $overtimeEnd, displayedComponents: .hourAndMinute)
+            HStack {
+                Text("时长")
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text(overtimeDurationText)
+                    .font(.headline)
+                    .foregroundColor(.blue)
+            }
+            Text("结束比开始早算跨夜（比如 22:00 到 02:00 是 4 小时）。")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            TextField("备注（可选）", text: $overtimeNote)
+                .textFieldStyle(.roundedBorder)
+            Button("确认加班") { Task { await submitOvertime() } }
+                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity)
+                
+        }
+        .padding(14)
+        .background(Color(.secondarySystemBackground))
+        .cornerRadius(12)
+    }
+
+    /// 表单里当场算出的时长（跟服务端同一规则）。
+    private var overtimeDurationText: String {
+        let fmt = DateFormatter()
+        fmt.dateFormat = "HH:mm"
+        let start = fmt.string(from: overtimeStart)
+        let end = fmt.string(from: overtimeEnd)
+        if start == end { return "开始和结束不能一样" }
+        return OvertimeCalc.text(minutes: OvertimeCalc.minutes(start: start, end: end))
     }
 
     private var swapForm: some View {
@@ -227,7 +310,7 @@ struct DayDetailView: View {
             Button("确认调班") { Task { await submitSwap() } }
                 .buttonStyle(.borderedProminent)
                 .frame(maxWidth: .infinity)
-                .disabled(isBusy)
+                
         }
         .padding(14)
         .background(Color(.secondarySystemBackground))
@@ -249,7 +332,7 @@ struct DayDetailView: View {
             Button("确认请假") { Task { await submitLeave() } }
                 .buttonStyle(.borderedProminent)
                 .frame(maxWidth: .infinity)
-                .disabled(isBusy)
+                
         }
         .padding(14)
         .background(Color(.secondarySystemBackground))
@@ -273,7 +356,7 @@ struct DayDetailView: View {
             Button("确认请假") { Task { await submitLeaveRange() } }
                 .buttonStyle(.borderedProminent)
                 .frame(maxWidth: .infinity)
-                .disabled(isBusy)
+                
         }
         .padding(14)
         .background(Color(.secondarySystemBackground))
@@ -282,36 +365,26 @@ struct DayDetailView: View {
 
     // MARK: 提交
 
+    // 提交都是乐观更新：本地先改好、立刻显示“已保存”，后台再静默同步到服务端。
+    // 同步失败会刷回来回滚，错误写进 store.errorMessage。
     private func submitSwap() async {
         errorText = nil
         doneMessage = nil
-        isBusy = true
-        defer { isBusy = false }
-        do {
-            try await store.submitOverride(date: shownDay.date, shift: newShift,
-                                           note: swapNote.isEmpty ? nil : swapNote,
-                                           partner: partnerTeam.isEmpty ? nil : partnerTeam,
-                                           partnerShift: partnerShift.isEmpty ? nil : partnerShift)
-            doneMessage = "调班已保存"
-            showSwapForm = false
-        } catch {
-            errorText = (error as? APIError)?.message ?? error.localizedDescription
-        }
+        await store.submitOverride(date: shownDay.date, shift: newShift,
+                                   note: swapNote.isEmpty ? nil : swapNote,
+                                   partner: partnerTeam.isEmpty ? nil : partnerTeam,
+                                   partnerShift: partnerShift.isEmpty ? nil : partnerShift)
+        doneMessage = "调班已保存"
+        showSwapForm = false
     }
 
     private func submitLeave() async {
         errorText = nil
         doneMessage = nil
-        isBusy = true
-        defer { isBusy = false }
-        do {
-            try await store.submitLeave(date: shownDay.date, type: leaveType,
-                                        note: leaveNote.isEmpty ? nil : leaveNote)
-            doneMessage = "请假已保存"
-            showLeaveForm = false
-        } catch {
-            errorText = (error as? APIError)?.message ?? error.localizedDescription
-        }
+        await store.submitLeave(date: shownDay.date, type: leaveType,
+                                note: leaveNote.isEmpty ? nil : leaveNote)
+        doneMessage = "请假已保存"
+        showLeaveForm = false
     }
 
     private func submitLeaveRange() async {
@@ -321,43 +394,49 @@ struct DayDetailView: View {
             errorText = "结束日期不能早于开始日期"
             return
         }
-        isBusy = true
-        defer { isBusy = false }
-        do {
-            try await store.submitLeaveRange(start: DateUtil.string(from: rangeStart),
-                                             end: DateUtil.string(from: rangeEnd),
-                                             type: leaveType,
-                                             note: leaveNote.isEmpty ? nil : leaveNote)
-            doneMessage = "请假已保存"
-            showLeaveRangeForm = false
-        } catch {
-            errorText = (error as? APIError)?.message ?? error.localizedDescription
-        }
+        await store.submitLeaveRange(start: DateUtil.string(from: rangeStart),
+                                     end: DateUtil.string(from: rangeEnd),
+                                     type: leaveType,
+                                     note: leaveNote.isEmpty ? nil : leaveNote)
+        doneMessage = "请假已保存"
+        showLeaveRangeForm = false
     }
 
     private func cancelOverride() async {
         errorText = nil
         doneMessage = nil
-        isBusy = true
-        defer { isBusy = false }
-        do {
-            try await store.cancelOverride(date: shownDay.date)
-            doneMessage = "调班已取消"
-        } catch {
-            errorText = (error as? APIError)?.message ?? error.localizedDescription
-        }
+        await store.cancelOverride(date: shownDay.date)
+        doneMessage = "调班已取消"
     }
 
     private func cancelLeave() async {
         errorText = nil
         doneMessage = nil
-        isBusy = true
-        defer { isBusy = false }
-        do {
-            try await store.cancelLeave(date: shownDay.date)
-            doneMessage = "请假已取消"
-        } catch {
-            errorText = (error as? APIError)?.message ?? error.localizedDescription
+        await store.cancelLeave(date: shownDay.date)
+        doneMessage = "请假已取消"
+    }
+
+    private func submitOvertime() async {
+        errorText = nil
+        doneMessage = nil
+        let fmt = DateFormatter()
+        fmt.dateFormat = "HH:mm"
+        let start = fmt.string(from: overtimeStart)
+        let end = fmt.string(from: overtimeEnd)
+        if start == end {
+            errorText = "开始和结束时间不能一样"
+            return
         }
+        await store.submitOvertime(date: shownDay.date, start: start, end: end,
+                                   note: overtimeNote.isEmpty ? nil : overtimeNote)
+        doneMessage = "加班已保存（\(OvertimeCalc.text(minutes: OvertimeCalc.minutes(start: start, end: end)))）"
+        showOvertimeForm = false
+    }
+
+    private func deleteOvertime() async {
+        errorText = nil
+        doneMessage = nil
+        await store.deleteOvertime(date: shownDay.date)
+        doneMessage = "加班已删除"
     }
 }

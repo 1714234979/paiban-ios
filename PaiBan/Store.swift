@@ -16,6 +16,7 @@ struct CachedData: Codable {
     var months: [String: MonthSchedule]?            // key: "班组-yyyy-MM"
     var monthSwaps: [String: [SwapRecord]]?        // key: "yyyy-MM"
     var monthLeaves: [String: [LeaveRecord]]?      // key: "yyyy-MM"
+    var monthOvertime: [String: [OvertimeRecord]]? // key: "yyyy-MM"
     var yearDays: [String: [DaySchedule]]?         // key: "yyyy"，/me/range 全年天数
     var payConfig: PayConfigData?                   // GET /api/v1/config 的 pay 一节
     var payMonths: [String: PayMonth]?              // key: "yyyy-MM"，本地算好的工资
@@ -78,6 +79,7 @@ final class AppStore: ObservableObject {
     @Published var month: MonthSchedule?
     @Published var swaps: [SwapRecord] = []
     @Published var leaves: [LeaveRecord] = []
+    @Published var overtime: [OvertimeRecord] = []
     @Published var isLoadingMonth = false
 
     // 工资（默认看上个月；本地算，服务端只给原始数据）
@@ -95,6 +97,7 @@ final class AppStore: ObservableObject {
     @Published var monthCache: [String: MonthSchedule] = [:]      // key: "班组-yyyy-MM"
     var swapsCache: [String: [SwapRecord]] = [:]       // key: "yyyy-MM"
     var leavesCache: [String: [LeaveRecord]] = [:]     // key: "yyyy-MM"
+    var overtimeCache: [String: [OvertimeRecord]] = [:] // key: "yyyy-MM"
     private var fetchingMonths: Set<String> = []       // 正在后台取的月份，避免重复发请求
 
     // App 内更新提示
@@ -143,10 +146,21 @@ final class AppStore: ObservableObject {
 
     // MARK: 启动
 
-    /// 启动流程：选路 → 试 session 登录（cookie 还在就直接进）→ 读缓存立刻显示 → 后台刷新。
+    /// 启动流程（本地优先）：Keychain 里有账号密码 + 本地有缓存，就直接进，
+    /// 不等服务器；进去之后后台静默同步（服务器、数据、更新检查）。
+    /// 没账号或没缓存才走原来那套（连服务器、登录页）。
     func startup() async {
         isStarting = true
         startupError = nil
+        if let lastId = UserDefaults.standard.string(forKey: lastUserIdKey),
+           KeychainHelper.load() != nil,
+           let cache = CacheStore.load(userId: lastId), cache.user != nil {
+            applyCache(cache)
+            isLoggedIn = true
+            isStarting = false
+            Task { await backgroundSyncAfterLaunch() }
+            return
+        }
         let reachable = await api.resolveServer()
         serverReachable = reachable
         serverBaseURL = api.baseURL
@@ -194,6 +208,42 @@ final class AppStore: ObservableObject {
                 isLoggedIn = true
                 isOffline = true
             } else {
+                isLoggedIn = false
+            }
+        }
+    }
+
+    /// 进去之后后台静默同步：选路 → 验 session → 刷新数据 → 查更新。
+    /// 联不上就离线用着，不打扰；只有 session 明确失效（不是网络问题）才回登录页。
+    private func backgroundSyncAfterLaunch() async {
+        let reachable = await api.resolveServer()
+        serverReachable = reachable
+        serverBaseURL = api.baseURL
+        serverKind = api.serverKind
+        guard reachable else {
+            isOffline = true
+            return
+        }
+        do {
+            let me = try await api.fetchMe()
+            if me.isAdmin {
+                await api.logout()
+                isLoggedIn = false
+                startupError = APIError.adminBlocked.message
+                return
+            }
+            user = me
+            isLoggedIn = true
+            isOffline = false
+            viewTeam = me.displayTeam
+            UserDefaults.standard.set(me.id ?? me.username ?? "", forKey: lastUserIdKey)
+            await refreshAll()
+            await checkForUpdateAfterLaunch()
+        } catch {
+            if let apiError = error as? APIError, apiError.message == APIError.unreachable.message {
+                isOffline = true
+            } else {
+                // 不是网络问题，是 session/账号问题：回登录页。
                 isLoggedIn = false
             }
         }
@@ -289,6 +339,7 @@ final class AppStore: ObservableObject {
         monthCache = cache.months ?? [:]
         swapsCache = cache.monthSwaps ?? [:]
         leavesCache = cache.monthLeaves ?? [:]
+        overtimeCache = cache.monthOvertime ?? [:]
         let ym = currentYearMonth
         let key = monthCacheKey(team: viewTeam, year: ym.year, month: ym.month)
         if let cachedMonth = monthCache[key] {
@@ -324,10 +375,12 @@ final class AppStore: ObservableObject {
             monthCache[monthCacheKey(team: viewTeam, year: ym.year, month: ym.month)] = month
             swapsCache[payCacheKey(year: ym.year, month: ym.month)] = swaps
             leavesCache[payCacheKey(year: ym.year, month: ym.month)] = leaves
+            overtimeCache[payCacheKey(year: ym.year, month: ym.month)] = overtime
         }
         CacheStore.save(userId: id, cache: CachedData(
             user: user, month: month, pay: pay, swaps: swaps, leaves: leaves,
             months: monthCache, monthSwaps: swapsCache, monthLeaves: leavesCache,
+            monthOvertime: overtimeCache,
             yearDays: yearDaysCache, payConfig: payConfig, payMonths: payCache,
             savedAt: Date()
         ))
@@ -373,9 +426,11 @@ final class AppStore: ObservableObject {
                 let m = try await api.fetchMonth(year: year, month: month)
                 let swaps = (try? await api.fetchSwaps(year: year, month: month)) ?? []
                 let leaves = (try? await api.fetchLeaves(year: year, month: month)) ?? []
+                let ot = (try? await api.fetchOvertime(year: year, month: month)) ?? []
                 monthCache[key] = m
                 swapsCache[payCacheKey(year: year, month: month)] = swaps
                 leavesCache[payCacheKey(year: year, month: month)] = leaves
+                overtimeCache[payCacheKey(year: year, month: month)] = ot
                 isOffline = false
             } catch {
                 AppLogger.shared.log("预取排班 \(year)-\(month) 失败：\((error as? APIError)?.message ?? error.localizedDescription)", tag: "Cache")
@@ -399,9 +454,11 @@ final class AppStore: ObservableObject {
                 month = try await api.fetchMonth(year: ym.year, month: ym.month)
                 swaps = (try? await api.fetchSwaps(year: ym.year, month: ym.month)) ?? swaps
                 leaves = (try? await api.fetchLeaves(year: ym.year, month: ym.month)) ?? leaves
+                overtime = (try? await api.fetchOvertime(year: ym.year, month: ym.month)) ?? overtime
                 monthCache[key] = month
                 swapsCache[monthKey] = swaps
                 leavesCache[monthKey] = leaves
+                overtimeCache[monthKey] = overtime
                 isOffline = false
                 AppLogger.shared.log("排班 \(ym.year)-\(ym.month) 联网刷新成功", tag: "Cache")
             } catch {
@@ -417,6 +474,7 @@ final class AppStore: ObservableObject {
             month = ScheduleCalculator.localMonth(team: viewTeam, year: ym.year, month: ym.month)
             swaps = []
             leaves = []
+            overtime = []
         }
         persistCache()
     }
@@ -492,42 +550,176 @@ final class AppStore: ObservableObject {
         persistCache()
     }
 
-    // MARK: 写操作（调班 / 请假 / 资料 / 换班）
+    // MARK: 写操作（调班 / 请假 / 加班）——乐观更新 + 后台静默同步
 
-    // 写操作后：刷新当月 + 重新取全年天数（本地算工资的输入变了）+ 本地重算工资。
-    func submitOverride(date: String, shift: String, note: String?, partner: String?, partnerShift: String?) async throws {
-        _ = try await api.postOverride(date: date, shift: shift, note: note, partner: partner, partnerShift: partnerShift)
-        await refreshMonth()
-        await refreshPayInputs()
-        await refreshPay()
+    /// 本地先改当天的班次（界面立刻变），再后台同步到服务端；
+    /// 同步成功后从服务端刷新一次（权威数据），失败则刷回来（回滚）并把错误写进 errorMessage。
+    private func applyOverrideLocally(date: String, shift: String, note: String?, partner: String?, partnerShift: String?) {
+        guard var m = month, var days = m.days,
+              let i = days.firstIndex(where: { $0.date == date }) else { return }
+        var d = days[i]
+        d.shift = shift
+        d.timeLabel = ShiftStyle.timeRange(for: shift)
+        d.isDouble = ShiftStyle.isDouble(shift)
+        d.totalHours = ShiftStyle.isDouble(shift) ? 16 : (shift == "休息" ? 0 : 8)
+        d.isWork = shift != "休息"
+        d.overridden = true
+        d.note = note
+        d.partner = partner
+        d.partnerShift = partnerShift
+        days[i] = d
+        m.days = days
+        month = m
+        let mk = payCacheKey(year: currentYearMonth.year, month: currentYearMonth.month)
+        monthCache[monthCacheKey(team: viewTeam, year: currentYearMonth.year, month: currentYearMonth.month)] = m
+        var rec = swaps.first { $0.date == date } ?? SwapRecord(date: date)
+        rec.shift = shift; rec.note = note; rec.partner = partner; rec.partnerShift = partnerShift
+        if let j = swaps.firstIndex(where: { $0.date == date }) { swaps[j] = rec } else { swaps.append(rec) }
+        swapsCache[mk] = swaps
     }
 
-    func cancelOverride(date: String) async throws {
-        try await api.deleteOverride(date: date)
-        await refreshMonth()
-        await refreshPayInputs()
-        await refreshPay()
+    private func applyLeaveLocally(date: String, type: String?, note: String?) {
+        guard var m = month, var days = m.days,
+              let i = days.firstIndex(where: { $0.date == date }) else { return }
+        var d = days[i]
+        d.onLeave = true
+        d.leaveType = type
+        d.leaveNote = note
+        days[i] = d
+        m.days = days
+        month = m
+        let mk = payCacheKey(year: currentYearMonth.year, month: currentYearMonth.month)
+        monthCache[monthCacheKey(team: viewTeam, year: currentYearMonth.year, month: currentYearMonth.month)] = m
+        var rec = leaves.first { $0.date == date } ?? LeaveRecord(date: date)
+        rec.type = type; rec.note = note
+        if let j = leaves.firstIndex(where: { $0.date == date }) { leaves[j] = rec } else { leaves.append(rec) }
+        leavesCache[mk] = leaves
     }
 
-    func submitLeave(date: String, type: String?, note: String?) async throws {
-        try await api.postLeave(date: date, type: type, note: note)
-        await refreshMonth()
-        await refreshPayInputs()
-        await refreshPay()
+    /// 后台同步一趟：成功后刷新权威数据，失败刷回来回滚并记错（不抛给界面，界面已经显示“已保存”）。
+    private func syncInBackground(_ work: @escaping () async throws -> Void) {
+        Task {
+            do {
+                try await work()
+                await refreshMonth()
+                await refreshPayInputs()
+                await refreshPay()
+            } catch {
+                await refreshMonth()
+                errorMessage = (error as? APIError)?.message ?? error.localizedDescription
+                AppLogger.shared.log("同步失败：\(errorMessage ?? "")", tag: "Sync")
+            }
+        }
     }
 
-    func submitLeaveRange(start: String, end: String, type: String?, note: String?) async throws {
-        try await api.postLeaveRange(start: start, end: end, type: type, note: note)
-        await refreshMonth()
-        await refreshPayInputs()
-        await refreshPay()
+    func submitOverride(date: String, shift: String, note: String?, partner: String?, partnerShift: String?) async {
+        applyOverrideLocally(date: date, shift: shift, note: note, partner: partner, partnerShift: partnerShift)
+        persistCache()
+        syncInBackground {
+            _ = try await self.api.postOverride(date: date, shift: shift, note: note, partner: partner, partnerShift: partnerShift)
+        }
     }
 
-    func cancelLeave(date: String) async throws {
-        try await api.deleteLeave(date: date)
-        await refreshMonth()
-        await refreshPayInputs()
+    func cancelOverride(date: String) async {
+        // 取消调班：本地先把当天恢复成基础班次（界面立刻变），后台再同步。
+        if var m = month, var days = m.days, let i = days.firstIndex(where: { $0.date == date }) {
+            var d = days[i]
+            d.shift = d.baseShift ?? d.shift
+            d.timeLabel = ShiftStyle.timeRange(for: d.shift)
+            d.isDouble = ShiftStyle.isDouble(d.shift)
+            d.totalHours = ShiftStyle.isDouble(d.shift) ? 16 : (d.shift == "休息" ? 0 : 8)
+            d.isWork = d.shift != "休息"
+            d.overridden = false
+            d.note = nil; d.partner = nil; d.partnerShift = nil
+            days[i] = d
+            m.days = days
+            month = m
+            swaps.removeAll { $0.date == date }
+        }
+        persistCache()
+        syncInBackground { try await self.api.deleteOverride(date: date) }
+    }
+
+    func submitLeave(date: String, type: String?, note: String?) async {
+        applyLeaveLocally(date: date, type: type, note: note)
+        persistCache()
+        syncInBackground {
+            try await self.api.postLeave(date: date, type: type, note: note)
+        }
+    }
+
+    func submitLeaveRange(start: String, end: String, type: String?, note: String?) async {
+        // 请一段假：本地先把范围内有班的日子都标上请假，后台再同步。
+        if let s = DateUtil.date(from: start), let e = DateUtil.date(from: end) {
+            let n = max(0, Int(e.timeIntervalSince(s) / 86400))
+            for i in 0...min(n, 62) {
+                if let d = Calendar.current.date(byAdding: .day, value: i, to: s) {
+                    applyLeaveLocally(date: DateUtil.string(from: d), type: type, note: note)
+                }
+            }
+        }
+        persistCache()
+        syncInBackground {
+            try await self.api.postLeaveRange(start: start, end: end, type: type, note: note)
+        }
+    }
+
+    func cancelLeave(date: String) async {
+        if var m = month, var days = m.days, let i = days.firstIndex(where: { $0.date == date }) {
+            var d = days[i]
+            d.onLeave = false; d.leaveType = nil; d.leaveNote = nil
+            days[i] = d
+            m.days = days
+            month = m
+            leaves.removeAll { $0.date == date }
+        }
+        persistCache()
+        syncInBackground { try await self.api.deleteLeave(date: date) }
+    }
+
+    /// 记加班：几点到几点，服务端算时长（跨夜自动加 24 小时）。一天一条，改了就覆盖。
+    /// 本地先记一条（时长当场算），后台再同步；失败刷回来回滚。
+    func submitOvertime(date: String, start: String, end: String, note: String?) async {
+        let minutes = OvertimeCalc.minutes(start: start, end: end)
+        let rec = OvertimeRecord(date: date, start: start, end: end, minutes: minutes, note: note)
+        if let i = overtime.firstIndex(where: { $0.date == date }) { overtime[i] = rec } else { overtime.append(rec) }
+        let mk = payCacheKey(year: currentYearMonth.year, month: currentYearMonth.month)
+        overtimeCache[mk] = overtime
+        persistCache()
+        syncInBackground {
+            _ = try await self.api.postOvertime(date: date, start: start, end: end, note: note)
+        }
+    }
+
+    func deleteOvertime(date: String) async {
+        overtime.removeAll { $0.date == date }
+        let mk = payCacheKey(year: currentYearMonth.year, month: currentYearMonth.month)
+        overtimeCache[mk] = overtime
+        persistCache()
+        syncInBackground { try await self.api.deleteOvertime(date: date) }
+    }
+
+    /// 改当月科室绩效（只有老爷能改）：本地先改掉当月录入数、立刻重算，后台再同步到服务端。
+    func updateDeptPerf(monthKey: String, deptPerf: Double) async {
+        var cfg = payConfig ?? PayConfigData()
+        var months = cfg.months ?? [:]
+        var rec = months[monthKey] ?? PayMonthRecord()
+        rec.deptPerf = deptPerf
+        months[monthKey] = rec
+        cfg.months = months
+        payConfig = cfg
         await refreshPay()
+        persistCache()
+        Task {
+            do {
+                _ = try await api.postPayMonth(monthKey: monthKey, deptPerf: deptPerf)
+            } catch {
+                errorMessage = (error as? APIError)?.message ?? error.localizedDescription
+                AppLogger.shared.log("科室绩效同步失败：\(errorMessage ?? "")", tag: "Sync")
+                await refreshPayInputs()
+                await refreshPay()
+            }
+        }
     }
 
     /// 保存资料：引导流程与设置页共用（team / paySettings / onboardingDone 只传给定的字段）。
@@ -577,7 +769,13 @@ final class AppStore: ObservableObject {
             let mk = payCacheKey(year: ym.year, month: ym.month)
             swaps = swapsCache[mk] ?? swaps
             leaves = leavesCache[mk] ?? leaves
+            overtime = overtimeCache[mk] ?? overtime
         }
+    }
+
+    /// 某天的加班记录（没有就是 nil）。
+    func overtime(for date: String) -> OvertimeRecord? {
+        overtime.first { $0.date == date }
     }
 
     /// 滑页时直接定到某年某月（只改 currentMonth、立刻用缓存顶上，刷新走后台，不闪白）。

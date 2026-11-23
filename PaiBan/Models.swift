@@ -468,6 +468,43 @@ struct LeaveRecord: Codable, Equatable, Identifiable {
     var id: String { date }
 }
 
+/// 单日加班记录：{date, start, end, minutes, note}。start/end 是 HH:MM；
+/// minutes 是服务端算好的时长（分钟，结束 <= 开始算跨夜）。一天一条，改了就覆盖。
+struct OvertimeRecord: Codable, Equatable, Identifiable {
+    var date: String
+    var start: String
+    var end: String
+    var minutes: Int?
+    var note: String?
+    var id: String { date }
+
+    /// 时长显示，如“4小时”“4小时30分”。minutes 为空时按起止时间本地算。
+    var durationText: String {
+        let m = minutes ?? OvertimeCalc.minutes(start: start, end: end)
+        return OvertimeCalc.text(minutes: m)
+    }
+}
+
+/// 加班时长本地算：跟服务端同一规则（结束 <= 开始算跨夜，加 24 小时）。
+enum OvertimeCalc {
+    static func minutes(start: String, end: String) -> Int {
+        func toMin(_ s: String) -> Int {
+            let p = s.split(separator: ":").compactMap { Int($0) }
+            guard p.count == 2 else { return 0 }
+            return p[0] * 60 + p[1]
+        }
+        var s = toMin(start), e = toMin(end)
+        if e <= s { e += 1440 }
+        return e - s
+    }
+
+    static func text(minutes: Int) -> String {
+        let h = minutes / 60, m = minutes % 60
+        if m == 0 { return "\(h)小时" }
+        return "\(h)小时\(m)分"
+    }
+}
+
 /// 三薪明细里的单天：{date, name, shift}。
 struct TripleDate: Codable, Equatable {
     var date: String?

@@ -477,6 +477,32 @@ final class APIClient {
         try await requestNoData(path: "/api/v1/me/leave", method: "DELETE", query: ["date": date])
     }
 
+    // MARK: 加班（/me/overtime）
+
+    /// GET /api/v1/me/overtime?year=&month=
+    func fetchOvertime(year: Int, month: Int) async throws -> [OvertimeRecord] {
+        try await request(path: "/api/v1/me/overtime",
+                          query: ["year": String(year), "month": String(month)])
+    }
+
+    /// POST /api/v1/me/overtime — 成功返回当天那条加班记录（服务端已算好时长）。
+    func postOvertime(date: String, start: String, end: String, note: String?) async throws -> OvertimeRecord {
+        var body: [String: Any] = ["date": date, "start": start, "end": end]
+        if let note, !note.isEmpty { body["note"] = note }
+        return try await request(path: "/api/v1/me/overtime", method: "POST", jsonBody: body)
+    }
+
+    /// DELETE /api/v1/me/overtime?date=YYYY-MM-DD
+    func deleteOvertime(date: String) async throws {
+        try await requestNoData(path: "/api/v1/me/overtime", method: "DELETE", query: ["date": date])
+    }
+
+    /// POST /api/v1/me/pay/month — 老爷改自己当月录入数（科室绩效）。成功返回重算后的当月工资。
+    func postPayMonth(monthKey: String, deptPerf: Double) async throws -> PayMonth {
+        try await request(path: "/api/v1/me/pay/month", method: "POST",
+                          jsonBody: ["monthKey": monthKey, "deptPerf": deptPerf])
+    }
+
     // MARK: 版本清单（公开接口，不用认证）
 
     /// GET <baseURL>/api/v1/version → {ok, data: {latestVersion, releaseNotes, downloadUrl}}。

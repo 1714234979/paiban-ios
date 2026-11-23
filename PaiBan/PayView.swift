@@ -5,6 +5,12 @@ import SwiftUI
 struct PayView: View {
     @EnvironmentObject private var store: AppStore
 
+    /// 改科室绩效：点奖金里的科室绩效行，弹出输入框改当月那个数。
+    @State private var editingDeptPerf = false
+    @State private var deptPerfText = ""
+    @State private var deptPerfSaving = false
+    @State private var deptPerfError: String?
+
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
@@ -33,11 +39,6 @@ struct PayView: View {
             Text("本地计算，仅供参考")
                 .font(.subheadline)
                 .foregroundColor(.white.opacity(0.75))
-            if store.isOffline {
-                Label("离线缓存", systemImage: "wifi.slash")
-                    .font(.caption)
-                    .foregroundColor(.yellow)
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
@@ -101,19 +102,7 @@ struct PayView: View {
                     ("水电费", MoneyUtil.money(pay.utilities)),
                     ("实发工资", MoneyUtil.money(pay.salaryNet)),
                 ])
-                paySection(title: "奖金", rows: [
-                    ("科室绩效", MoneyUtil.money(pay.deptPerf)),
-                    ("其他奖罚", MoneyUtil.money(pay.otherReward)),
-                    ("绩效系数", MoneyUtil.number(pay.perfCoef)),
-                    ("奖金系数", MoneyUtil.number(pay.bonusCoef)),
-                    ("加班费（含三薪）", MoneyUtil.money(pay.overtimePay)),
-                    ("三薪天数", pay.tripleDays.map { String(format: "%.1f 天", $0) } ?? "—"),
-                    ("三薪金额", MoneyUtil.money(pay.triplePay)),
-                    ("加班天数", pay.overtimeDays.map { String(format: "%.1f 天", $0) } ?? "—"),
-                    ("税前奖金", MoneyUtil.money(pay.bonusTotal)),
-                    ("个税（累计预扣，税从奖金里扣）", MoneyUtil.money(pay.incomeTax)),
-                    ("实发奖金", MoneyUtil.money(pay.bonusAfterTax)),
-                ])
+                bonusSection(pay: pay)
                 paySection(title: "合计", rows: [
                     ("实发工资 + 实发奖金", MoneyUtil.money(pay.grandTotal)),
                     ("餐贴", MoneyUtil.money(pay.mealAllowance)),
@@ -175,6 +164,106 @@ struct PayView: View {
         .background(Color(.systemBackground))
         .cornerRadius(12)
         .padding(.horizontal, 16)
+    }
+
+    /// 奖金区：科室绩效那行点一下就能改当月那个数（只有老爷能改，改完存服务端、本地立刻重算）。
+    private func bonusSection(pay: PayMonth) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("奖金")
+                .font(.headline)
+                .padding(.bottom, 8)
+            // 科室绩效行：点一下改数（带“可改”小字提示）。
+            Button {
+                if store.isOwner {
+                    deptPerfText = pay.deptPerf.map { String(format: "%.2f", $0) } ?? "4000"
+                    deptPerfError = nil
+                    editingDeptPerf = true
+                }
+            } label: {
+                HStack {
+                    Text("科室绩效")
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text(MoneyUtil.money(pay.deptPerf))
+                    if store.isOwner {
+                        Text("可改")
+                            .font(.caption)
+                            .foregroundColor(.blue)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.blue.opacity(0.08))
+                            .cornerRadius(6)
+                    }
+                }
+                .font(.subheadline)
+                .padding(.vertical, 5)
+            }
+            .disabled(!store.isOwner)
+            Divider()
+            if editingDeptPerf {
+                VStack(spacing: 8) {
+                    HStack {
+                        TextField("科室绩效（如 3800）", text: $deptPerfText)
+                            .keyboardType(.decimalPad)
+                            .textFieldStyle(.roundedBorder)
+                        Button("保存") { Task { await saveDeptPerf() } }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(deptPerfSaving)
+                        Button("取消") { editingDeptPerf = false }
+                            .buttonStyle(.bordered)
+                    }
+                    if let deptPerfError {
+                        Text(deptPerfError)
+                            .font(.caption)
+                            .foregroundColor(.red)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .padding(.vertical, 8)
+                Divider()
+            }
+            ForEach([
+                ("其他奖罚", MoneyUtil.money(pay.otherReward)),
+                ("绩效系数", MoneyUtil.number(pay.perfCoef)),
+                ("奖金系数", MoneyUtil.number(pay.bonusCoef)),
+                ("加班费（含三薪）", MoneyUtil.money(pay.overtimePay)),
+                ("三薪天数", pay.tripleDays.map { String(format: "%.1f 天", $0) } ?? "—"),
+                ("三薪金额", MoneyUtil.money(pay.triplePay)),
+                ("加班天数", pay.overtimeDays.map { String(format: "%.1f 天", $0) } ?? "—"),
+                ("税前奖金", MoneyUtil.money(pay.bonusTotal)),
+                ("个税（累计预扣，税从奖金里扣）", MoneyUtil.money(pay.incomeTax)),
+                ("实发奖金", MoneyUtil.money(pay.bonusAfterTax)),
+            ], id: \.0) { row in
+                HStack {
+                    Text(row.0)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text(row.1)
+                        .bold(row.0.hasPrefix("实发") || row.0.hasPrefix("税前"))
+                }
+                .font(.subheadline)
+                .padding(.vertical, 5)
+                Divider()
+            }
+        }
+        .padding(14)
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .padding(.horizontal, 16)
+    }
+
+    private func saveDeptPerf() async {
+        deptPerfError = nil
+        guard let value = Double(deptPerfText.trimmingCharacters(in: .whitespaces)),
+              value >= 0, value <= 10000 else {
+            deptPerfError = "输个 0–10000 之间的数"
+            return
+        }
+        deptPerfSaving = true
+        defer { deptPerfSaving = false }
+        let key = String(format: "%04d-%02d", store.payYearMonth.year, store.payYearMonth.month)
+        await store.updateDeptPerf(monthKey: key, deptPerf: value)
+        editingDeptPerf = false
     }
 
     /// 实际出勤可能是小数（如录入的 23.4、24.31）：整数按整数显示，小数保留 1 位。
