@@ -477,7 +477,7 @@ final class APIClient {
     func sendFeedback(message: String, logs: String, type: String = "bug", location: String = "排班页", imageBase64: String? = nil) async throws {
         let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?"
         let build = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
-        let device = "\(UIDevice.current.systemName) \(UIDevice.current.systemVersion) (\(UIDevice.current.model))"
+        let device = "\(await UIDevice.current.systemName) \(await UIDevice.current.systemVersion) (\(await UIDevice.current.model))"
         var body: [String: Any] = [
             "message": message,
             "logs": logs,

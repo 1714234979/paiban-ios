@@ -563,6 +563,35 @@ final class AppStore: ObservableObject {
         persistCache()
     }
 
+    /// 把服务端单日数据直接补进日历缓存：调班/请假/取消保存成功后立刻调，
+    /// 日历网格读的就是 monthCache，不用等整月刷新回来；整月刷新随后仍会跑一遍对账。
+    /// 1.1.2 的教训：只改 month 不写 monthCache（取消请假那路），网格就一直是老的，
+    /// 后台整月刷新一慢，用户看到的就是“保存成功了，日历没变”。
+    private func patchDayIntoCaches(_ day: DaySchedule) {
+        let comps = DateUtil.yearMonth(of: DateUtil.date(from: day.date) ?? Date())
+        let key = monthCacheKey(team: viewTeam, year: comps.year, month: comps.month)
+        if var cached = monthCache[key], var days = cached.days,
+           let i = days.firstIndex(where: { $0.date == day.date }) {
+            days[i] = day
+            cached.days = days
+            monthCache[key] = cached
+        }
+        if var m = month, m.year == comps.year, m.month == comps.month,
+           var days = m.days, let i = days.firstIndex(where: { $0.date == day.date }) {
+            days[i] = day
+            m.days = days
+            month = m
+        }
+        persistCache()
+    }
+
+    /// 从服务端取某天最新状态，补进日历缓存（失败静默，整月刷新会兜底）。
+    private func refreshDayOnCalendar(date: String) async {
+        if let day = try? await api.fetchDay(date: date) {
+            patchDayIntoCaches(day)
+        }
+    }
+
     /// 刷新工资的输入：工资配置（/api/v1/config 的 pay 一节）+ 当年全年天数（/me/range）。
     /// 两者都取回来存好，后面切月、看工资都本地算，不再每次问服务端。
     func refreshPayInputs() async {
@@ -631,9 +660,16 @@ final class AppStore: ObservableObject {
     func triplePayInfo(year: Int, month: Int) -> (tripleDates: Set<String>, tripleDays: Double, overtimeDays: Double)? {
         guard viewTeam == myTeam else { return nil }
         guard let pay = computeLocalPay(year: year, month: month) else { return nil }
+        // 三薪按班次标：按时间顺序累加每一天的班次数，累计班次还没达到三薪数那几天都标
+        // （双班那天 2 个班次，一天就占满 2 个三薪；只有部分班次算三薪那天也标）。
         let dates = pay.tripleDates ?? []
-        let count = max(0, Int(pay.tripleDays ?? 0))
-        let tripleSet = Set(dates.prefix(count).compactMap { $0.date })
+        let target = pay.tripleDays ?? 0
+        var tripleSet = Set<String>()
+        var used = 0.0
+        for td in dates {
+            if used < target, let d = td.date { tripleSet.insert(d) }
+            used += Double(ShiftStyle.parts(of: td.shift ?? "").count)
+        }
         return (tripleSet, pay.tripleDays ?? 0, pay.overtimeDays ?? 0)
     }
 
@@ -739,6 +775,10 @@ final class AppStore: ObservableObject {
                     paybackDate: String?, paybackMyShift: String?) async throws -> SwapSaveResult {
         let result = try await api.postSwap(date: date, partner: partner, partnerShift: partnerShift,
                                             note: note, paybackDate: paybackDate, paybackMyShift: paybackMyShift)
+        // 先把替班日（+还班日）的服务端最新状态直接补进日历缓存，日历立刻变；
+        // 整月刷新随后跑一遍，把统计和记录列表也对上。
+        await refreshDayOnCalendar(date: date)
+        if let payback = result.paybackDate { await refreshDayOnCalendar(date: payback) }
         await refreshMonth()
         await refreshPayInputs()
         await refreshPay()
@@ -748,6 +788,8 @@ final class AppStore: ObservableObject {
     /// 给待还班的调班补填还班日。
     func fillSwapPayback(coverDate: String, paybackDate: String, myShift: String) async throws {
         try await api.postSwapPayback(coverDate: coverDate, paybackDate: paybackDate, myShift: myShift)
+        await refreshDayOnCalendar(date: coverDate)
+        await refreshDayOnCalendar(date: paybackDate)
         await refreshMonth()
         await refreshPayInputs()
         await refreshPay()
@@ -756,6 +798,7 @@ final class AppStore: ObservableObject {
     /// 待还班的调班一直不还，转为请假（对方的顶岗保留）。
     func convertSwapToLeave(date: String, type: String?, note: String?) async throws {
         try await api.postSwapToLeave(date: date, type: type, note: note)
+        await refreshDayOnCalendar(date: date)
         await refreshMonth()
         await refreshPayInputs()
         await refreshPay()
@@ -764,6 +807,7 @@ final class AppStore: ObservableObject {
     /// 请假日安排顶岗：对方替我上我那天的班。
     func submitLeaveCover(date: String, partner: String, partnerShift: String, note: String?) async throws {
         try await api.postLeaveCover(date: date, partner: partner, partnerShift: partnerShift, note: note)
+        await refreshDayOnCalendar(date: date)
         await refreshMonth()
         await refreshPayInputs()
         await refreshPay()
@@ -772,7 +816,11 @@ final class AppStore: ObservableObject {
     /// 删一次调班（两边一起删）：删替班日连还班日一起恢复；删还班日则替班日变回待还班。
     /// 同样等服务端回话再报成功。
     func cancelSwap(date: String) async throws {
+        // 先记下还班日：删完替班日，还班日那天也要一起恢复，事后就查不到了。
+        let paybackDate = month?.day(for: date)?.paybackDate
         try await api.deleteOverride(date: date)
+        await refreshDayOnCalendar(date: date)
+        if let payback = paybackDate { await refreshDayOnCalendar(date: payback) }
         await refreshMonth()
         await refreshPayInputs()
         await refreshPay()
@@ -801,7 +849,11 @@ final class AppStore: ObservableObject {
             days[i] = d
             m.days = days
             month = m
+            // 日历网格读 monthCache：只改 month 不写缓存，网格要等后台刷新才变（1.1.2 的 bug）。
+            let comps = DateUtil.yearMonth(of: DateUtil.date(from: date) ?? Date())
+            monthCache[monthCacheKey(team: viewTeam, year: comps.year, month: comps.month)] = m
             leaves.removeAll { $0.date == date }
+            leavesCache[payCacheKey(year: comps.year, month: comps.month)] = leaves
         }
         persistCache()
         syncInBackground { try await self.api.deleteLeave(date: date) }

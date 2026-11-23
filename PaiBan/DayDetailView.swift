@@ -557,7 +557,7 @@ struct DayDetailView: View {
                         .foregroundColor(.secondary)
                 }
             } else {
-                Text("给 \(shownDay.date) 调班：我这天是 \(shownDay.shift)（\(ShiftStyle.timeRange(for: shownDay.shift)））。调班就是他先替我上，我再挑一天替他上；还班日也可以先空着，以后再定。")
+                Text("给 \(shownDay.date) 调班：我这天是 \(shownDay.shift)（\(ShiftStyle.timeRange(for: shownDay.shift))））。调班就是他先替我上，我再挑一天替他上；还班日也可以先空着，以后再定。")
                     .font(.subheadline)
                 Text("第 1 步 · 选替我上这个班的人")
                     .font(.subheadline).bold()
@@ -639,7 +639,7 @@ struct DayDetailView: View {
                     .foregroundColor(.secondary)
                 if ev.eligible, let result = ev.result {
                     if ev.ownShift == "休息" {
-                        Text("\(resultLabel)：只上一个班 · \(result)\n这天本来休息，替班后就上这一个班（\(ShiftStyle.timeRange(for: result)）），不算双班")
+                        Text("\(resultLabel)：只上一个班 · \(result)\n这天本来休息，替班后就上这一个班（\(ShiftStyle.timeRange(for: result))）），不算双班")
                             .font(.subheadline)
                     } else {
                         Text("\(resultLabel)：\(result)\n\(ShiftStyle.timeRange(for: result))")
@@ -703,13 +703,13 @@ struct DayDetailView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("保存前预览")
                 .font(.subheadline).bold()
-            Text("替班日 \(shownDay.date)：我休息；\(partner)班上 \(partnerShift)（\(ShiftStyle.timeRange(for: partnerShift)））。")
+            Text("替班日 \(shownDay.date)：我休息；\(partner)班上 \(partnerShift)（\(ShiftStyle.timeRange(for: partnerShift))））。")
                 .font(.subheadline)
             if swapLater {
                 Text("还班日：还没定。先这样保存，这条记成「待还班」；以后在当天详情里补填还班日，一直不还就转为请假（这天按请假算）。")
                     .font(.subheadline)
             } else if let payback = swapPayback, let myShift = selectedPaybackMyShift {
-                Text("还班日 \(payback)：我上 \(myShift)（\(ShiftStyle.timeRange(for: myShift)））；\(partner)班休息。")
+                Text("还班日 \(payback)：我上 \(myShift)（\(ShiftStyle.timeRange(for: myShift))））；\(partner)班休息。")
                     .font(.subheadline)
             } else {
                 Text("还班日：还没选。选一天当还班日，或者点「还班日先不填」。")
@@ -845,7 +845,7 @@ struct DayDetailView: View {
                             }
                         }
                         if let partner = leaveCoverPartner, let result = leaveCoverCandidates.first(where: { $0.team == partner })?.ev.result {
-                            Text("\(partner)班顶岗：他这天上 \(result)（\(ShiftStyle.timeRange(for: result)））；我这天请假休息。")
+                            Text("\(partner)班顶岗：他这天上 \(result)（\(ShiftStyle.timeRange(for: result))））；我这天请假休息。")
                                 .font(.subheadline)
                             Button("确认安排顶岗") { Task { await submitLeaveCover() } }
                                 .buttonStyle(.borderedProminent)

@@ -197,11 +197,12 @@ enum PayCalc {
                 tripleDates.append(TripleDate(date: d.date, name: stat[d.date], shift: d.shift))
             }
         }
-        let statutoryWorked = tripleDates.count
-        // 三薪提纯：只有超出基本天数的部分算三薪，其余节假日天数转加班。
+        // 三薪按班次算（2026-11-24 老爷定）：法定节假日上了几个班就有几个三薪，双班那天算 2 个。
+        let statutoryWorkedShifts = tripleDates.reduce(0) { $0 + ShiftStyle.parts(of: $1.shift ?? "").count }
+        // 三薪提纯：只有超出基本天数的部分算三薪，其余节假日班次转加班。
         // 注意 attendance 可能是小数（如 23.4），这里按服务端原样用浮点算，不取整。
-        let tripleDays = record?.tripleDays ?? min(Double(statutoryWorked), max(0, attendance - Double(bd)))
-        let convertedTripleDays = Double(statutoryWorked) - tripleDays
+        let tripleDays = record?.tripleDays ?? min(Double(statutoryWorkedShifts), max(0, attendance - Double(bd)))
+        let convertedTripleDays = Double(statutoryWorkedShifts) - tripleDays
         let overtimeDays = record?.overtimeDays ?? round2(max(0, attendance - Double(bd) - tripleDays) + convertedTripleDays)
         let triplePay = round2(tripleDays * 3 * dailyRate)
         let overtimePayPart = round2(overtimeDays * 2 * dailyRate)
