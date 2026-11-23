@@ -474,10 +474,11 @@ struct MonthPageView: View {
     }
 
     var body: some View {
-        // 1.1.5：固定 6 行、固定 6pt 行距——原来按行数自适应（5 行松、6 行紧），
-        // 相邻两页行距不同，滑动中两页的行对不上，看着就是两个月绞在一起
-        //（12 月 5 行滑向 1 月 6 行就是这么错位的）。现在所有页几何完全一致，
-        // 滑动时行与行永远对齐；行数不够的月底部留空白格，外框总高仍是 414pt 不伸缩。
+        // 1.2.1（老爷 06:57 纠正「固定 6 行」的做法）：总高固定 414pt 不变，
+        // 行距按本月行数自适应——5 行的月松一些（23.5pt）、6 行的月紧凑一些（6pt），
+        // 行数不同但总高一样，整体对齐，5 行的月不再底部空一行。
+        // 关键：行数从快照 snapDays 里算（days.count / 7），快照在滑动中一动不动，
+        // 所以行距在动画中途绝不变；快照 + 防抖换月 + 裁剪三件不变。
         // 周几行已抽到 TabView 外面固定不动，这里只画日期网格。
         // 订阅 payInputsVersion：工资输入到齐时三薪标要出现，日历得重画
         //（之前没订阅，输入到了也不重画，三薪标要等别的状态变了才冒出来）。
@@ -485,7 +486,8 @@ struct MonthPageView: View {
         // 网格本身（snapDays）是快照，滑动中不动。
         let _ = store.payInputsVersion
         let days = snapLoaded ? snapDays : gridDays
-        let weeks = 6
+        // 格子总数恒等于 行数×7（上月补 + 本月 + 下月补正好拼满整周），行数从快照算。
+        let weeks = max(1, days.count / 7)
         VStack(spacing: calendarRowSpacing(weeks: weeks)) {
             ForEach(0..<weeks, id: \.self) { w in
                 HStack(spacing: 4) {
