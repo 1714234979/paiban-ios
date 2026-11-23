@@ -1,45 +1,41 @@
 import SwiftUI
 
-/// 设置页：账号、换班（更换班组入口）、工资设置、检查更新、关于、退出登录。
+/// 设置页（1.1.3：二级菜单）：主界面只留入口行——账号与安全、工资设置、关于
+/// 各开一个二级页面改细项；换班、管理后台、服务器、更新、反馈留在主界面。
 /// 服务器那节只给老爷（张晓文）看，同事看不到。
 struct SettingsView: View {
     @EnvironmentObject private var store: AppStore
 
-    @State private var baseSalaryText = ""
-    @State private var bonusCoefText = ""
-    @State private var pensionText = ""
-    @State private var position = "员工"
-    @State private var utilitiesText = ""
-    @State private var deptPerfText = ""
-    @State private var showLogoutConfirm = false
-    @State private var isSavingPay = false
-    @State private var saveMessage: String?
     @State private var isCheckingUpdate = false
     @State private var showFeedback = false
     @State private var showAdminBackend = false
 
-    private let positions = ["员工", "现场组长", "自控组长", "班长"]
+    /// 账号与安全入口的副标题：名字 · 手机号（脱敏，未绑就写未绑定）。
+    private var accountSubtitle: String {
+        let phone = PhoneUtil.masked(store.user?.phone) ?? "未绑定手机号"
+        return "\(store.displayUsername) · \(phone)"
+    }
 
-    /// 养老月扣反推缴费基数：基数 = 养老月扣 ÷ 0.08（保留两位小数）。
-    private var derivedBase: Double? {
-        guard let pension = Double(pensionText.trimmingCharacters(in: .whitespaces)), pension > 0 else { return nil }
-        return PayCalc.round2(pension / 0.08)
+    /// 工资设置入口的副标题：基本工资 · 奖金系数。
+    private var paySubtitle: String {
+        let settings = store.user?.paySettings
+        let base = settings?.baseSalary.map { PayCalc.jsNum($0) } ?? "2420"
+        let coef = settings?.bonusCoef.map { String(format: "%.1f", $0) } ?? "1.0"
+        return "基本工资 \(base) · 奖金系数 \(coef)"
     }
 
     var body: some View {
         Form {
             Section("账号") {
-                HStack {
-                    Text("账号")
-                    Spacer()
-                    Text(store.displayUsername)
-                        .foregroundColor(.secondary)
-                }
-                HStack {
-                    Text("班组")
-                    Spacer()
-                    Text("\(store.myTeam)班")
-                        .foregroundColor(.secondary)
+                NavigationLink {
+                    AccountSecurityView()
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("账号与安全")
+                        Text(accountSubtitle)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
 
@@ -84,6 +80,290 @@ struct SettingsView: View {
             }
 
             Section("工资设置") {
+                NavigationLink {
+                    PaySettingsView()
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("工资设置")
+                        Text(paySubtitle)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            // 服务器线路只给老爷看（调试用），同事不显示。
+            if store.isOwner {
+                Section("服务器") {
+                    HStack {
+                        Text("当前线路")
+                        Spacer()
+                        Text(store.serverKind.displayName)
+                            .foregroundColor(.secondary)
+                    }
+                    Text(store.serverBaseURL ?? "未连接")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Picker("手动切换线路", selection: manualSelection) {
+                        Text("自动选路").tag("")
+                        ForEach(ServerConfig.allCandidates, id: \.baseURL) { candidate in
+                            Text("\(candidate.kind.displayName) · \(candidate.baseURL)").tag(candidate.baseURL)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                }
+            }
+
+            Section("更新") {
+                Button {
+                    Task { await manualUpdateCheck() }
+                } label: {
+                    HStack {
+                        Text("检查更新")
+                        Spacer()
+                        if isCheckingUpdate {
+                            ProgressView()
+                        } else {
+                            Text("当前 \(UpdateChecker.currentVersion)")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
+
+            Section("反馈") {
+                Button {
+                    showFeedback = true
+                } label: {
+                    HStack {
+                        Text("反馈问题")
+                        Spacer()
+                        Text("会附上最近 24 小时运行日志")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            Section("关于") {
+                NavigationLink {
+                    AboutView()
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("关于")
+                        Text("更新日志 · 功能介绍 · 版本 \(UpdateChecker.currentVersion)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+        }
+        .navigationTitle("设置")
+        .alert("检查更新", isPresented: updateNoticeBinding) {
+            Button("知道了", role: .cancel) {
+                store.updateNotice = nil
+            }
+        } message: {
+            Text(store.updateNotice ?? "")
+        }
+        .sheet(isPresented: $showFeedback) {
+            FeedbackView()
+        }
+        .fullScreenCover(isPresented: $showAdminBackend) {
+            AdminBackendView()
+        }
+    }
+
+    // MARK: 手动选线路的绑定
+
+    private var manualSelection: Binding<String> {
+        Binding(
+            get: { ServerConfig.manualOverride ?? "" },
+            set: { newValue in
+                Task {
+                    if newValue.isEmpty {
+                        await store.clearServerOverride()
+                    } else {
+                        await store.switchServer(to: newValue)
+                    }
+                }
+            }
+        )
+    }
+
+    private var updateNoticeBinding: Binding<Bool> {
+        Binding(
+            get: { store.updateNotice != nil },
+            set: { newValue in
+                if !newValue { store.updateNotice = nil }
+            }
+        )
+    }
+
+    // MARK: 检查更新
+
+    private func manualUpdateCheck() async {
+        isCheckingUpdate = true
+        defer { isCheckingUpdate = false }
+        await store.checkForUpdateManually()
+    }
+}
+
+// MARK: - 设置二级页面（1.1.3）
+
+/// 账号与安全（二级页面）：名字、登录账号、班组、手机号（绑定/更换）、
+/// 修改名字、修改密码、退出登录。退出登录放这里，不留在设置页主界面；
+/// 退出只清登录状态，离线缓存保留。
+struct AccountSecurityView: View {
+    @EnvironmentObject private var store: AppStore
+
+    @State private var showBindPhone = false
+    @State private var showChangePhone = false
+    @State private var showChangeName = false
+    @State private var showChangePassword = false
+    @State private var showLogoutConfirm = false
+
+    var body: some View {
+        Form {
+            Section("账号") {
+                HStack {
+                    Text("名字")
+                    Spacer()
+                    Text(store.displayUsername)
+                        .foregroundColor(.secondary)
+                }
+                // 登录用的账号名（username）：显示名可以改，这个不动；和显示名不一样才单独列一行。
+                if let username = store.user?.username, !username.isEmpty, username != store.displayUsername {
+                    HStack {
+                        Text("登录账号")
+                        Spacer()
+                        Text(username)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                HStack {
+                    Text("班组")
+                    Spacer()
+                    Text("\(store.myTeam)班")
+                        .foregroundColor(.secondary)
+                }
+                // 手机号：没绑点进去绑；绑了点进去换（换号走新号验证码，一月一次）。
+                Button {
+                    if store.user?.phone?.isEmpty == false {
+                        showChangePhone = true
+                    } else {
+                        showBindPhone = true
+                    }
+                } label: {
+                    HStack {
+                        Text("手机号")
+                        Spacer()
+                        Text(PhoneUtil.masked(store.user?.phone) ?? "未绑定")
+                            .foregroundColor(.secondary)
+                        Image(systemName: "chevron.right")
+                            .foregroundColor(.secondary)
+                    }
+                }
+                if store.user?.phone?.isEmpty == false {
+                    Button {
+                        showChangePhone = true
+                    } label: {
+                        HStack {
+                            Text("更换手机号")
+                            Spacer()
+                            Text("一个月只能换一次")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
+
+            Section("修改") {
+                Button {
+                    showChangeName = true
+                } label: {
+                    HStack {
+                        Text("修改名字")
+                        Spacer()
+                        Text("改显示名，登录账号不变")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                Button {
+                    showChangePassword = true
+                } label: {
+                    HStack {
+                        Text("修改密码")
+                        Spacer()
+                        Text("短信验证码验证，不限次数")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            Section {
+                Button(role: .destructive) {
+                    showLogoutConfirm = true
+                } label: {
+                    Text("退出登录")
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+            } footer: {
+                Text("退出后只清除本机的登录状态，离线缓存保留，下次登同一账号直接用缓存顶着。")
+            }
+        }
+        .navigationTitle("账号与安全")
+        .alert("退出登录", isPresented: $showLogoutConfirm) {
+            Button("取消", role: .cancel) { }
+            Button("退出", role: .destructive) {
+                Task { await store.logout() }
+            }
+        } message: {
+            Text("确定要退出登录吗？只清除登录状态，离线缓存会保留。")
+        }
+        .sheet(isPresented: $showBindPhone) {
+            BindPhoneSheet()
+        }
+        .sheet(isPresented: $showChangePhone) {
+            BindPhoneSheet(mode: .change)
+        }
+        .sheet(isPresented: $showChangeName) {
+            ChangeNameSheet()
+        }
+        .sheet(isPresented: $showChangePassword) {
+            ChangePasswordSheet()
+        }
+    }
+}
+
+/// 工资设置（二级页面）：基本工资、奖金系数、养老月扣（反推缴费基数）、
+/// 岗位、水电费、科室绩效奖金。保存走服务端接口，立即落盘，管理端即是最新。
+struct PaySettingsView: View {
+    @EnvironmentObject private var store: AppStore
+
+    @State private var baseSalaryText = ""
+    @State private var bonusCoefText = ""
+    @State private var pensionText = ""
+    @State private var position = "员工"
+    @State private var utilitiesText = ""
+    @State private var deptPerfText = ""
+    @State private var isSavingPay = false
+    @State private var saveMessage: String?
+
+    private let positions = ["员工", "现场组长", "自控组长", "班长"]
+
+    /// 养老月扣反推缴费基数：基数 = 养老月扣 ÷ 0.08（保留两位小数）。
+    private var derivedBase: Double? {
+        guard let pension = Double(pensionText.trimmingCharacters(in: .whitespaces)), pension > 0 else { return nil }
+        return PayCalc.round2(pension / 0.08)
+    }
+
+    var body: some View {
+        Form {
+            Section {
                 HStack {
                     Text("基本工资")
                     Spacer()
@@ -168,145 +448,11 @@ struct SettingsView: View {
                         .foregroundColor(.secondary)
                 }
             }
-
-            // 服务器线路只给老爷看（调试用），同事不显示。
-            if store.isOwner {
-                Section("服务器") {
-                    HStack {
-                        Text("当前线路")
-                        Spacer()
-                        Text(store.serverKind.displayName)
-                            .foregroundColor(.secondary)
-                    }
-                    Text(store.serverBaseURL ?? "未连接")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Picker("手动切换线路", selection: manualSelection) {
-                        Text("自动选路").tag("")
-                        ForEach(ServerConfig.allCandidates, id: \.baseURL) { candidate in
-                            Text("\(candidate.kind.displayName) · \(candidate.baseURL)").tag(candidate.baseURL)
-                        }
-                    }
-                    .pickerStyle(.menu)
-                }
-            }
-
-            Section("更新") {
-                Button {
-                    Task { await manualUpdateCheck() }
-                } label: {
-                    HStack {
-                        Text("检查更新")
-                        Spacer()
-                        if isCheckingUpdate {
-                            ProgressView()
-                        } else {
-                            Text("当前 \(UpdateChecker.currentVersion)")
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
-            }
-
-            Section("反馈") {
-                Button {
-                    showFeedback = true
-                } label: {
-                    HStack {
-                        Text("反馈问题")
-                        Spacer()
-                        Text("会附上最近 24 小时运行日志")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
-
-            Section("关于") {
-                HStack {
-                    Text("版本")
-                    Spacer()
-                    Text(UpdateChecker.currentVersion)
-                        .foregroundColor(.secondary)
-                }
-                HStack {
-                    Text("Bundle ID")
-                    Spacer()
-                    Text("com.paiban.app")
-                        .foregroundColor(.secondary)
-                }
-                HStack {
-                    Text("名称")
-                    Spacer()
-                    Text("排班空间")
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            Section {
-                Button(role: .destructive) {
-                    showLogoutConfirm = true
-                } label: {
-                    Text("退出登录")
-                        .frame(maxWidth: .infinity, alignment: .center)
-                }
-            } footer: {
-                Text("退出后会清除本机的登录状态和该账号的离线缓存。")
-            }
         }
-        .navigationTitle("设置")
+        .navigationTitle("工资设置")
         .onAppear(perform: fillPayFields)
         .onChange(of: store.user?.paySettings) { _ in fillPayFields() }
-        .alert("退出登录", isPresented: $showLogoutConfirm) {
-            Button("取消", role: .cancel) { }
-            Button("退出", role: .destructive) {
-                Task { await store.logout() }
-            }
-        } message: {
-            Text("确定要退出登录吗？本机的离线缓存会一起清除。")
-        }
-        .alert("检查更新", isPresented: updateNoticeBinding) {
-            Button("知道了", role: .cancel) {
-                store.updateNotice = nil
-            }
-        } message: {
-            Text(store.updateNotice ?? "")
-        }
-        .sheet(isPresented: $showFeedback) {
-            FeedbackView()
-        }
-        .fullScreenCover(isPresented: $showAdminBackend) {
-            AdminBackendView()
-        }
     }
-
-    // MARK: 手动选线路的绑定
-
-    private var manualSelection: Binding<String> {
-        Binding(
-            get: { ServerConfig.manualOverride ?? "" },
-            set: { newValue in
-                Task {
-                    if newValue.isEmpty {
-                        await store.clearServerOverride()
-                    } else {
-                        await store.switchServer(to: newValue)
-                    }
-                }
-            }
-        )
-    }
-
-    private var updateNoticeBinding: Binding<Bool> {
-        Binding(
-            get: { store.updateNotice != nil },
-            set: { newValue in
-                if !newValue { store.updateNotice = nil }
-            }
-        )
-    }
-
-    // MARK: 工资设置
 
     private func fillPayFields() {
         let settings = store.user?.paySettings
@@ -354,12 +500,399 @@ struct SettingsView: View {
             saveMessage = (error as? APIError)?.message ?? error.localizedDescription
         }
     }
+}
 
-    // MARK: 检查更新
+/// 关于（二级页面）：更新日志（按版本列）、功能介绍、当前版本与版权。
+struct AboutView: View {
+    var body: some View {
+        Form {
+            Section("更新日志") {
+                changelog(version: "1.1.3", items: [
+                    "手机号验证码登录（账号密码登录也保留）",
+                    "老账号首次打开强制绑定手机号",
+                    "设置页可改密码、改名字、更换手机号（换号一月一次）",
+                    "退出登录只清登录状态，离线缓存保留",
+                    "调班/请假按排班空间重做：选对方班互换、预览两边、删了两边一起恢复",
+                    "其他班日历只读，可改的班跟着设置页的班组走",
+                    "日历：字体收小、间距收紧、假标不再压阴历、三薪标回、月统计改三薪/加班",
+                    "排班页滑动修掉帧；工资页切月加动画；「可改」行滑动不再误触",
+                    "设置页改成二级菜单：账号与安全、工资设置、关于",
+                    "点更新自动复制提取码，提示框里也直接显示提取码",
+                    "更新包改名「排班空间1.1.3.zip」",
+                ])
+                changelog(version: "1.1.2", items: [
+                    "日历按新样式重做：阴历、节气、法定假日",
+                    "工资页手势锁定、切月动画",
+                    "单月可改绩效系数、奖金系数、加班天数、水电费",
+                    "编辑框点外面自动收起",
+                ])
+                changelog(version: "1.1.1", items: [
+                    "科室绩效默认值，设置页可填",
+                    "切月缓存、工资页左右滑",
+                    "云优先，服务器区只对老爷显示",
+                    "管理员权限分层；反馈页改版",
+                ])
+                changelog(version: "1.1", items: [
+                    "首个原生版本：排班日历、工资预估、调班请假",
+                ])
+            }
+            Section("功能介绍") {
+                Text("排班空间是 603车间倒班同事的排班与工资小工具：四班 8 天一轮日历（含阴历、节气、法定假日与三薪），调班/请假、工资预估（累计预扣个税），离线缓存先顶着，没网也能看；登录支持账号密码与手机号验证码。")
+            }
+            Section("当前版本") {
+                HStack {
+                    Text("版本")
+                    Spacer()
+                    Text(UpdateChecker.currentVersion)
+                        .foregroundColor(.secondary)
+                }
+                HStack {
+                    Text("Bundle ID")
+                    Spacer()
+                    Text("com.paiban.app")
+                        .foregroundColor(.secondary)
+                }
+                HStack {
+                    Text("名称")
+                    Spacer()
+                    Text("排班空间")
+                        .foregroundColor(.secondary)
+                }
+            }
+            Section {
+                Text("© 2026 排班空间")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+        }
+        .navigationTitle("关于")
+    }
 
-    private func manualUpdateCheck() async {
-        isCheckingUpdate = true
-        defer { isCheckingUpdate = false }
-        await store.checkForUpdateManually()
+    private func changelog(version: String, items: [String]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(version).bold()
+            ForEach(items, id: \.self) { item in
+                Text("· \(item)")
+                    .font(.callout)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+// MARK: - 绑定手机号 / 改名字 / 改密码（1.1.3）
+
+/// 绑定手机号的两种模式：首次绑定 / 更换手机号。
+enum BindPhoneMode {
+    case bind
+    case change
+}
+
+/// 绑定手机号：输手机号 → 发验证码（60 秒倒计时）→ 输 6 位码 → 绑定。
+/// 绑完就能用手机号 + 验证码登录；服务端立即落盘，管理端即是最新。
+/// 更换模式：验证码发到新号，换完旧号不能再登录；一个月只能换一次，
+/// 发码前先按上次换号时间算，限期内不发码、直接报下次可换时间。
+/// forced = 强制绑定（1.1.3 升级门）：没有取消按钮，绑完才走。
+struct BindPhoneSheet: View {
+    var mode: BindPhoneMode = .bind
+    var forced: Bool = false
+    @EnvironmentObject private var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var phone = ""
+    @State private var code = ""
+    @State private var countdown = 0
+    @State private var sending = false
+    @State private var saving = false
+    @State private var message: String?
+    @State private var isError = false
+
+    private var isChange: Bool { mode == .change }
+
+    /// 上次换号时间（服务端记的 ISO 时间戳）。
+    private var lastPhoneChangeDate: Date? {
+        guard let last = store.user?.lastPhoneChangeAt, !last.isEmpty else { return nil }
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return parser.date(from: last)
+    }
+
+    /// 上次换号 + 30 天 = 下次可换时间（与服务端算法一致）。
+    private var nextChangeDate: String? {
+        guard let date = lastPhoneChangeDate else { return nil }
+        let out = DateFormatter()
+        out.dateFormat = "yyyy-MM-dd"
+        return out.string(from: date.addingTimeInterval(30 * 86400))
+    }
+
+    /// 还在 30 天换号窗口内（没到下次可换时间）。
+    private var withinChangeLimit: Bool {
+        guard let date = lastPhoneChangeDate else { return false }
+        return Date().timeIntervalSince(date) < 30 * 86400
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if isChange, let current = store.user?.phone, !current.isEmpty {
+                    Section {
+                        HStack {
+                            Text("当前绑定")
+                            Spacer()
+                            Text(PhoneUtil.masked(current) ?? current)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                Section {
+                    TextField(isChange ? "新手机号（11 位大陆手机号）" : "手机号（11 位大陆手机号）", text: $phone)
+                        .keyboardType(.numberPad)
+                    HStack {
+                        TextField("6 位验证码", text: $code)
+                            .keyboardType(.numberPad)
+                        Button {
+                            Task { await sendCode() }
+                        } label: {
+                            Text(countdown > 0 ? "\(countdown) 秒后重发" : "获取验证码")
+                        }
+                        .disabled(sending || countdown > 0 || !PhoneUtil.isValid(phone))
+                    }
+                } footer: {
+                    if isChange {
+                        Text("验证码发到新手机号；换完旧号不能再登录。一个月只能换一次" + (nextChangeDate.map { "，下次可换时间：\($0)" } ?? "") + "。")
+                    } else {
+                        Text("绑完就能用手机号 + 验证码登录；一个手机号只能绑一个账号。")
+                    }
+                }
+                if let message {
+                    Section {
+                        Text(message).foregroundColor(isError ? .red : .green)
+                    }
+                }
+            }
+            .navigationTitle(isChange ? "更换手机号" : "绑定手机号")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                if !forced {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("取消") { dismiss() }
+                    }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(isChange ? "更换" : "绑定") { Task { await bind() } }
+                        .disabled(saving || !PhoneUtil.isValid(phone) || code.count != 6)
+                }
+            }
+        }
+    }
+
+    private func sendCode() async {
+        message = nil
+        isError = false
+        // 换号限流先在本地算：限期内不发码（省一条短信），直接报下次可换时间；
+        // 服务端还会再拦一道（429），报错原样透传。
+        if isChange, withinChangeLimit {
+            message = "手机号一个月只能换一次" + (nextChangeDate.map { "，下次可换时间：\($0)" } ?? "")
+            isError = true
+            return
+        }
+        sending = true
+        defer { sending = false }
+        do {
+            try await store.api.sendSmsCode(phone: phone.trimmingCharacters(in: .whitespaces))
+            countdown = 60
+            Task {
+                while countdown > 0 {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    countdown -= 1
+                }
+            }
+        } catch {
+            message = (error as? APIError)?.message ?? error.localizedDescription
+            isError = true
+        }
+    }
+
+    private func bind() async {
+        message = nil
+        isError = false
+        saving = true
+        defer { saving = false }
+        do {
+            try await store.bindPhone(phone: phone.trimmingCharacters(in: .whitespaces),
+                                      code: code.trimmingCharacters(in: .whitespaces))
+            dismiss()
+        } catch {
+            message = (error as? APIError)?.message ?? error.localizedDescription
+            isError = true
+        }
+    }
+}
+
+/// 改名字：改的是显示名（displayName），随意改、不限次数、不用验证码；
+/// 登录用的账号名（username）不动。留空保存 = 清回登录账号名。
+struct ChangeNameSheet: View {
+    @EnvironmentObject private var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var name = ""
+    @State private var saving = false
+    @State private var message: String?
+    @State private var isError = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    TextField("显示名（最多 32 个字）", text: $name)
+                } footer: {
+                    Text("改的是显示名，登录用的账号名不变；留空保存会清回账号名。")
+                }
+                if let message {
+                    Section {
+                        Text(message).foregroundColor(isError ? .red : .green)
+                    }
+                }
+            }
+            .navigationTitle("修改名字")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") { Task { await save() } }
+                        .disabled(saving || name.count > 32)
+                }
+            }
+            .onAppear {
+                name = store.user?.displayName ?? ""
+            }
+        }
+    }
+
+    private func save() async {
+        message = nil
+        isError = false
+        saving = true
+        defer { saving = false }
+        do {
+            try await store.saveProfile(displayName: name.trimmingCharacters(in: .whitespaces))
+            dismiss()
+        } catch {
+            message = (error as? APIError)?.message ?? error.localizedDescription
+            isError = true
+        }
+    }
+}
+
+/// 改密码：必须先绑手机号，短信验证码验证身份；不限次数，随时能改
+///（老爷 2026-11-24 04:54 改口：之前「一个月只能改一次」作废，改绑手机号才一月一次）。
+/// 验证码发到已绑的手机号。
+struct ChangePasswordSheet: View {
+    @EnvironmentObject private var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var code = ""
+    @State private var newPassword = ""
+    @State private var confirmPassword = ""
+    @State private var countdown = 0
+    @State private var sending = false
+    @State private var saving = false
+    @State private var message: String?
+    @State private var isError = false
+
+    private var boundPhone: String? { store.user?.phone }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if let phone = boundPhone {
+                    Section {
+                        HStack {
+                            Text("验证手机号")
+                            Spacer()
+                            Text(PhoneUtil.masked(phone) ?? phone)
+                                .foregroundColor(.secondary)
+                        }
+                        HStack {
+                            TextField("6 位验证码", text: $code)
+                                .keyboardType(.numberPad)
+                            Button {
+                                Task { await sendCode() }
+                            } label: {
+                                Text(countdown > 0 ? "\(countdown) 秒后重发" : "获取验证码")
+                            }
+                            .disabled(sending || countdown > 0)
+                        }
+                    } footer: {
+                        Text("验证码发到已绑的手机号；不限次数，随时能改。")
+                    }
+                    Section("新密码") {
+                        SecureField("新密码（至少 6 位）", text: $newPassword)
+                        SecureField("再输一次新密码", text: $confirmPassword)
+                    }
+                } else {
+                    Section {
+                        Text("还没绑定手机号。改密码要先绑手机号（短信验证码验证身份）。")
+                            .foregroundColor(.secondary)
+                    }
+                }
+                if let message {
+                    Section {
+                        Text(message).foregroundColor(isError ? .red : .green)
+                    }
+                }
+            }
+            .navigationTitle("修改密码")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("保存") { Task { await save() } }
+                        .disabled(saving || boundPhone == nil || code.count != 6
+                                  || newPassword.count < 6 || newPassword != confirmPassword)
+                }
+            }
+        }
+    }
+
+    private func sendCode() async {
+        guard let phone = boundPhone else { return }
+        message = nil
+        isError = false
+        sending = true
+        defer { sending = false }
+        do {
+            try await store.api.sendSmsCode(phone: phone)
+            countdown = 60
+            Task {
+                while countdown > 0 {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    countdown -= 1
+                }
+            }
+        } catch {
+            message = (error as? APIError)?.message ?? error.localizedDescription
+            isError = true
+        }
+    }
+
+    private func save() async {
+        guard let phone = boundPhone else { return }
+        message = nil
+        isError = false
+        saving = true
+        defer { saving = false }
+        do {
+            try await store.changePassword(phone: phone,
+                                           code: code.trimmingCharacters(in: .whitespaces),
+                                           newPassword: newPassword)
+            dismiss()
+        } catch {
+            message = (error as? APIError)?.message ?? error.localizedDescription
+            isError = true
+        }
     }
 }

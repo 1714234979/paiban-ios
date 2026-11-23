@@ -171,6 +171,18 @@ enum ShiftStyle {
         }
     }
 
+    /// 几个单班并成一个（顶岗/替班后那天上的班）：单班 + 单班 → 双班；
+    /// 休息 + 单班 → 那个单班。顺序按 早、日、中（早中班、日中班）。
+    /// 调用前应已排除相同班与早日组合。
+    static func combined(_ parts: [String]) -> String {
+        let comps = parts.filter { $0 != "休息" }
+        if comps.isEmpty { return "休息" }
+        if comps.count == 1 { return comps[0] }
+        let order = ["早班", "日班", "中班"]
+        let sorted = comps.sorted { (order.firstIndex(of: $0) ?? 99) < (order.firstIndex(of: $1) ?? 99) }
+        return sorted.map { String($0.prefix(1)) }.joined() + "班"
+    }
+
     static func isDouble(_ shift: String) -> Bool {
         shift == "早中班" || shift == "日中班" || shift == "早日班"
     }
@@ -318,12 +330,32 @@ enum ScheduleCalculator {
 // MARK: - 用户 / Profile
 
 /// GET /api/v1/auth/login 与注册返回的公开用户信息（user 字段）。
+/// 大陆手机号工具（1.1.3，登录 / 绑定 / 改密码共用）。
+enum PhoneUtil {
+    /// 校验：1 开头、第二位 3–9、共 11 位。
+    static func isValid(_ s: String) -> Bool {
+        let t = s.trimmingCharacters(in: .whitespaces)
+        guard t.count == 11, t.hasPrefix("1") else { return false }
+        let second = t[t.index(t.startIndex, offsetBy: 1)]
+        guard ("3"..."9").contains(second) else { return false }
+        return t.allSatisfy { $0.isNumber }
+    }
+    /// 脱敏：13812345678 → 138****5678。
+    static func masked(_ phone: String?) -> String? {
+        guard let phone, phone.count == 11 else { return nil }
+        return "\(phone.prefix(3))****\(phone.suffix(4))"
+    }
+}
+
 struct PublicUser: Codable, Equatable {
     var id: String?
     var username: String?
     var role: String?
     var enabled: Bool?
     var canWrite: Bool?
+    var phone: String?
+    var displayName: String?
+    var lastPhoneChangeAt: String?
     var apiKeyHint: String?
     var passwordViewable: Bool?
     var createdAt: String?
@@ -337,6 +369,9 @@ struct UserProfile: Codable, Equatable {
     var role: String?
     var enabled: Bool?
     var canWrite: Bool?
+    var phone: String?
+    var displayName: String?
+    var lastPhoneChangeAt: String?
     var passwordViewable: Bool?
     var team: String?
     var teamHistory: [TeamHistoryEntry]?
@@ -474,6 +509,30 @@ struct LeaveRecord: Codable, Equatable, Identifiable {
     var type: String?
     var note: String?
     var id: String { date }
+}
+
+/// POST /api/v1/me/swap 返回：{coverDate, paybackDate}（paybackDate 为空 = 待还班）。
+struct SwapSaveResult: Decodable {
+    var coverDate: String?
+    var paybackDate: String?
+}
+
+/// GET /api/v1/me/teams/range 返回：{start, teams: {A:[DaySchedule], B:[...], C:[...], D:[...]}}。
+/// 调班候选卡片与还班日列表用（四班同取）；自己班的日程以 /me/month 为准，不用这里的。
+struct TeamsRangeResponse: Decodable {
+    var start: String?
+    var teams: [String: [DaySchedule]]?
+}
+
+/// 顶岗/替班评估（空间 evalCover 的 App 版）：某人替我上某个班，
+/// 他那天变成什么、行不行、不行是为什么。
+/// - ownShift：他那天原来的班；result：替我之后他那天变成的班（nil 表示不行）。
+/// - ownShift 是“休息”时 result 就是加上去的那个班——只上一个班，不算双班。
+struct CoverEval {
+    var eligible: Bool
+    var reason: String?
+    var ownShift: String
+    var result: String?
 }
 
 /// 单日加班记录：{date, start, end, minutes, note}。start/end 是 HH:MM；
@@ -747,6 +806,18 @@ enum ChineseCalendar {
 
     /// 某天的信息（带缓存：同一天只算一次，滑页时不重算）。
     private static var cache: [String: DayInfo] = [:]
+
+    /// 1.1.3：预热某个月所有日期的阴历缓存（只填缓存、不返回值）。
+    /// 必须在主线程调用（DateUtil 用共享 DateFormatter，非线程安全）。
+    /// 调用方按月分批、每批之间让出主线程，避免一次算 12 个月堵住界面。
+    static func warmMonth(year: Int, month: Int) {
+        guard let first = DateUtil.firstDayOfMonth(year: year, month: month) else { return }
+        let days = DateUtil.daysInMonth(year: year, month: month)
+        for offset in 0..<days {
+            guard let date = DateUtil.calendar.date(byAdding: .day, value: offset, to: first) else { continue }
+            _ = info(for: DateUtil.string(from: date))
+        }
+    }
 
     static func info(for dateString: String) -> DayInfo {
         if let cached = cache[dateString] { return cached }

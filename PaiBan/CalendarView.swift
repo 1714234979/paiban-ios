@@ -58,6 +58,21 @@ struct CalendarView: View {
             let prev = yearMonth(from: pageIndex - 1)
             store.prefetchMonth(year: next.year, month: next.month)
             store.prefetchMonth(year: prev.year, month: prev.month)
+            // 1.1.3：阴历缓存预热 + 工资输入补齐（日历的三薪标与底部统计要用）。
+            // 阴历按月分批算（主线程，DateFormatter 不线程安全），每批之间让出主线程，
+            // 避免一次算 12 个月堵住界面；滑到新月时阴历已是缓存，不再现算。
+            // 工资输入（全年天数 + 配置）后台补，到了 payInputsVersion +1 触发重画。
+            Task {
+                for idx in pageRange {
+                    let ym = yearMonth(from: idx)
+                    ChineseCalendar.warmMonth(year: ym.year, month: ym.month)
+                    await Task.yield()
+                }
+            }
+            Task {
+                let years = Set(pageRange.map { yearMonth(from: $0).year })
+                await store.ensureYearDays(years: Array(years).sorted())
+            }
         }
         // 滑到哪页，Store 就跟到哪月（汇总、调班/请假记录都跟着走），并预取前后月。
         // 相邻月预取不等当前月刷新完，并行发起，切月不再出现「加载中」。
@@ -255,10 +270,14 @@ struct CalendarView: View {
 
     // MARK: 月度汇总
 
+    /// 1.1.3：删掉「双班 X 天」，改成「三薪 X 天」「加班 X 天」，
+    /// 取当月工资算法里的 tripleDays / overtimeDays（12 月是三薪 0 天、加班 1 天）；
+    /// 只在看自己班且算得出时显示数字，算不出（输入没到齐）先显示“—”，输入到了重画。
+    /// 其他几项（应出勤、实际出勤、请假、休息）不动。
     private var summaryLine: some View {
         Group {
             if let stats = displayedMonth?.stats {
-                Text("当月应出勤 \(MoneyUtil.int(stats.basicDays)) 天 · 实际出勤 \(MoneyUtil.int(stats.actualShifts)) 个班 · 双班 \(MoneyUtil.int(stats.doubleDays)) 天 · 请假 \(MoneyUtil.int(stats.leaveDays)) 天 · 休息 \(MoneyUtil.int(stats.restDays)) 天")
+                Text(summaryText(stats: stats))
                     .font(.subheadline)
                     .multilineTextAlignment(.center)
                     .padding(12)
@@ -267,6 +286,23 @@ struct CalendarView: View {
                     .cornerRadius(12)
             }
         }
+    }
+
+    private func summaryText(stats: MonthStats) -> String {
+        let ym = store.currentYearMonth
+        var triple = "—"
+        var overtime = "—"
+        if let info = store.triplePayInfo(year: ym.year, month: ym.month) {
+            triple = formatDays(info.tripleDays)
+            overtime = formatDays(info.overtimeDays)
+        }
+        return "当月应出勤 \(MoneyUtil.int(stats.basicDays)) 天 · 实际出勤 \(MoneyUtil.int(stats.actualShifts)) 个班 · 三薪 \(triple) 天 · 加班 \(overtime) 天 · 请假 \(MoneyUtil.int(stats.leaveDays)) 天 · 休息 \(MoneyUtil.int(stats.restDays)) 天"
+    }
+
+    /// 天数显示：整数不带小数（如 0、1），小数保留 1 位。
+    private func formatDays(_ value: Double) -> String {
+        if value == value.rounded() { return "\(Int(value))" }
+        return String(format: "%.1f", value)
     }
 
     // MARK: 调班 / 请假记录
@@ -412,7 +448,7 @@ struct MonthPageView: View {
                     .onTapGesture { onSelectAdjacentMonth(prevYearMonth.year, prevYearMonth.month) }
             }
             ForEach(monthData.days ?? [], id: \.date) { day in
-                DayCell(day: day, isToday: day.date == DateUtil.string(from: Date()), isSelected: isSelected(day.date))
+                DayCell(day: day, isToday: day.date == DateUtil.string(from: Date()), isSelected: isSelected(day.date), isTriplePay: tripleDates.contains(day.date))
                     .onTapGesture { onSelectDay(day) }
             }
             // 下月开头几天（灰色，点后跳到下月），最后一周补满，左右滑动无断层。
@@ -421,6 +457,12 @@ struct MonthPageView: View {
                     .onTapGesture { onSelectAdjacentMonth(nextYearMonth.year, nextYearMonth.month) }
             }
         }
+    }
+
+    /// 本月三薪日（工资算法里 tripleDays 的那几天）：本地算、带缓存；
+    /// 输入没到齐算不出时为空（先不标，等输入到了重画）。只在看自己班时有。
+    private var tripleDates: Set<String> {
+        store.triplePayInfo(year: year, month: month)?.tripleDates ?? []
     }
 
     private var monthData: MonthSchedule {
@@ -461,13 +503,19 @@ struct MonthPageView: View {
 /// 法定节假日左上角绿“假”、调休上班日红“班”；当天描绿边。
 /// 关键：所有班次的 pill 都是同一固定高度 28pt、通栏、圆角；
 /// 双班时在同一个 28pt 高度里上下叠两个 13pt 小 pill，不撑高格子。
-/// 整格固定 64pt（日期行 28 + 间距 4 + pill 28 + 上下边距 4），行距自适应靠网格间距调。
+/// 整格固定 64pt（日期行 26 + 间距 2 + pill 28 + 上下边距 8），行距自适应靠网格间距调。
+/// 1.1.3：阳历数字 18→16pt（收一收、别太高）；日期与色块间距 4→2pt；
+/// 请假「假」标从号数旁边移到左列、和法定「假/班」上下叠放（之前号数+红标太宽、压着右边阴历字）；
+/// 三薪日：同一个 28pt 色块里上下两行——上面班次名、下面半透明白字「三薪」，
+/// 和色块重叠、不另起一行；法定「假/班」保持原样，两套标法不混。
 struct DayCell: View {
     let day: DaySchedule
     let isToday: Bool
     let isSelected: Bool
     /// 上月/下月补进来的日期：灰色显示，点后跳到对应月。
     var isAdjacent: Bool = false
+    /// 三薪日（工资算法里 tripleDays 的那几天）：色块里加一行半透明「三薪」。
+    var isTriplePay: Bool = false
 
     private let pillHeight: CGFloat = 28
 
@@ -477,35 +525,34 @@ struct DayCell: View {
     }
 
     var body: some View {
-        VStack(spacing: 4) {
-            // 日期行（三栏，互不重叠）：左 假/班角标（10pt，没有留空、号数位置一致）
-            // + 中 阳历大数字（居中，请假红标跟在号数后）
-            // + 右 阴历/节气/节日小字（竖排两字，节气/节日红字、阴历灰字）。
+        VStack(spacing: 2) {
+            // 日期行（三栏，互不重叠）：左 法定假/班 + 请假标上下叠（12pt，没有留空）
+            // + 中 阳历大数字（居中） + 右 阴历/节气/节日小字（竖排两字，节气/节日红字、阴历灰字）。
+            // 请假标放左列：之前跟在号数后面，号数+红标比中间栏宽、压着右边阴历字（11-02、11-03 就是这么叠上的）。
             HStack(alignment: .top, spacing: 1) {
-                if let mark = extra.mark, !isAdjacent {
-                    Text(mark == .holiday ? "假" : "班")
-                        .font(.system(size: 9, weight: .bold))
-                        .foregroundColor(mark == .holiday ? .green : .red)
-                        .frame(width: 10, alignment: .leading)
-                } else {
-                    Color.clear.frame(width: 10, height: 9)
-                }
-                HStack(alignment: .top, spacing: 2) {
-                    Text("\(day.dayNumber)")
-                        .font(.system(size: 18, weight: isToday ? .bold : .semibold))
-                        .foregroundColor(isAdjacent ? .secondary : .primary)
+                VStack(alignment: .leading, spacing: 1) {
+                    if let mark = extra.mark, !isAdjacent {
+                        Text(mark == .holiday ? "假" : "班")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(mark == .holiday ? .green : .red)
+                    } else {
+                        Color.clear.frame(width: 12, height: 9)
+                    }
                     if day.onLeave == true && !isAdjacent {
                         Text("假")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(.system(size: 8, weight: .bold))
                             .foregroundColor(.white)
-                            .padding(.horizontal, 3)
+                            .padding(.horizontal, 2)
                             .padding(.vertical, 1)
                             .background(Color.red)
-                            .cornerRadius(4)
-                            .padding(.top, 2)
+                            .cornerRadius(3)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .center)
+                .frame(width: 12, alignment: .leading)
+                Text("\(day.dayNumber)")
+                    .font(.system(size: 16, weight: isToday ? .bold : .semibold))
+                    .foregroundColor(isAdjacent ? .secondary : .primary)
+                    .frame(maxWidth: .infinity, alignment: .center)
                 VStack(spacing: 0) {
                     ForEach(Array(extra.lunarText.enumerated()), id: \.offset) { _, ch in
                         Text(String(ch))
@@ -516,23 +563,66 @@ struct DayCell: View {
                 .frame(width: 9, alignment: .leading)
                 .padding(.top, 1)
             }
-            .frame(height: 28)
+            .frame(height: 26)
 
             // 班次 pill：固定 28pt；补的日期用班次色但半透明（班次色不变，只是淡一点）。
+            // 三薪日：色块里上下两行——上面班次名、下面半透明白字「三薪」，和色块重叠，
+            // 不另起一行、不占格子外的地方；双班三薪日上行两个班次并排、下行「三薪」。
             Group {
                 if day.isDouble == true {
-                    VStack(spacing: 2) {
-                        ForEach(ShiftStyle.parts(of: day.shift), id: \.self) { part in
-                            Text(TeamInfo.shortName(part))
-                                .font(.system(size: 10, weight: .bold))
-                                .foregroundColor(.white)
+                    if isTriplePay && !isAdjacent {
+                        VStack(spacing: 0) {
+                            HStack(spacing: 2) {
+                                ForEach(ShiftStyle.parts(of: day.shift), id: \.self) { part in
+                                    Text(TeamInfo.shortName(part))
+                                        .font(.system(size: 10, weight: .bold))
+                                        .foregroundColor(.white)
+                                        .frame(maxWidth: .infinity)
+                                        .frame(height: 15)
+                                        .background(ShiftStyle.color(for: part))
+                                        .cornerRadius(4)
+                                }
+                            }
+                            Text("三薪")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(.white.opacity(0.9))
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 13)
-                                .background(ShiftStyle.color(for: part))
-                                .cornerRadius(4)
+                                .background(Color.black.opacity(0.22))
                         }
+                        .frame(height: pillHeight)
+                        .clipShape(RoundedRectangle(cornerRadius: 7))
+                    } else {
+                        VStack(spacing: 2) {
+                            ForEach(ShiftStyle.parts(of: day.shift), id: \.self) { part in
+                                Text(TeamInfo.shortName(part))
+                                    .font(.system(size: 10, weight: .bold))
+                                    .foregroundColor(.white)
+                                    .frame(maxWidth: .infinity)
+                                    .frame(height: 13)
+                                    .background(ShiftStyle.color(for: part))
+                                    .cornerRadius(4)
+                            }
+                        }
+                        .frame(height: pillHeight)
                     }
+                } else if isTriplePay && !isAdjacent {
+                    VStack(spacing: 0) {
+                        Text(day.isRest ? "休" : TeamInfo.shortName(day.shift))
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(day.isRest ? ShiftStyle.color(for: "休息") : .white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 15)
+                        Text("三薪")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.white.opacity(0.85))
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 13)
+                    }
+                    .frame(maxWidth: .infinity)
                     .frame(height: pillHeight)
+                    .background(day.isRest ? ShiftStyle.background(for: "休息") : ShiftStyle.color(for: day.shift))
+                    .cornerRadius(7)
                 } else {
                     Text(day.isRest ? "休" : TeamInfo.shortName(day.shift))
                         .font(.system(size: 12, weight: .bold))

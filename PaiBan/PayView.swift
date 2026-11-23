@@ -14,13 +14,24 @@ struct PayView: View {
     @FocusState private var editFieldFocused: Bool
     /// 横滑锁定：横向位移占优时锁成横滑、禁掉纵向滚动，斜滑按主导方向判定。
     @State private var horizontalSwipeLocked = false
+    /// 切月滑动方向（1 = 下个月：左滑，新内容从右边滑入；-1 = 上个月：右滑，从左边滑入）。
+    @State private var slideDirection: Int = 1
 
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
                 headerCard
                 monthStepper
+                // 1.1.3：切月动画——内容按月份给唯一 id，换月时旧内容滑出、新内容滑入；
+                // 方向由 slideDirection 定（左滑下个月从右入、右滑上个月从左入）。
+                // 之前只在 withAnimation 里改月份，工资内容是 onChange 里异步刷的、
+                // 不在同一个动画事务里，又没有 .transition，所以看着没有动画。
                 monthBreakdown
+                    .id("\(store.payYearMonth.year)-\(store.payYearMonth.month)")
+                    .transition(.asymmetric(
+                        insertion: .move(edge: slideDirection > 0 ? .trailing : .leading),
+                        removal: .move(edge: slideDirection > 0 ? .leading : .trailing)
+                    ))
                 noteCard
             }
             .padding(.bottom, 24)
@@ -50,9 +61,7 @@ struct PayView: View {
                     let w = value.translation.width
                     let h = value.translation.height
                     guard abs(w) > 60, abs(w) > abs(h) * 1.5 else { return }
-                    withAnimation(.easeInOut(duration: 0.25)) {
-                        stepPayMonth(by: w < 0 ? 1 : -1)
-                    }
+                    stepPayMonth(by: w < 0 ? 1 : -1)
                 }
         )
         // 切到别的页面（排班/设置）时，敞着的编辑框自动收起，丢弃未保存的改动。
@@ -115,7 +124,13 @@ struct PayView: View {
         // 滑页范围与排班页一致：2024-01 ~ 2030-12，到边就停。
         let idx = year * 12 + (month - 1)
         guard idx >= 2024 * 12, idx < 2031 * 12 else { return }
-        store.payYearMonth = (year, month)
+        // 滑动方向：左滑下个月（新内容从右边滑入）、右滑上个月（从左边滑入）。
+        slideDirection = offset > 0 ? 1 : -1
+        // 1.1.3：月份 + 工资内容包在同一个动画事务里（setPayMonth 同步算好当月工资），
+        // 再靠 monthBreakdown 的 .id + .transition 做左右滑动；按钮切月也走这里，同样有动画。
+        withAnimation(.easeInOut(duration: 0.25)) {
+            store.setPayMonth(year: year, month: month)
+        }
     }
 
     // MARK: 月度明细
@@ -272,17 +287,21 @@ struct PayView: View {
 
     /// 一行可改的数值：点“可改”弹出 inline 编辑框（输入框 + 保存/取消），下面再跟分隔线。
     /// 只有老爷能改；点外面或切页面自动收起（dismissEdit）。
+    /// 1.1.3：只有「可改」这个小徽标是按钮（明确的编辑入口），整行不再是按钮。
+    /// 之前整行都是 Button，左右滑切月时手指从行上划过、抬手还在行内，
+    /// Button 就当成一次点按、把编辑框打开了。现在行本身不可点，横滑只会触发切月；
+    /// 想改就点「可改」徽标（小目标，横滑起止很难同时落在它上面），误触基本杜绝。
     private func editableRow(title: String, valueText: String, field: PayRecordField, currentValue: String, placeholder: String) -> some View {
         VStack(spacing: 0) {
-            Button {
-                openEdit(field, currentValue: currentValue)
-            } label: {
-                HStack {
-                    Text(title)
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Text(valueText)
-                    if store.isOwner {
+            HStack {
+                Text(title)
+                    .foregroundColor(.secondary)
+                Spacer()
+                Text(valueText)
+                if store.isOwner {
+                    Button {
+                        openEdit(field, currentValue: currentValue)
+                    } label: {
                         Text("可改")
                             .font(.caption)
                             .foregroundColor(.blue)
@@ -291,11 +310,11 @@ struct PayView: View {
                             .background(Color.blue.opacity(0.08))
                             .cornerRadius(6)
                     }
+                    .buttonStyle(.plain)
                 }
-                .font(.subheadline)
-                .padding(.vertical, 5)
             }
-            .disabled(!store.isOwner)
+            .font(.subheadline)
+            .padding(.vertical, 5)
             if editingField == field {
                 VStack(spacing: 8) {
                     HStack {

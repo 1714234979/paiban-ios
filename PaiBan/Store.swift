@@ -98,6 +98,12 @@ final class AppStore: ObservableObject {
     var swapsCache: [String: [SwapRecord]] = [:]       // key: "yyyy-MM"
     var leavesCache: [String: [LeaveRecord]] = [:]     // key: "yyyy-MM"
     var overtimeCache: [String: [OvertimeRecord]] = [:] // key: "yyyy-MM"
+    // 本地算好的月排班（8 天一轮）备忘：monthFor 每调一次就重算一次是 1.1.2 掉帧的主因，
+    // 这里按班组+年月记下来，只算一次；真数据到了走 monthCache 覆盖，不影响预取。
+    var localMonthCache: [String: MonthSchedule] = [:]  // key 同 monthCacheKey
+    /// 工资输入（payConfig / 全年天数）版本号：日历要靠它重画三薪标与底部统计，
+    /// 输入到齐就 +1 触发重画（yearDaysCache / payConfig 本身不是 @Published）。
+    @Published var payInputsVersion = 0
     private var fetchingMonths: Set<String> = []       // 正在后台取的月份，避免重复发请求
 
     // App 内更新提示
@@ -109,6 +115,11 @@ final class AppStore: ObservableObject {
     private let lastUserIdKey = "paiban.lastUserId"
 
     var myTeam: String { user?.displayTeam ?? "B" }
+
+    /// 当前看的日历能不能改：只有正在看的班组 = 用户当前在设置页设定的班组时才能改。
+    /// （老爷 2026-11-24 04:49/04:50 定：切到别的班看日历是纯只读；能改的班跟着设置走，
+    /// 换班组后权限跟着变，不是写死 B 班。）
+    var canEditCurrentCalendar: Bool { viewTeam == myTeam }
 
     /// 今天的班次（供排班页顶栏显示）：优先用已加载的当月/全年天数（带调班请假），
     /// 没有就按 8 天一轮本地算基础班次。看别的月份时顶栏照样显示今天，不受切月影响。
@@ -277,6 +288,32 @@ final class AppStore: ObservableObject {
         await checkForUpdateAfterLaunch()
     }
 
+    /// 手机号 + 验证码登录（1.1.3）：与账号密码登录同一套后续流程（fetchMe → 设用户 → 读缓存 → 刷新）。
+    /// 没有密码，不存 Keychain；下次启动走 session（7 天）或缓存离线进。
+    /// 新手机号会自动建账号（用户名是「手机+后 4 位」），显示名可在设置页改。
+    func loginWithSms(phone: String, code: String) async throws {
+        if !serverReachable, !(await api.resolveServer()) {
+            throw APIError.unreachable
+        }
+        serverBaseURL = api.baseURL
+        serverKind = api.serverKind
+        serverReachable = true
+        _ = try await api.loginWithSms(phone: phone, code: code)
+        let me = try await api.fetchMe()
+        if me.isAdmin {
+            await api.logout()
+            throw APIError.adminBlocked
+        }
+        user = me
+        isLoggedIn = true
+        isOffline = false
+        viewTeam = me.displayTeam
+        UserDefaults.standard.set(me.id ?? me.username ?? "", forKey: lastUserIdKey)
+        loadCacheForCurrentUser()
+        await refreshAll()
+        await checkForUpdateAfterLaunch()
+    }
+
     func register(username: String, password: String) async throws {
         if !serverReachable, !(await api.resolveServer()) {
             throw APIError.unreachable
@@ -296,12 +333,42 @@ final class AppStore: ObservableObject {
         await checkForUpdateAfterLaunch()
     }
 
-    /// 退出登录：清服务端 session + 本地该用户的缓存 + Keychain 里的账号密码。
+    /// 绑定/更换手机号（1.1.3）：发码验证后绑定，服务端立即落盘并返回最新用户信息；
+    /// 这里合并进当前用户（team/paySettings 不动），管理端读服务端即是最新。
+    /// 首次绑定不限；换绑（已绑过再换另一个号）一个月只能换一次，
+    /// 服务端限 30 天，限期内会报 429 并给出下次可换时间（错误原样透传）。
+    func bindPhone(phone: String, code: String) async throws {
+        let updated = try await api.bindPhone(phone: phone, code: code)
+        var merged = user ?? updated
+        merged.phone = updated.phone ?? merged.phone
+        merged.displayName = updated.displayName ?? merged.displayName
+        merged.lastPhoneChangeAt = updated.lastPhoneChangeAt ?? merged.lastPhoneChangeAt
+        user = merged
+        persistCache()
+    }
+
+    /// 改密码（1.1.3）：必须先绑手机号，短信验证码验证身份；不限次数、随时能改
+    /// （老爷 2026-11-24 04:54 改口：之前「一个月只能改一次」作废，改绑手机号才一月一次）。
+    /// 改完服务端立即落盘；原来有密码登录记录的，Keychain 也同步换成新密码，
+    /// 否则下次启动本地验旧密码会对不上；原来只用短信登录的（没 Keychain）不动。
+    func changePassword(phone: String, code: String, newPassword: String) async throws {
+        let updated = try await api.changePassword(phone: phone, code: code, newPassword: newPassword)
+        var merged = user ?? updated
+        merged.phone = updated.phone ?? merged.phone
+        merged.displayName = updated.displayName ?? merged.displayName
+        merged.lastPhoneChangeAt = updated.lastPhoneChangeAt ?? merged.lastPhoneChangeAt
+        user = merged
+        if KeychainHelper.load() != nil, let username = user?.username {
+            KeychainHelper.save(username: username, password: newPassword)
+        }
+        persistCache()
+    }
+
+    /// 退出登录：只清登录状态/session（服务端 session + 本地 cookie + Keychain 密码）。
+    /// 1.1.3：离线缓存保留（不删文件、不清 lastUserId），下次登同一账号直接用缓存顶着。
+    /// 内存里的当月数据清掉，避免登出后界面还留着上一个人的数。
     func logout() async {
-        let userId = user?.id ?? user?.username
         await api.logout()
-        if let userId { CacheStore.delete(userId: userId) }
-        UserDefaults.standard.removeObject(forKey: lastUserIdKey)
         user = nil
         isLoggedIn = false
         isOffline = false
@@ -315,6 +382,7 @@ final class AppStore: ObservableObject {
         monthCache = [:]
         swapsCache = [:]
         leavesCache = [:]
+        localMonthCache = [:]
         cacheSavedAt = nil
     }
 
@@ -406,12 +474,19 @@ final class AppStore: ObservableObject {
 
     /// 刷新当月：有缓存先直接显示（不转圈），再后台静默刷新；没缓存才转圈等网络。
     /// 看自己班组走服务端 /me/month；看别的班组本地算基础排班。
-    /// 滑页时要哪月给哪月：有缓存直接给缓存；没缓存先按本地 8 天一轮算基础排班顶上（秒出、不闪白），
-    /// 同时后台取真数据，到了就写进 monthCache，页面自己刷新。看别的班不用取数，本地算的就是最终结果。
+    /// 滑页时要哪月给哪月：有缓存直接给缓存；没缓存先按本地 8 天一轮算顶上（秒出、不闪白），
+    /// 但只算一次、记进 localMonthCache——1.1.2 每调一次就重算一次（每格 ~30 天 × DateFormatter），
+    /// 滑页时每页调 3 次、每次重绘全调，是掉帧的主因。真数据到了走 monthCache 覆盖，
+    /// 预取照常发（localMonthCache 不影响 monthCache 的预取判断）。
     func monthFor(year: Int, month: Int) -> MonthSchedule {
         let key = monthCacheKey(team: viewTeam, year: year, month: month)
         if let cached = monthCache[key] { return cached }
+        if let local = localMonthCache[key] {
+            if viewTeam == myTeam { prefetchMonth(year: year, month: month) }
+            return local
+        }
         let local = ScheduleCalculator.localMonth(team: viewTeam, year: year, month: month)
+        localMonthCache[key] = local
         if viewTeam == myTeam { prefetchMonth(year: year, month: month) }
         return local
     }
@@ -453,14 +528,21 @@ final class AppStore: ObservableObject {
             if !hadCache { isLoadingMonth = true }
             defer { isLoadingMonth = false }
             do {
-                month = try await api.fetchMonth(year: ym.year, month: ym.month)
-                swaps = (try? await api.fetchSwaps(year: ym.year, month: ym.month)) ?? swaps
-                leaves = (try? await api.fetchLeaves(year: ym.year, month: ym.month)) ?? leaves
-                overtime = (try? await api.fetchOvertime(year: ym.year, month: ym.month)) ?? overtime
-                monthCache[key] = month
-                swapsCache[monthKey] = swaps
-                leavesCache[monthKey] = leaves
-                overtimeCache[monthKey] = overtime
+                // 先把四趟取完（各在自己的 await 里），再一次性把结果写进 @Published：
+                // 1.1.2 是取一趟写一次，每次写都触发一次整页重绘，滑页时连着重绘好几次才卡。
+                // 同步连续写多个 @Published，SwiftUI 只算一次重绘。
+                let fetchedMonth = try await api.fetchMonth(year: ym.year, month: ym.month)
+                let fetchedSwaps = (try? await api.fetchSwaps(year: ym.year, month: ym.month)) ?? swaps
+                let fetchedLeaves = (try? await api.fetchLeaves(year: ym.year, month: ym.month)) ?? leaves
+                let fetchedOvertime = (try? await api.fetchOvertime(year: ym.year, month: ym.month)) ?? overtime
+                month = fetchedMonth
+                swaps = fetchedSwaps
+                leaves = fetchedLeaves
+                overtime = fetchedOvertime
+                monthCache[key] = fetchedMonth
+                swapsCache[monthKey] = fetchedSwaps
+                leavesCache[monthKey] = fetchedLeaves
+                overtimeCache[monthKey] = fetchedOvertime
                 isOffline = false
                 AppLogger.shared.log("排班 \(ym.year)-\(ym.month) 联网刷新成功", tag: "Cache")
             } catch {
@@ -472,8 +554,8 @@ final class AppStore: ObservableObject {
                 }
             }
         } else {
-            // 看别的班：本地按 8 天一轮算基础排班（无调班/请假），即时显示。
-            month = ScheduleCalculator.localMonth(team: viewTeam, year: ym.year, month: ym.month)
+            // 看别的班：本地按 8 天一轮算基础排班（无调班/请假），即时显示（走 monthFor 的备忘，不重算）。
+            month = monthFor(year: ym.year, month: ym.month)
             swaps = []
             leaves = []
             overtime = []
@@ -509,6 +591,50 @@ final class AppStore: ObservableObject {
             recordedMonths: recorded, effective: effective,
             annualLeaveOffset: offset, year: year, month: month
         )
+    }
+
+    /// 切月（工资页）：同步改月份并立刻用本地算好的工资顶上（有输入时秒出），
+    /// 让调用方的 withAnimation 能把「月份 + 内容」包在同一个动画事务里，
+    /// 工资页切月才有真正的左右滑动动画；本地算不出时照旧走异步 refreshPay（onChange 兜底）。
+    func setPayMonth(year: Int, month: Int) {
+        payYearMonth = (year, month)
+        if let local = computeLocalPay(year: year, month: month) {
+            pay = local
+            payCache[payCacheKey(year: year, month: month)] = local
+            persistCache()
+        }
+    }
+
+    /// 补齐指定年份的全年天数 + 工资配置（日历的三薪标与底部统计要用，本地算的输入）。
+    /// 只补没缓存的年份；到齐后 payInputsVersion +1，让日历重画。
+    func ensureYearDays(years: [Int]) async {
+        if payConfig == nil {
+            if let cfg = try? await api.fetchPayConfig() {
+                payConfig = cfg
+            }
+        }
+        for year in years {
+            if yearDaysCache[String(year)] != nil { continue }
+            let daysInYear = DateUtil.isLeapYear(year) ? 366 : 365
+            if let days = try? await api.fetchRangeDays(
+                start: String(format: "%04d-01-01", year), days: daysInYear), !days.isEmpty {
+                yearDaysCache[String(year)] = days
+            }
+        }
+        payInputsVersion += 1
+    }
+
+    /// 某月工资里的三薪日期与加班天数（日历用）：三薪日 = 法定节假日上班的天里、
+    /// 超出基本天数的那几天（按日期顺序取前 tripleDays 天，与工资页 tripleDates 一致）；
+    /// 加班天数 = 工资算法的 overtimeDays。只在看自己班时用（别人的班没有我的工资）。
+    /// 本地算（computeLocalPay，带缓存）；输入没到齐算不出时返回 nil（日历先不标，等输入到了重画）。
+    func triplePayInfo(year: Int, month: Int) -> (tripleDates: Set<String>, tripleDays: Double, overtimeDays: Double)? {
+        guard viewTeam == myTeam else { return nil }
+        guard let pay = computeLocalPay(year: year, month: month) else { return nil }
+        let dates = pay.tripleDates ?? []
+        let count = max(0, Int(pay.tripleDays ?? 0))
+        let tripleSet = Set(dates.prefix(count).compactMap { $0.date })
+        return (tripleSet, pay.tripleDays ?? 0, pay.overtimeDays ?? 0)
     }
 
     /// 刷新工资：优先走本地缓存与本地算，切月秒出。
@@ -556,30 +682,6 @@ final class AppStore: ObservableObject {
 
     /// 本地先改当天的班次（界面立刻变），再后台同步到服务端；
     /// 同步成功后从服务端刷新一次（权威数据），失败则刷回来（回滚）并把错误写进 errorMessage。
-    private func applyOverrideLocally(date: String, shift: String, note: String?, partner: String?, partnerShift: String?) {
-        guard var m = month, var days = m.days,
-              let i = days.firstIndex(where: { $0.date == date }) else { return }
-        var d = days[i]
-        d.shift = shift
-        d.timeLabel = ShiftStyle.timeRange(for: shift)
-        d.isDouble = ShiftStyle.isDouble(shift)
-        d.totalHours = ShiftStyle.isDouble(shift) ? 16 : (shift == "休息" ? 0 : 8)
-        d.isWork = shift != "休息"
-        d.overridden = true
-        d.note = note
-        d.partner = partner
-        d.partnerShift = partnerShift
-        days[i] = d
-        m.days = days
-        month = m
-        let mk = payCacheKey(year: currentYearMonth.year, month: currentYearMonth.month)
-        monthCache[monthCacheKey(team: viewTeam, year: currentYearMonth.year, month: currentYearMonth.month)] = m
-        var rec = swaps.first { $0.date == date } ?? SwapRecord(date: date)
-        rec.shift = shift; rec.note = note; rec.partner = partner; rec.partnerShift = partnerShift
-        if let j = swaps.firstIndex(where: { $0.date == date }) { swaps[j] = rec } else { swaps.append(rec) }
-        swapsCache[mk] = swaps
-    }
-
     private func applyLeaveLocally(date: String, type: String?, note: String?) {
         guard var m = month, var days = m.days,
               let i = days.firstIndex(where: { $0.date == date }) else { return }
@@ -614,40 +716,66 @@ final class AppStore: ObservableObject {
         }
     }
 
-    func submitOverride(date: String, shift: String, note: String?, partner: String?, partnerShift: String?) async {
-        applyOverrideLocally(date: date, shift: shift, note: note, partner: partner, partnerShift: partnerShift)
-        persistCache()
-        syncInBackground {
-            _ = try await self.api.postOverride(date: date, shift: shift, note: note, partner: partner, partnerShift: partnerShift)
-        }
-    }
-
-    func cancelOverride(date: String) async {
-        // 取消调班：本地先把当天恢复成基础班次（界面立刻变），后台再同步。
-        if var m = month, var days = m.days, let i = days.firstIndex(where: { $0.date == date }) {
-            var d = days[i]
-            d.shift = d.baseShift ?? d.shift
-            d.timeLabel = ShiftStyle.timeRange(for: d.shift)
-            d.isDouble = ShiftStyle.isDouble(d.shift)
-            d.totalHours = ShiftStyle.isDouble(d.shift) ? 16 : (d.shift == "休息" ? 0 : 8)
-            d.isWork = d.shift != "休息"
-            d.overridden = false
-            d.note = nil; d.partner = nil; d.partnerShift = nil
-            days[i] = d
-            m.days = days
-            month = m
-            swaps.removeAll { $0.date == date }
-        }
-        persistCache()
-        syncInBackground { try await self.api.deleteOverride(date: date) }
-    }
-
     func submitLeave(date: String, type: String?, note: String?) async {
         applyLeaveLocally(date: date, type: type, note: note)
         persistCache()
         syncInBackground {
             try await self.api.postLeave(date: date, type: type, note: note)
         }
+    }
+
+    // MARK: 调班互换（空间那套，1.1.3）
+
+    /// 四班同取：从 start 起连续 N 天、四个班组的日程（调班候选卡片与还班日列表用）。
+    /// 当天详情打开调班/请假流程时现取（数据小、一次取够当月窗口），不做长期缓存。
+    func fetchTeamsRange(start: String, days: Int) async throws -> TeamsRangeResponse {
+        try await api.fetchTeamsRange(start: start, days: days)
+    }
+
+    /// 互换调班：替班日我休息、对方上我的班；paybackDate 为空 = 待还班。
+    /// 与乐观更新的那几路不同，这里等服务端回话再报成功——连班禁令由服务端最终裁定，
+    /// 失败要把服务端的中文错误原样显示出来，不能先报“已保存”再悄悄回滚。
+    func submitSwap(date: String, partner: String, partnerShift: String, note: String?,
+                    paybackDate: String?, paybackMyShift: String?) async throws -> SwapSaveResult {
+        let result = try await api.postSwap(date: date, partner: partner, partnerShift: partnerShift,
+                                            note: note, paybackDate: paybackDate, paybackMyShift: paybackMyShift)
+        await refreshMonth()
+        await refreshPayInputs()
+        await refreshPay()
+        return result
+    }
+
+    /// 给待还班的调班补填还班日。
+    func fillSwapPayback(coverDate: String, paybackDate: String, myShift: String) async throws {
+        try await api.postSwapPayback(coverDate: coverDate, paybackDate: paybackDate, myShift: myShift)
+        await refreshMonth()
+        await refreshPayInputs()
+        await refreshPay()
+    }
+
+    /// 待还班的调班一直不还，转为请假（对方的顶岗保留）。
+    func convertSwapToLeave(date: String, type: String?, note: String?) async throws {
+        try await api.postSwapToLeave(date: date, type: type, note: note)
+        await refreshMonth()
+        await refreshPayInputs()
+        await refreshPay()
+    }
+
+    /// 请假日安排顶岗：对方替我上我那天的班。
+    func submitLeaveCover(date: String, partner: String, partnerShift: String, note: String?) async throws {
+        try await api.postLeaveCover(date: date, partner: partner, partnerShift: partnerShift, note: note)
+        await refreshMonth()
+        await refreshPayInputs()
+        await refreshPay()
+    }
+
+    /// 删一次调班（两边一起删）：删替班日连还班日一起恢复；删还班日则替班日变回待还班。
+    /// 同样等服务端回话再报成功。
+    func cancelSwap(date: String) async throws {
+        try await api.deleteOverride(date: date)
+        await refreshMonth()
+        await refreshPayInputs()
+        await refreshPay()
     }
 
     func submitLeaveRange(start: String, end: String, type: String?, note: String?) async {
@@ -731,25 +859,28 @@ final class AppStore: ObservableObject {
         }
     }
 
-    /// 保存资料：引导流程与设置页共用（team / paySettings / onboardingDone 只传给定的字段）。
-    /// 注意：PUT /me/profile 只回 profile 字段（team / teamHistory / paySettings / onboardingDone），
+    /// 保存资料：引导流程与设置页共用（team / paySettings / onboardingDone / displayName 只传给定的字段）。
+    /// 注意：PUT /me/profile 只回 profile 字段（team / teamHistory / paySettings / onboardingDone / displayName），
     /// 没有 username / id / role；直接整包替换会把账号名丢成 nil（设置页账号显示“—”就是这么来的）。
     /// 这里合并：保留原有身份字段，只更新 profile 字段。
-    func saveProfile(team: String? = nil, paySettings: [String: Any]? = nil, onboardingDone: Bool? = nil) async throws {
-        let updated = try await api.updateProfile(team: team, paySettings: paySettings, onboardingDone: onboardingDone)
+    func saveProfile(team: String? = nil, paySettings: [String: Any]? = nil, onboardingDone: Bool? = nil, displayName: String? = nil) async throws {
+        let updated = try await api.updateProfile(team: team, paySettings: paySettings, onboardingDone: onboardingDone, displayName: displayName)
         var merged = user ?? updated
         merged.team = updated.team ?? merged.team
         merged.teamHistory = updated.teamHistory ?? merged.teamHistory
         merged.paySettings = updated.paySettings ?? merged.paySettings
         merged.onboardingDone = updated.onboardingDone ?? merged.onboardingDone
+        merged.displayName = updated.displayName ?? merged.displayName
         user = merged
         if let team { viewTeam = team }
         persistCache()
     }
 
-    /// 设置页显示的账号名：user.username 为主；万一缓存里是旧的缺名字版本，
-    /// 用 Keychain 里登录时存的账号名兜底（登录成功就存了，一定有）。
+    /// 设置页显示的名字：优先显示名（displayName，自己改的），没有显示名显示账号名；
+    /// 万一缓存里是旧的缺名字版本，用 Keychain 里登录时存的账号名兜底。
+    /// 注意：显示名只是显示，登录用的账号名（username）不动。
     var displayUsername: String {
+        if let name = user?.displayName, !name.isEmpty { return name }
         if let name = user?.username, !name.isEmpty { return name }
         if let name = KeychainHelper.load()?.username, !name.isEmpty { return name }
         return "—"
@@ -774,16 +905,12 @@ final class AppStore: ObservableObject {
     /// 网格没缓存先按本地 8 天一轮算顶上。后台刷新成功才更新缓存，失败保留旧缓存不弹错。
     private func applyCachedMonth() {
         let ym = currentYearMonth
-        let key = monthCacheKey(team: viewTeam, year: ym.year, month: ym.month)
         let mk = payCacheKey(year: ym.year, month: ym.month)
         swaps = swapsCache[mk] ?? []
         leaves = leavesCache[mk] ?? []
         overtime = overtimeCache[mk] ?? []
-        if let cached = monthCache[key] {
-            month = cached
-        } else {
-            month = ScheduleCalculator.localMonth(team: viewTeam, year: ym.year, month: ym.month)
-        }
+        // 网格走 monthFor：有真数据用真数据，没有本地算顶上（只算一次，记缓存里）。
+        month = monthFor(year: ym.year, month: ym.month)
     }
 
     /// 某天的加班记录（没有就是 nil）。

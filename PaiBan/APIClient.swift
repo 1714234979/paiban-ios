@@ -36,6 +36,11 @@ struct AuthResponse: Decodable {
 /// 空 data（只关心 ok/error 的接口）。
 struct EmptyData: Decodable {}
 
+/// GET /api/v1/auth/sms/status 返回的 data：{configured: Bool}。
+struct SmsStatus: Decodable {
+    var configured: Bool
+}
+
 
 // MARK: - Keychain（只存 Basic 认证用的账号密码，不存 session）
 
@@ -250,6 +255,70 @@ final class APIClient {
 
     // MARK: 登录 / 注册
 
+    // MARK: - 手机号验证码登录（1.1.3）
+
+    /// POST /api/v1/auth/sms/send — 发验证码（6 位、5 分钟有效）。
+    /// 服务端限流：同一手机号 60 秒一次、每天最多 10 次；失败中文错误原样透传。
+    func sendSmsCode(phone: String) async throws {
+        try await requestNoData(path: "/api/v1/auth/sms/send", method: "POST",
+                                jsonBody: ["phone": phone])
+    }
+
+    /// GET /api/v1/auth/sms/status — 短信服务是否已开通（只返回 configured，
+    /// 不含任何配置内容）。强制绑手机号的门先查这个：没开通时不硬拦，配好后自动变严格。
+    func fetchSmsStatus() async throws -> Bool {
+        let status: SmsStatus = try await request(path: "/api/v1/auth/sms/status")
+        return status.configured
+    }
+
+    /// POST /api/v1/auth/sms/login — 手机号 + 验证码登录。
+    /// 返回形同密码登录（{ok, user}，新注册还会带 apiKey）；成功后服务端发 7 天 session。
+    /// 没有密码，不存 Keychain；role=admin 照样拦（服务端 403 + 这里的客户端拦截）。
+    @discardableResult
+    func loginWithSms(phone: String, code: String) async throws -> PublicUser {
+        guard baseURL != nil else { throw APIError.unreachable }
+        let url = try url(for: "/api/v1/auth/sms/login")
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.httpBody = try JSONSerialization.data(withJSONObject: ["phone": phone, "code": code])
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await session.data(for: req)
+        } catch {
+            throw APIError.unreachable
+        }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        let auth: AuthResponse
+        do {
+            auth = try decoder.decode(AuthResponse.self, from: data)
+        } catch {
+            throw APIError(message: "登录失败（HTTP \(status)）")
+        }
+        guard auth.ok, let user = auth.user else {
+            throw APIError(message: auth.error ?? "验证码不对或已过期")
+        }
+        if user.role == "admin" {
+            clearSessionCookies()
+            throw APIError.adminBlocked
+        }
+        return user
+    }
+
+    /// POST /api/v1/me/phone/bind — 已登录用户绑定手机号（发码验证后绑定）。
+    /// 返回 {ok, data: publicUser}，Store 侧合并进当前用户（team/paySettings 不动）。
+    func bindPhone(phone: String, code: String) async throws -> UserProfile {
+        try await request(path: "/api/v1/me/phone/bind", method: "POST",
+                          jsonBody: ["phone": phone, "code": code])
+    }
+
+    /// POST /api/v1/me/password/change — 改密码（先绑手机号，短信验证码验证身份）。
+    /// 服务端限 30 天改一次，限期内调会报 429 并给出下次可改时间，错误原样透传。
+    func changePassword(phone: String, code: String, newPassword: String) async throws -> UserProfile {
+        try await request(path: "/api/v1/me/password/change", method: "POST",
+                          jsonBody: ["phone": phone, "code": code, "newPassword": newPassword])
+    }
+
     /// POST /api/v1/auth/login — App 专用登录（CONTRACT.md 账号规矩）：
     /// 只允许 role=user 的普通账号；role=admin 返回 403，错误原样透传。
     /// 成功后服务端 Set-Cookie: paiban_session（7 天）。
@@ -358,11 +427,13 @@ final class APIClient {
     }
 
     /// PUT /api/v1/me/profile — 只传给定的字段（合并更新）。
-    func updateProfile(team: String? = nil, paySettings: [String: Any]? = nil, onboardingDone: Bool? = nil) async throws -> UserProfile {
+    /// displayName：改显示名（≤32 字，空串清回用户名）；登录用的 username 不动。
+    func updateProfile(team: String? = nil, paySettings: [String: Any]? = nil, onboardingDone: Bool? = nil, displayName: String? = nil) async throws -> UserProfile {
         var body: [String: Any] = [:]
         if let team { body["team"] = team }
         if let paySettings { body["paySettings"] = paySettings }
         if let onboardingDone { body["onboardingDone"] = onboardingDone }
+        if let displayName { body["displayName"] = displayName }
         // PUT /me/profile 返回更新后的 profile（data 包装）。
         return try await request(path: "/api/v1/me/profile", method: "PUT", jsonBody: body)
     }
@@ -478,6 +549,48 @@ final class APIClient {
     /// DELETE /api/v1/me/leave?date=YYYY-MM-DD
     func deleteLeave(date: String) async throws {
         try await requestNoData(path: "/api/v1/me/leave", method: "DELETE", query: ["date": date])
+    }
+
+    // MARK: 调班互换（/me/swap，空间那套）
+
+    /// GET /api/v1/me/teams/range?start=YYYY-MM-DD&days=N —— 四班同取：
+    /// 从 start 起连续 N 天、四个班组的日程（调班候选卡片与还班日列表用）。
+    func fetchTeamsRange(start: String, days: Int) async throws -> TeamsRangeResponse {
+        try await request(path: "/api/v1/me/teams/range",
+                          query: ["start": start, "days": String(days)])
+    }
+
+    /// POST /api/v1/me/swap —— 互换调班：替班日我休息、对方上我的班；
+    /// paybackDate 为空 = 待还班（以后再补填），给了就同时写还班日那对。
+    /// 成功返回 {coverDate, paybackDate}。
+    func postSwap(date: String, partner: String, partnerShift: String, note: String?,
+                  paybackDate: String?, paybackMyShift: String?) async throws -> SwapSaveResult {
+        var body: [String: Any] = ["date": date, "partner": partner, "partnerShift": partnerShift]
+        if let note, !note.isEmpty { body["note"] = note }
+        if let paybackDate, !paybackDate.isEmpty { body["paybackDate"] = paybackDate }
+        if let paybackMyShift, !paybackMyShift.isEmpty { body["paybackMyShift"] = paybackMyShift }
+        return try await request(path: "/api/v1/me/swap", method: "POST", jsonBody: body)
+    }
+
+    /// POST /api/v1/me/swap/payback —— 给待还班的调班补填还班日。
+    func postSwapPayback(coverDate: String, paybackDate: String, myShift: String) async throws {
+        let body: [String: Any] = ["coverDate": coverDate, "paybackDate": paybackDate, "myShift": myShift]
+        try await requestNoData(path: "/api/v1/me/swap/payback", method: "POST", jsonBody: body)
+    }
+
+    /// POST /api/v1/me/swap/to-leave —— 待还班的调班一直不还，转为请假（对方的顶岗保留）。
+    func postSwapToLeave(date: String, type: String?, note: String?) async throws {
+        var body: [String: Any] = ["date": date]
+        if let type, !type.isEmpty { body["type"] = type }
+        if let note, !note.isEmpty { body["note"] = note }
+        try await requestNoData(path: "/api/v1/me/swap/to-leave", method: "POST", jsonBody: body)
+    }
+
+    /// POST /api/v1/me/leave/cover —— 请假日安排顶岗：对方替我上我那天的班。
+    func postLeaveCover(date: String, partner: String, partnerShift: String, note: String?) async throws {
+        var body: [String: Any] = ["date": date, "partner": partner, "partnerShift": partnerShift]
+        if let note, !note.isEmpty { body["note"] = note }
+        try await requestNoData(path: "/api/v1/me/leave/cover", method: "POST", jsonBody: body)
     }
 
     // MARK: 加班（/me/overtime）
