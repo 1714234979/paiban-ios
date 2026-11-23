@@ -264,7 +264,7 @@ enum ScheduleCalculator {
         var restDays = 0, actualWork = 0, actualShifts = 0, doubleDays = 0
         var dayCount = 0, earlyCount = 0, midCount = 0
         for d in days {
-            if !d.isWork { restDays += 1; continue }
+            if d.isWork != true { restDays += 1; continue }
             actualWork += 1
             if d.isDouble == true { doubleDays += 1 }
             for p in ShiftStyle.parts(of: d.shift) {
