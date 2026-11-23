@@ -264,19 +264,6 @@ struct AccountSecurityView: View {
                             .foregroundColor(.secondary)
                     }
                 }
-                if store.user?.phone?.isEmpty == false {
-                    Button {
-                        showChangePhone = true
-                    } label: {
-                        HStack {
-                            Text("更换手机号")
-                            Spacer()
-                            Text("一个月只能换一次")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
             }
 
             Section("修改") {
@@ -297,8 +284,7 @@ struct AccountSecurityView: View {
                     HStack {
                         Text("修改密码")
                         Spacer()
-                        Text("短信验证码验证，不限次数")
-                            .font(.caption)
+                        Image(systemName: "chevron.right")
                             .foregroundColor(.secondary)
                     }
                 }
@@ -438,6 +424,7 @@ struct PaySettingsView: View {
                         Text("保存工资设置")
                     }
                 }
+                .buttonStyle(.borderedProminent)
                 .disabled(isSavingPay)
                 Text("每月工资均为预估，与实际发放有出入属正常")
                     .font(.caption)
@@ -502,39 +489,23 @@ struct PaySettingsView: View {
     }
 }
 
-/// 关于（二级页面）：更新日志（按版本列）、功能介绍、当前版本与版权。
+/// 关于（二级页面）：更新日志入口、功能介绍、当前版本与版权。
+/// 1.1.4：更新日志改成二级菜单——原来四个版本的条目全堆在关于页里，
+/// 现在关于页只留一行入口，点进去才是 ChangelogView。
 struct AboutView: View {
     var body: some View {
         Form {
             Section("更新日志") {
-                changelog(version: "1.1.3", items: [
-                    "手机号验证码登录（账号密码登录也保留）",
-                    "老账号首次打开强制绑定手机号",
-                    "设置页可改密码、改名字、更换手机号（换号一月一次）",
-                    "退出登录只清登录状态，离线缓存保留",
-                    "调班/请假按排班空间重做：选对方班互换、预览两边、删了两边一起恢复",
-                    "其他班日历只读，可改的班跟着设置页的班组走",
-                    "日历：字体收小、间距收紧、假标不再压阴历、三薪标回、月统计改三薪/加班",
-                    "排班页滑动修掉帧；工资页切月加动画；「可改」行滑动不再误触",
-                    "设置页改成二级菜单：账号与安全、工资设置、关于",
-                    "点更新自动复制提取码，提示框里也直接显示提取码",
-                    "更新包改名「排班空间1.1.3.zip」",
-                ])
-                changelog(version: "1.1.2", items: [
-                    "日历按新样式重做：阴历、节气、法定假日",
-                    "工资页手势锁定、切月动画",
-                    "单月可改绩效系数、奖金系数、加班天数、水电费",
-                    "编辑框点外面自动收起",
-                ])
-                changelog(version: "1.1.1", items: [
-                    "科室绩效默认值，设置页可填",
-                    "切月缓存、工资页左右滑",
-                    "云优先，服务器区只对老爷显示",
-                    "管理员权限分层；反馈页改版",
-                ])
-                changelog(version: "1.1", items: [
-                    "首个原生版本：排班日历、工资预估、调班请假",
-                ])
+                NavigationLink {
+                    ChangelogView()
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("更新日志")
+                        Text("查看各版本更新内容")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
             Section("功能介绍") {
                 Text("排班空间是 603车间倒班同事的排班与工资小工具：四班 8 天一轮日历（含阴历、节气、法定假日与三薪），调班/请假、工资预估（累计预扣个税），离线缓存先顶着，没网也能看；登录支持账号密码与手机号验证码。")
@@ -567,6 +538,63 @@ struct AboutView: View {
             }
         }
         .navigationTitle("关于")
+    }
+}
+
+/// 更新日志（二级页面，从关于页点进来）：各版本更新内容，最新版在最上面。
+struct ChangelogView: View {
+    var body: some View {
+        Form {
+            Section {
+                changelog(version: "1.1.4", items: [
+                    "排班页左右滑修卡顿：固定网格、不再重算、滑页刷新防抖",
+                    "工资页左右滑改原生 TabView，跟着手指走",
+                    "日历加载可靠：月份取不到重试 3 次、失败不写空缓存、滑页不打断在途加载",
+                    "重装登录后云端数据完整恢复",
+                    "账号与安全页精简：删修改密码提示、删更换手机号入口、换号提示移到换号流程里",
+                    "更新日志改成二级菜单",
+                    "当天详情页重做：四按钮 2×2 等宽等高、提示框重排、卡片统一样式、sheet 高度自适应",
+                    "全 App UI 风格统一：主按钮/卡片/字号/间距同一套规范，主色统一成 navy",
+                ])
+            }
+            Section {
+                changelog(version: "1.1.3", items: [
+                    "手机号验证码登录（账号密码登录也保留）",
+                    "老账号首次打开强制绑定手机号",
+                    "设置页可改密码、改名字、更换手机号（换号一月一次）",
+                    "退出登录只清登录状态，离线缓存保留",
+                    "调班/请假按排班空间重做：选对方班互换、预览两边、删了两边一起恢复",
+                    "其他班日历只读，可改的班跟着设置页的班组走",
+                    "日历：字体收小、间距收紧、假标不再压阴历、三薪标回、月统计改三薪/加班",
+                    "排班页滑动修掉帧；工资页切月加动画；「可改」行滑动不再误触",
+                    "设置页改成二级菜单：账号与安全、工资设置、关于",
+                    "点更新自动复制提取码，提示框里也直接显示提取码",
+                    "更新包改名「排班空间1.1.3.zip」",
+                ])
+            }
+            Section {
+                changelog(version: "1.1.2", items: [
+                    "日历按新样式重做：阴历、节气、法定假日",
+                    "工资页手势锁定、切月动画",
+                    "单月可改绩效系数、奖金系数、加班天数、水电费",
+                    "编辑框点外面自动收起",
+                ])
+            }
+            Section {
+                changelog(version: "1.1.1", items: [
+                    "科室绩效默认值，设置页可填",
+                    "切月缓存、工资页左右滑",
+                    "云优先，服务器区只对老爷显示",
+                    "管理员权限分层；反馈页改版",
+                ])
+            }
+            Section {
+                changelog(version: "1.1", items: [
+                    "首个原生版本：排班日历、工资预估、调班请假",
+                ])
+            }
+        }
+        .navigationTitle("更新日志")
     }
 
     private func changelog(version: String, items: [String]) -> some View {

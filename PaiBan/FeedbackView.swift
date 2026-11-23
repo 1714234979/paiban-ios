@@ -96,7 +96,7 @@ struct FeedbackView: View {
                     .frame(minHeight: 100, maxHeight: 180)
                     .padding(8)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 10)
+                        RoundedRectangle(cornerRadius: AppStyle.buttonRadius)
                             .stroke(Color(.separator), lineWidth: 1)
                     )
                 if let resultText {
@@ -109,12 +109,17 @@ struct FeedbackView: View {
                     Task { await send() }
                 } label: {
                     Text(isSending ? "发送中…" : "发送反馈")
+                        .font(.headline)
                         .frame(maxWidth: .infinity)
+                        .frame(height: AppStyle.buttonHeight)
+                        .background(AppStyle.navy)
+                        .foregroundColor(.white)
+                        .cornerRadius(AppStyle.buttonRadius)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(.plain)
                 .disabled(message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSending)
             }
-            .padding(20)
+            .padding(AppStyle.pagePadding)
             .navigationTitle("反馈问题")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {

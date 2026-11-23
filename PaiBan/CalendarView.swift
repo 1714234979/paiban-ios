@@ -121,7 +121,7 @@ struct CalendarView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(Color(red: 0.11, green: 0.15, blue: 0.23))
+        .background(AppStyle.navy)
         .cornerRadius(16)
     }
 
@@ -158,7 +158,7 @@ struct CalendarView: View {
                         .bold(store.viewTeam == team)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
-                        .background(store.viewTeam == team ? Color(red: 0.11, green: 0.15, blue: 0.23) : Color(.systemBackground))
+                        .background(store.viewTeam == team ? AppStyle.navy : Color(.systemBackground))
                         .foregroundColor(store.viewTeam == team ? .white : .primary)
                         .cornerRadius(20)
                 }
@@ -290,10 +290,10 @@ struct CalendarView: View {
                 Text(summaryText(stats: stats))
                     .font(.subheadline)
                     .multilineTextAlignment(.center)
-                    .padding(12)
+                    .padding(AppStyle.cardPadding)
                     .frame(maxWidth: .infinity)
                     .background(Color(.systemBackground))
-                    .cornerRadius(12)
+                    .cornerRadius(AppStyle.cardRadius)
             }
         }
     }
@@ -347,9 +347,9 @@ struct CalendarView: View {
                         .padding(.vertical, 4)
                     }
                 }
-                .padding(12)
+                .padding(AppStyle.cardPadding)
                 .background(Color(.systemBackground))
-                .cornerRadius(16)
+                .cornerRadius(AppStyle.cardRadius)
             }
         }
     }

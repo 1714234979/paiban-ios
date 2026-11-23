@@ -91,7 +91,7 @@ struct PayView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(Color(red: 0.11, green: 0.15, blue: 0.23))
+        .background(AppStyle.navy)
         .cornerRadius(16)
         .padding(.horizontal, 16)
         .padding(.top, 8)
@@ -166,9 +166,9 @@ struct PayView: View {
                             .font(.subheadline)
                         }
                     }
-                    .padding(14)
+                    .padding(AppStyle.cardPadding)
                     .background(Color(.systemBackground))
-                    .cornerRadius(12)
+                    .cornerRadius(AppStyle.cardRadius)
                     .padding(.horizontal, 16)
                 }
             }
@@ -200,9 +200,9 @@ struct PayView: View {
                 Divider()
             }
         }
-        .padding(14)
+        .padding(AppStyle.cardPadding)
         .background(Color(.systemBackground))
-        .cornerRadius(12)
+        .cornerRadius(AppStyle.cardRadius)
         .padding(.horizontal, 16)
     }
 
@@ -233,9 +233,9 @@ struct PayView: View {
             staticRow(title: "个税（累计预扣，税从奖金里扣）", valueText: MoneyUtil.money(pay.incomeTax), bold: false)
             staticRow(title: "实发奖金", valueText: MoneyUtil.money(pay.bonusAfterTax), bold: true)
         }
-        .padding(14)
+        .padding(AppStyle.cardPadding)
         .background(Color(.systemBackground))
-        .cornerRadius(12)
+        .cornerRadius(AppStyle.cardRadius)
         .padding(.horizontal, 16)
     }
 
@@ -262,9 +262,9 @@ struct PayView: View {
                         placeholder: "水电费（如 60）")
             staticRow(title: "实发工资", valueText: MoneyUtil.money(pay.salaryNet), bold: true)
         }
-        .padding(14)
+        .padding(AppStyle.cardPadding)
         .background(Color(.systemBackground))
-        .cornerRadius(12)
+        .cornerRadius(AppStyle.cardRadius)
         .padding(.horizontal, 16)
     }
 

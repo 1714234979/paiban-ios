@@ -36,7 +36,7 @@ struct RegisterView: View {
                         SecureField("再输一次密码", text: $confirmPassword)
                             .textFieldStyle(.roundedBorder)
                     }
-                    .padding(20)
+                    .padding(AppStyle.cardPadding)
                     .background(Color(.systemBackground))
                     .cornerRadius(16)
                     .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
@@ -52,20 +52,20 @@ struct RegisterView: View {
                     Button {
                         Task { await doRegister() }
                     } label: {
-                        if isBusy {
-                            ProgressView()
-                                .tint(.white)
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 6)
-                        } else {
-                            Text("注册并登录")
-                                .bold()
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 6)
+                        Group {
+                            if isBusy {
+                                ProgressView().tint(.white)
+                            } else {
+                                Text("注册并登录").font(.headline)
+                            }
                         }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: AppStyle.buttonHeight)
+                        .background(AppStyle.navy)
+                        .foregroundColor(.white)
+                        .cornerRadius(AppStyle.buttonRadius)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
+                    .buttonStyle(.plain)
                     .disabled(isBusy)
 
                     Text("注册只建普通同事账号；你的排班、请假、工资只归你自己，不会动别人的数据。")
@@ -73,7 +73,7 @@ struct RegisterView: View {
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, AppStyle.pagePadding)
                 .padding(.bottom, 24)
             }
             .background(Color(.systemGroupedBackground))

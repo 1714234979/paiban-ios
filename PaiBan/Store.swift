@@ -470,6 +470,33 @@ final class AppStore: ObservableObject {
             viewTeam = me.displayTeam
         }
         persistCache()
+        // 1.1.4：重装恢复——登录后把账号的完整数据从云端拉回来（后台静默，不拖登录）。
+        restoreFullDataFromCloud()
+    }
+
+    /// 登录后从云端把账号的完整数据拉回来（重装恢复）：除了 refreshAll 取的当月 +
+    /// 工资配置，再把 teamHistory 与当年各月的调班/请假/加班都补进缓存。
+    /// 1.1.4：原来 refreshAll 只取当月，其他月份只在滑到时才 prefetch——重装后
+    /// 登录，滑到 12 月（有调班对子）那一刻会先看到 8 天一轮的基础排班、等网络
+    /// 回来才变出调班，看着像丢了（数据其实都在服务端）。现在登录后后台静默补：
+    /// 当年 1–12 月逐月 prefetch（有记录的月份写进缓存，没记录的返回空数组也记下，
+    /// 下次滑到直接就是真数据、不闪基础排班）。登录本身不被拖住（后台 Task，
+    /// 当月与关键资料先出，其余慢慢补）；服务端是唯一真源，本地缓存只供离线。
+    /// teamHistory：fetchMe 的 profile 里已经带了（服务端 getProfile 返回），
+    /// 这里再兜底一次——如果是 nil（旧数据/异常），调 refreshTeamHistory 补取。
+    /// prefetchMonth 自带去重（已缓存/正在取的跳过），重复调也不会重复发请求。
+    private func restoreFullDataFromCloud() {
+        Task {
+            if user?.teamHistory == nil {
+                _ = try? await refreshTeamHistory()
+            }
+            let year = DateUtil.yearMonth(of: Date()).year
+            for month in 1...12 {
+                prefetchMonth(year: year, month: month)
+                // 让出一点时间，别 12 个月同时冲出去。
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
+        }
     }
 
     /// 刷新当月：有缓存先直接显示（不转圈），再后台静默刷新；没缓存才转圈等网络。
@@ -491,29 +518,64 @@ final class AppStore: ObservableObject {
         return local
     }
 
+    /// 取某月真数据，失败重试 3 次（退避 0.5/1 秒）。取消（滑走了）不重试，直接抛。
+    /// prefetchMonth 与 refreshMonth 共用；1.1.4 加载可靠。
+    private func fetchMonthWithRetry(year: Int, month: Int) async throws -> MonthSchedule {
+        var lastError: Error?
+        for attempt in 0..<3 {
+            if Task.isCancelled { throw CancellationError() }
+            do {
+                return try await api.fetchMonth(year: year, month: month)
+            } catch {
+                lastError = error
+                if Task.isCancelled { throw CancellationError() }
+                if attempt < 2 {
+                    try? await Task.sleep(nanoseconds: UInt64(500_000_000 * (attempt + 1)))
+                }
+            }
+        }
+        throw lastError ?? APIError.unreachable
+    }
+
     /// 后台取某月的真数据（调班/请假都带上），到了写进缓存；月缓存与调班/请假
     /// 缓存都齐了才跳过（缺任何一项都补取，免得记录一直空白），正在取的直接跳过。
+    /// 1.1.4（加载可靠，老爷 06:04 定性「不是没画全，是加载失败」）：
+    /// 原来 fetchMonth 失败只记一条日志、不重试，滑页时网络抖一下那月就一直是
+    /// 本地 fallback；fetchSwaps/fetchLeaves 失败还默认 [] 写进缓存，守卫一看
+    /// “有值”就再也不补取，记录永久空白。现在 fetchMonth 失败重试 3 次
+    /// （fetchMonthWithRetry）；调班/请假/加班哪路失败就不写那路的缓存（留 nil，
+    /// 下次 prefetch 再补），不把失败当成“没有记录”固化下来。
+    /// prefetch 的 Task 不随滑页取消（滑页只取消 refreshMonth 的防抖任务），
+    /// 在途的加载一定跑完写进缓存，滑走再滑回来数据还在。
     func prefetchMonth(year: Int, month: Int) {
         let key = monthCacheKey(team: myTeam, year: year, month: month)
         let mk = payCacheKey(year: year, month: month)
         guard monthCache[key] == nil || swapsCache[mk] == nil || leavesCache[mk] == nil, !fetchingMonths.contains(key) else { return }
         fetchingMonths.insert(key)
         Task {
-            do {
-                let m = try await api.fetchMonth(year: year, month: month)
-                let swaps = (try? await api.fetchSwaps(year: year, month: month)) ?? []
-                let leaves = (try? await api.fetchLeaves(year: year, month: month)) ?? []
-                let ot = (try? await api.fetchOvertime(year: year, month: month)) ?? []
-                monthCache[key] = m
-                swapsCache[payCacheKey(year: year, month: month)] = swaps
-                leavesCache[payCacheKey(year: year, month: month)] = leaves
-                overtimeCache[payCacheKey(year: year, month: month)] = ot
-                isOffline = false
-            } catch {
-                AppLogger.shared.log("预取排班 \(year)-\(month) 失败：\((error as? APIError)?.message ?? error.localizedDescription)", tag: "Cache")
+            defer {
+                fetchingMonths.remove(key)
+                persistCache()
             }
-            fetchingMonths.remove(key)
-            persistCache()
+            // fetchMonth 失败重试 3 次（fetchMonthWithRetry）；3 次都失败就不写缓存，
+            // 下次滑到/预取时守卫还会再试，不静默留空。
+            let m: MonthSchedule
+            do {
+                m = try await fetchMonthWithRetry(year: year, month: month)
+            } catch {
+                AppLogger.shared.log("预取排班 \(year)-\(month) 失败（已重试 3 次）：\((error as? APIError)?.message ?? error.localizedDescription)", tag: "Cache")
+                return
+            }
+            // 调班/请假/加班各取各的：哪路失败就不写那路（留 nil，下次再补），
+            // 不把 [] 当成“没有记录”写死进缓存。
+            let swaps = try? await api.fetchSwaps(year: year, month: month)
+            let leaves = try? await api.fetchLeaves(year: year, month: month)
+            let ot = try? await api.fetchOvertime(year: year, month: month)
+            monthCache[key] = m
+            if let swaps { swapsCache[mk] = swaps }
+            if let leaves { leavesCache[mk] = leaves }
+            if let ot { overtimeCache[mk] = ot }
+            isOffline = false
         }
     }
 
@@ -531,7 +593,9 @@ final class AppStore: ObservableObject {
                 // 先把四趟取完（各在自己的 await 里），再一次性把结果写进 @Published：
                 // 1.1.2 是取一趟写一次，每次写都触发一次整页重绘，滑页时连着重绘好几次才卡。
                 // 同步连续写多个 @Published，SwiftUI 只算一次重绘。
-                let fetchedMonth = try await api.fetchMonth(year: ym.year, month: ym.month)
+                // 1.1.4：fetchMonth 失败重试 3 次（fetchMonthWithRetry），别让一次网络
+                // 抖动就让落定那月的 store.month 一直是旧数；取消（滑走了）不重试。
+                let fetchedMonth = try await fetchMonthWithRetry(year: ym.year, month: ym.month)
                 let fetchedSwaps = (try? await api.fetchSwaps(year: ym.year, month: ym.month)) ?? swaps
                 let fetchedLeaves = (try? await api.fetchLeaves(year: ym.year, month: ym.month)) ?? leaves
                 let fetchedOvertime = (try? await api.fetchOvertime(year: ym.year, month: ym.month)) ?? overtime

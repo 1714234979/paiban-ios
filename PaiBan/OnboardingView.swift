@@ -27,12 +27,12 @@ struct OnboardingView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 ProgressView(value: Double(step + 1), total: Double(totalSteps))
-                    .tint(Color(red: 0.11, green: 0.15, blue: 0.23))
-                    .padding(.horizontal, 20)
+                    .tint(AppStyle.navy)
+                    .padding(.horizontal, AppStyle.pagePadding)
                     .padding(.top, 12)
 
                 ScrollView {
-                    VStack(alignment: .leading, spacing: 20) {
+                    VStack(alignment: .leading, spacing: AppStyle.sectionSpacing) {
                         Text("第 \(step + 1) 步 / 共 \(totalSteps) 步")
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -43,7 +43,7 @@ struct OnboardingView: View {
                                 .foregroundColor(.red)
                         }
                     }
-                    .padding(20)
+                    .padding(AppStyle.pagePadding)
                 }
 
                 HStack(spacing: 12) {
@@ -64,7 +64,7 @@ struct OnboardingView: View {
                     .buttonStyle(.borderedProminent)
                     .disabled(isBusy)
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, AppStyle.pagePadding)
                 .padding(.bottom, 24)
             }
             .navigationTitle("设置你的排班")

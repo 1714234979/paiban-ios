@@ -106,6 +106,14 @@ struct DayDetailView: View {
     @State private var errorText: String?
     @State private var doneMessage: String?
 
+    /// sheet 高度自适应内容（1.1.4）：原来 sheet 默认近乎全屏，内容只有上半截、
+    /// 下面留大片空白。没开表单时用 .medium（半屏刚好装下标题+详情+提示+按钮），
+    /// 点开调班/请假/记加班任一表单时切到 .large；表单关了再缩回 .medium。
+    @State private var sheetDetent: PresentationDetent = .medium
+    private var formOpen: Bool {
+        showSwapFlow || showFillPayback || showLeaveForm || showLeaveRangeForm || showOvertimeForm
+    }
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -135,7 +143,7 @@ struct DayDetailView: View {
                         if showOvertimeForm { overtimeForm }
                     }
                 }
-                .padding(20)
+                .padding(AppStyle.pagePadding)
             }
             .navigationTitle("当天详情")
             .navigationBarTitleDisplayMode(.inline)
@@ -143,6 +151,10 @@ struct DayDetailView: View {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("关闭") { dismiss() }
                 }
+            }
+            .presentationDetents([.medium, .large], selection: $sheetDetent)
+            .onChange(of: formOpen) { open in
+                sheetDetent = open ? .large : .medium
             }
         }
     }
@@ -167,9 +179,9 @@ struct DayDetailView: View {
                 .background(ShiftStyle.color(for: ShiftStyle.parts(of: shownDay.shift).first ?? shownDay.shift))
                 .cornerRadius(8)
         }
-        .padding(14)
+        .padding(AppStyle.cardPadding)
         .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
+        .cornerRadius(AppStyle.cardRadius)
     }
 
     private var detailRows: some View {
@@ -206,10 +218,9 @@ struct DayDetailView: View {
                 }
             }
         }
-        .padding(14)
-        .background(Color(.systemBackground))
-        .cornerRadius(12)
-        .shadow(color: .black.opacity(0.04), radius: 6, y: 2)
+        .padding(AppStyle.cardPadding)
+        .background(Color(.secondarySystemBackground))
+        .cornerRadius(AppStyle.cardRadius)
     }
 
     private func row(_ label: String, _ value: String) -> some View {
@@ -223,14 +234,18 @@ struct DayDetailView: View {
         .font(.subheadline)
     }
 
+    /// 连班禁令提示：1.1.4 重排——原来是 .caption 小灰字 + 淡黄底（yellow 0.10），
+    /// 字挤、对比度低，看着像水印。现在字号提到 .subheadline、行距 4、深棕字 +
+    /// 暖黄底（对比度够），padding 12、圆角 12，和详情卡同一尺寸语言。
     private var banHint: some View {
         Text("连班禁令：中班接次日早班不行；早班+日班不行（0 点直接上到 16 点）；一天不能上两个相同的班；只剩早+中、日+中两种双班。")
-            .font(.caption)
-            .foregroundColor(.secondary)
-            .padding(10)
+            .font(.subheadline)
+            .lineSpacing(4)
+            .foregroundColor(Color(red: 0.45, green: 0.33, blue: 0.05))
+            .padding(AppStyle.cardPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color.yellow.opacity(0.10))
-            .cornerRadius(10)
+            .background(Color(red: 1.0, green: 0.95, blue: 0.80))
+            .cornerRadius(AppStyle.cardRadius)
     }
 
     /// 只读提示：看别的班的日历时显示，改数据的入口全部不出现。
@@ -238,20 +253,24 @@ struct DayDetailView: View {
         Text("正在看 \(shownDay.team ?? store.viewTeam) 班的日历，只能看，不能改。切回自己班（\(store.myTeam) 班）才能调班、请假、记加班。")
             .font(.subheadline)
             .foregroundColor(.secondary)
-            .padding(12)
+            .padding(AppStyle.cardPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(.secondarySystemBackground))
-            .cornerRadius(10)
+            .cornerRadius(AppStyle.cardRadius)
     }
 
     // MARK: 操作入口
 
     /// 四个操作并排两列（调班 / 请假 / 请一段假 / 记加班），一次只开一个表单；
     /// 已有调班/请假时，取消类操作单独放一行红色文字按钮。
+    /// 1.1.4：原来是 LazyVGrid + .bordered/.borderedProminent，pill 只包文字、
+    /// 按内容定宽（「请一段假」4 个字比「调班」宽），左右两列不对齐、看着歪。
+    /// 现在四个按钮共用 actionButton：同一高度 48pt、同一圆角 12、撑满各自半格，
+    /// 调班是深色主按钮、其余三个是浅灰，大小位置全对齐。
     private var actionButtons: some View {
         VStack(spacing: 12) {
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 10), GridItem(.flexible(), spacing: 10)], spacing: 10) {
-                Button("调班") {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
+                actionButton("调班", prominent: true) {
                     resetFlowStates()
                     if shownDay.overridden == true && shownDay.partner != nil && shownDay.onLeave != true {
                         // 已有调班：下面直接显示状态与删除/补填入口，不用再开表单。
@@ -260,26 +279,20 @@ struct DayDetailView: View {
                     }
                     if showSwapFlow { Task { await loadTeamsRange() } }
                 }
-                .buttonStyle(.borderedProminent)
-                .frame(maxWidth: .infinity)
-                Button("请假") {
+                actionButton("请假") {
                     leaveType = shownDay.leaveType ?? "年假"
                     leaveNote = shownDay.leaveNote ?? ""
                     leaveCoverPartner = nil
                     resetFlowStates()
                     showLeaveForm.toggle()
                 }
-                .buttonStyle(.bordered)
-                .frame(maxWidth: .infinity)
-                Button("请一段假") {
+                actionButton("请一段假") {
                     rangeStart = DateUtil.date(from: shownDay.date) ?? Date()
                     rangeEnd = rangeStart
                     resetFlowStates()
                     showLeaveRangeForm.toggle()
                 }
-                .buttonStyle(.bordered)
-                .frame(maxWidth: .infinity)
-                Button("记加班") {
+                actionButton("记加班") {
                     if let ot = store.overtime(for: shownDay.date) {
                         overtimeStart = timeDate(ot.start) ?? overtimeStart
                         overtimeEnd = timeDate(ot.end) ?? overtimeEnd
@@ -288,8 +301,6 @@ struct DayDetailView: View {
                     resetFlowStates()
                     showOvertimeForm.toggle()
                 }
-                .buttonStyle(.bordered)
-                .frame(maxWidth: .infinity)
             }
             // 已有调班/请假/加班时的取消入口（只读日历上不出现）。
             if shownDay.overridden == true || shownDay.onLeave == true || store.overtime(for: shownDay.date) != nil {
@@ -320,6 +331,20 @@ struct DayDetailView: View {
             }
             if shownDay.overridden == true && shownDay.partner != nil && shownDay.onLeave != true {
                 swapStatusCard
+            }
+        }
+    }
+
+    /// 四个操作按钮共用：等宽等高（48 高、圆角 12、撑满半格），调班是主按钮、
+    /// 其余三个是次按钮。直接用设计规范里的 AppPrimaryButton/AppSecondaryButton，
+    /// 不再各写一套样式。1.1.4 之前是 LazyVGrid + .bordered/.borderedProminent，
+    /// pill 只包文字、按内容定宽，左右两列不对齐、看着歪。
+    private func actionButton(_ title: String, prominent: Bool = false, action: @escaping () -> Void) -> some View {
+        Group {
+            if prominent {
+                AppPrimaryButton(title: title, action: action)
+            } else {
+                AppSecondaryButton(title: title, action: action)
             }
         }
     }
@@ -383,9 +408,9 @@ struct DayDetailView: View {
                 }
             }
         }
-        .padding(14)
+        .padding(AppStyle.cardPadding)
         .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
+        .cornerRadius(AppStyle.cardRadius)
     }
 
     private var deleteSwapConfirm: some View {
@@ -618,9 +643,9 @@ struct DayDetailView: View {
                 }
             }
         }
-        .padding(14)
+        .padding(AppStyle.cardPadding)
         .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
+        .cornerRadius(AppStyle.cardRadius)
     }
 
     private func candidateCard(team: String, ev: CoverEval, selected: Bool, resultLabel: String, onPick: @escaping () -> Void) -> some View {
@@ -782,9 +807,9 @@ struct DayDetailView: View {
                 .disabled(fillPayback == nil)
             }
         }
-        .padding(14)
+        .padding(AppStyle.cardPadding)
         .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
+        .cornerRadius(AppStyle.cardRadius)
     }
 
     /// 补填还班日的候选：与调班流程第 2 步同一套算法（角色反过来，我替对方上）。
@@ -898,9 +923,9 @@ struct DayDetailView: View {
                     .frame(maxWidth: .infinity)
             }
         }
-        .padding(14)
+        .padding(AppStyle.cardPadding)
         .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
+        .cornerRadius(AppStyle.cardRadius)
     }
 
     /// 请假顶岗的候选：除我班外的三个班，各自替我上我这天的班行不行。
@@ -932,9 +957,9 @@ struct DayDetailView: View {
                 .buttonStyle(.borderedProminent)
                 .frame(maxWidth: .infinity)
         }
-        .padding(14)
+        .padding(AppStyle.cardPadding)
         .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
+        .cornerRadius(AppStyle.cardRadius)
     }
 
     // MARK: 加班
@@ -970,9 +995,9 @@ struct DayDetailView: View {
                 .buttonStyle(.borderedProminent)
                 .frame(maxWidth: .infinity)
         }
-        .padding(14)
+        .padding(AppStyle.cardPadding)
         .background(Color(.secondarySystemBackground))
-        .cornerRadius(12)
+        .cornerRadius(AppStyle.cardRadius)
     }
 
     /// 表单里当场算出的时长（跟服务端同一规则）。

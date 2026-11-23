@@ -27,7 +27,7 @@ struct LoginView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: 24) {
+                VStack(spacing: AppStyle.sectionSpacing) {
                     header
                     modePicker
                     formCard
@@ -44,7 +44,7 @@ struct LoginView: View {
                     }
                     serverLine
                 }
-                .padding(.horizontal, 20)
+                .padding(.horizontal, AppStyle.pagePadding)
                 .padding(.top, 32)
                 .padding(.bottom, 24)
             }
@@ -60,7 +60,7 @@ struct LoginView: View {
         VStack(spacing: 8) {
             ZStack {
                 RoundedRectangle(cornerRadius: 20)
-                    .fill(Color(red: 0.11, green: 0.15, blue: 0.23))
+                    .fill(AppStyle.navy)
                     .frame(width: 84, height: 84)
                 Text("班")
                     .font(.system(size: 44, weight: .bold))
@@ -104,7 +104,7 @@ struct LoginView: View {
             SecureField("密码", text: $password)
                 .textFieldStyle(.roundedBorder)
         }
-        .padding(20)
+        .padding(AppStyle.cardPadding)
         .background(Color(.systemBackground))
         .cornerRadius(16)
         .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
@@ -136,7 +136,7 @@ struct LoginView: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
-        .padding(20)
+        .padding(AppStyle.cardPadding)
         .background(Color(.systemBackground))
         .cornerRadius(16)
         .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
@@ -146,20 +146,20 @@ struct LoginView: View {
         Button {
             Task { await doLogin() }
         } label: {
-            if isBusy {
-                ProgressView()
-                    .tint(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
-            } else {
-                Text("登录")
-                    .bold()
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 6)
+            Group {
+                if isBusy {
+                    ProgressView().tint(.white)
+                } else {
+                    Text("登录").font(.headline)
+                }
             }
+            .frame(maxWidth: .infinity)
+            .frame(height: AppStyle.buttonHeight)
+            .background(AppStyle.navy)
+            .foregroundColor(.white)
+            .cornerRadius(AppStyle.buttonRadius)
         }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.large)
+        .buttonStyle(.plain)
         .disabled(isBusy || !canLogin)
     }
 
