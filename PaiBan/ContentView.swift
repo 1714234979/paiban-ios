@@ -1,81 +1,103 @@
 import SwiftUI
-import WebKit
+import UIKit
 
-// NAS 地址：先试家里局域网，再试 Tailscale
-private let lanBase = "http://192.168.1.101:3003"
-private let tailscaleBase = "http://100.66.88.28:3003"
-
-enum LoadState {
-    case checking
-    case online(URL)
-    case offline
-}
-
+/// 根视图（原 WKWebView 壳已整体删掉，全部原生）：
+/// 未登录 → 登录页；登录后没走完引导 → 引导页；否则 → 四个 Tab 的主界面。
+/// 启动时先读缓存、后台刷新；服务器全不通且无缓存时显示离线页。
+/// 新版本提示（Alert）也挂在这里：启动检查或设置页手动检查到新版时弹出。
 struct ContentView: View {
-    @State private var state: LoadState = .checking
-    @State private var reloadID = UUID()
+    @EnvironmentObject private var store: AppStore
 
     var body: some View {
         Group {
-            switch state {
-            case .checking:
-                ProgressView("正在连接 NAS…")
+            if store.isStarting {
+                ProgressView("正在连接服务器…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            case .online(let url):
-                NavigationStack {
-                    WebView(url: url, reloadID: reloadID, onLoadFailed: { state = .offline })
-                        .navigationTitle("排班空间")
-                        .navigationBarTitleDisplayMode(.inline)
-                        .toolbar {
-                            ToolbarItem(placement: .navigationBarTrailing) {
-                                Button { reloadID = UUID() } label: {
-                                    Image(systemName: "arrow.clockwise")
-                                }
-                            }
-                        }
-                }
-            case .offline:
-                OfflineView(onRetry: checkConnection)
-            }
-        }
-        .onAppear(perform: checkConnection)
-    }
-
-    func checkConnection() {
-        state = .checking
-        probe(base: lanBase) { ok in
-            if ok {
-                state = .online(URL(string: lanBase + "/app")!)
-                return
-            }
-            probe(base: tailscaleBase) { ok2 in
-                if ok2 {
-                    state = .online(URL(string: tailscaleBase + "/app")!)
+            } else if store.isLoggedIn {
+                if store.user?.onboardingDone == false {
+                    OnboardingView()
                 } else {
-                    state = .offline
+                    MainTabView()
                 }
+            } else if let startupError = store.startupError {
+                OfflineView(message: startupError) {
+                    Task { await store.startup() }
+                }
+            } else {
+                LoginView()
+            }
+        }
+        .task {
+            await store.startup()
+        }
+        .alert("发现新版本", isPresented: updateAlertBinding) {
+            if let info = store.pendingUpdate, info.hasDownloadURL {
+                Button("更新") {
+                    openDownloadURL(info)
+                }
+                Button("稍后", role: .cancel) {
+                    store.dismissUpdateForToday()
+                }
+            } else {
+                Button("知道了", role: .cancel) {
+                    store.dismissUpdateForToday()
+                }
+            }
+        } message: {
+            if let info = store.pendingUpdate {
+                Text(updateMessage(for: info))
             }
         }
     }
 
-    func probe(base: String, done: @escaping (Bool) -> Void) {
-        guard let url = URL(string: base + "/health") else { done(false); return }
-        var req = URLRequest(url: url)
-        req.timeoutInterval = 3
-        URLSession.shared.dataTask(with: req) { _, resp, _ in
-            let ok = (resp as? HTTPURLResponse)?.statusCode == 200
-            DispatchQueue.main.async { done(ok) }
-        }.resume()
+    private var updateAlertBinding: Binding<Bool> {
+        Binding(
+            get: { store.pendingUpdate != nil },
+            set: { newValue in
+                if !newValue { store.pendingUpdate = nil }
+            }
+        )
+    }
+
+    private func updateMessage(for info: VersionInfo) -> String {
+        var text = "最新版本 \(info.latestVersion)，当前版本 \(UpdateChecker.currentVersion)。"
+        if let notes = info.releaseNotes, !notes.isEmpty {
+            text += "\n\n\(notes)"
+        } else {
+            text += "\n\n新版本已发布，建议更新到最新版使用。"
+        }
+        if !info.hasDownloadURL {
+            text += "\n\n（暂无下载链接，请稍后再试）"
+        }
+        return text
+    }
+
+    /// 点「更新」：只在系统浏览器里打开清单里的 downloadUrl（网盘链接），
+    /// 用户在网盘里下载新 IPA 安装；不在 App 内直接下载安装包。
+    private func openDownloadURL(_ info: VersionInfo) {
+        guard let urlString = info.downloadUrl, let url = URL(string: urlString) else { return }
+        store.pendingUpdate = nil
+        UIApplication.shared.open(url)
     }
 }
 
+/// 服务器连不上、又没有可离线看的缓存时显示的页面。
 struct OfflineView: View {
+    let message: String
     var onRetry: () -> Void
+
     var body: some View {
         VStack(spacing: 16) {
-            Text("连不上 NAS")
+            Image(systemName: "wifi.slash")
+                .font(.largeTitle)
+                .foregroundColor(.secondary)
+            Text("连不上服务器")
                 .font(.title2).bold()
-            Text("手机要和 NAS 在同一个网络里：\n家里 Wi-Fi，或者打开 Tailscale 再试。")
+            Text(message)
+                .multilineTextAlignment(.center)
+                .foregroundColor(.secondary)
+            Text("手机要和 NAS 在同一个网络里：家里 Wi-Fi、Tailscale，或者等公网隧道地址填好。")
+                .font(.caption)
                 .multilineTextAlignment(.center)
                 .foregroundColor(.secondary)
             Button("重新连接", action: onRetry)
@@ -83,39 +105,5 @@ struct OfflineView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
-
-struct WebView: UIViewRepresentable {
-    let url: URL
-    let reloadID: UUID
-    let onLoadFailed: () -> Void
-
-    func makeCoordinator() -> Coordinator { Coordinator(onLoadFailed: onLoadFailed) }
-
-    func makeUIView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
-        config.defaultWebpagePreferences.allowsContentJavaScript = true
-        let view = WKWebView(frame: .zero, configuration: config)
-        view.navigationDelegate = context.coordinator
-        return view
-    }
-
-    func updateUIView(_ view: WKWebView, context: Context) {
-        if view.url == nil {
-            view.load(URLRequest(url: url))
-        } else if context.coordinator.lastReloadID != reloadID {
-            context.coordinator.lastReloadID = reloadID
-            view.reload()
-        }
-    }
-
-    class Coordinator: NSObject, WKNavigationDelegate {
-        let onLoadFailed: () -> Void
-        var lastReloadID: UUID?
-        init(onLoadFailed: @escaping () -> Void) { self.onLoadFailed = onLoadFailed }
-        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
-            onLoadFailed()
-        }
     }
 }
