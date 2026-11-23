@@ -104,6 +104,10 @@ final class AppStore: ObservableObject {
     /// 工资输入（payConfig / 全年天数）版本号：日历要靠它重画三薪标与底部统计，
     /// 输入到齐就 +1 触发重画（yearDaysCache / payConfig 本身不是 @Published）。
     @Published var payInputsVersion = 0
+    /// 日历数据版本号（1.1.5）：日历每页只存一份数据快照，滑动中不读 store；
+    /// 只有真正的数据变更才 +1 让各页重拍快照——调班/请假保存、刷新成功、换班组。
+    /// 滑页中的 prefetch / setCurrentMonth 不碰它，滑稳之前快照一动不动。
+    @Published var calendarVersion = 0
     private var fetchingMonths: Set<String> = []       // 正在后台取的月份，避免重复发请求
 
     // App 内更新提示
@@ -608,6 +612,8 @@ final class AppStore: ObservableObject {
                 leavesCache[monthKey] = fetchedLeaves
                 overtimeCache[monthKey] = fetchedOvertime
                 isOffline = false
+                // 1.1.5：刷新成功才让日历各页重拍快照（滑页防抖保证这时已经落定）。
+                calendarVersion += 1
                 AppLogger.shared.log("排班 \(ym.year)-\(ym.month) 联网刷新成功", tag: "Cache")
             } catch {
                 AppLogger.shared.log("排班 \(ym.year)-\(ym.month) 联网刷新失败：\((error as? APIError)?.message ?? error.localizedDescription)，用缓存顶着", tag: "Cache")
@@ -812,6 +818,8 @@ final class AppStore: ObservableObject {
         month = m
         let mk = payCacheKey(year: currentYearMonth.year, month: currentYearMonth.month)
         monthCache[monthCacheKey(team: viewTeam, year: currentYearMonth.year, month: currentYearMonth.month)] = m
+        // 1.1.5：请假乐观更新也要让日历各页重拍快照（日历立刻变，不等后台刷新）。
+        calendarVersion += 1
         var rec = leaves.first { $0.date == date } ?? LeaveRecord(date: date)
         rec.type = type; rec.note = note
         if let j = leaves.firstIndex(where: { $0.date == date }) { leaves[j] = rec } else { leaves.append(rec) }
@@ -934,6 +942,8 @@ final class AppStore: ObservableObject {
             // 日历网格读 monthCache：只改 month 不写缓存，网格要等后台刷新才变（1.1.2 的 bug）。
             let comps = DateUtil.yearMonth(of: DateUtil.date(from: date) ?? Date())
             monthCache[monthCacheKey(team: viewTeam, year: comps.year, month: comps.month)] = m
+            // 1.1.5：取消请假也要让日历各页重拍快照（日历立刻变，不等后台刷新）。
+            calendarVersion += 1
             leaves.removeAll { $0.date == date }
             leavesCache[payCacheKey(year: comps.year, month: comps.month)] = leaves
         }

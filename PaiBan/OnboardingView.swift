@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// 新用户引导（注册后、onboardingDone=false 时只显示一次）：
-/// (1) 哪个班组 (2) 基本工资 (3) 奖金系数 (4) 养老月扣 → 系统反推社保缴费基数。
-/// 每步都可跳过（用默认值），最后 PUT /me/profile 保存并标记 onboardingDone=true。
+/// (1) 哪个班组 (2) 基本工资 (3) 奖金系数 (4) 养老月扣 → 系统反推社保缴费基数
+/// (5) 学历 (6) 缺员补贴。每步都可跳过（用默认值），最后 PUT /me/profile 保存并标记 onboardingDone=true。
 struct OnboardingView: View {
     @EnvironmentObject private var store: AppStore
 
@@ -11,6 +11,11 @@ struct OnboardingView: View {
     @State private var baseSalaryText = "2420"
     @State private var bonusCoef = 1.0
     @State private var pensionText = "475.04"
+    @State private var education = "其他"
+    @State private var hasShortage = false
+    @State private var shortageAmountText = ""
+    @State private var shortageStartDate = Date()
+    @State private var shortageEndDate = Calendar.current.date(byAdding: .month, value: 3, to: Date()) ?? Date()
     @State private var errorText: String?
     @State private var isBusy = false
 
@@ -21,7 +26,7 @@ struct OnboardingView: View {
         return PayCalc.round2(pension / 0.08)
     }
 
-    private let totalSteps = 4
+    private let totalSteps = 6
 
     var body: some View {
         NavigationStack {
@@ -93,8 +98,12 @@ struct OnboardingView: View {
             stepBaseSalary
         case 2:
             stepBonusCoef
-        default:
+        case 3:
             stepContributionBase
+        case 4:
+            stepEducation
+        default:
+            stepShortage
         }
     }
 
@@ -203,6 +212,49 @@ struct OnboardingView: View {
         }
     }
 
+    private var stepEducation: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("你的学历？")
+                .font(.title2).bold()
+            Text("学历补贴每月发进工资：专科 50 元，本科 100 元，其他 0 元。")
+                .foregroundColor(.secondary)
+            Picker("学历", selection: $education) {
+                Text("专科").tag("专科")
+                Text("本科").tag("本科")
+                Text("其他").tag("其他")
+            }
+            .pickerStyle(.segmented)
+            Text("选错了以后可以在设置 → 工资设置里改。")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private var stepShortage: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("有没有缺员补贴？")
+                .font(.title2).bold()
+            Text("缺员补贴按月发进奖金：期限内每月计入，期限到了就不计了。")
+                .foregroundColor(.secondary)
+            Picker("缺员补贴", selection: $hasShortage) {
+                Text("没有").tag(false)
+                Text("有").tag(true)
+            }
+            .pickerStyle(.segmented)
+            if hasShortage {
+                TextField("每月金额（元）", text: $shortageAmountText)
+                    .keyboardType(.decimalPad)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.title3)
+                DatePicker("开始日期", selection: $shortageStartDate, displayedComponents: .date)
+                DatePicker("结束日期", selection: $shortageEndDate, displayedComponents: .date)
+                Text("期限到了自动停发，不用再来改。")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+    }
+
     // MARK: 保存
 
     private func parsedDouble(_ text: String, fallback: Double) -> Double {
@@ -219,13 +271,27 @@ struct OnboardingView: View {
 
     private func finish() async {
         errorText = nil
+        if hasShortage && shortageEndDate < shortageStartDate {
+            errorText = "缺员补贴结束日期不能早于开始日期"
+            return
+        }
         isBusy = true
         defer { isBusy = false }
-        let settings: [String: Any] = [
+        var settings: [String: Any] = [
             "baseSalary": parsedDouble(baseSalaryText, fallback: 2420),
             "bonusCoef": (bonusCoef * 10).rounded() / 10,
             "contributionBase": derivedBase ?? 5938,
+            "education": education,
         ]
+        if hasShortage {
+            settings["shortageSubsidy"] = [
+                "amount": parsedDouble(shortageAmountText, fallback: 0),
+                "startDate": DateUtil.string(from: shortageStartDate),
+                "endDate": DateUtil.string(from: shortageEndDate),
+            ]
+        } else {
+            settings["shortageSubsidy"] = ["amount": 0]
+        }
         do {
             try await store.saveProfile(team: team, paySettings: settings, onboardingDone: true)
             try await seedInitialTeamHistory()

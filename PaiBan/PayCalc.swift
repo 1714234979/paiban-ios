@@ -218,7 +218,11 @@ enum PayCalc {
             heat = 0
         }
         let seniority = (global.seniorityPerYear ?? 20) * Double(year - (userSettings?.hireYear ?? global.hireYear ?? 2018) + 1)
-        let salarySubtotal = round2(baseSalary + allowance + heat + seniority)
+        // 学历补贴（2026-11-24 老爷定）：专科 50、本科 100、其他 0；进工资小计，跟着计税。
+        var educationSubsidy: Double = 0
+        if userSettings?.education == "专科" { educationSubsidy = 50 }
+        else if userSettings?.education == "本科" { educationSubsidy = 100 }
+        let salarySubtotal = round2(baseSalary + allowance + heat + educationSubsidy + seniority)
 
         let base = userSettings?.contributionBase ?? global.contributionBase ?? 5938
         let pension = round2(base * 0.08)
@@ -235,7 +239,17 @@ enum PayCalc {
         if let v = record?.utilities { utilities = v }
         let salaryNet = round2(salaryPayable - utilities)
 
-        let bonusTotal = round2((deptPerf + otherReward) * perfCoef * bonusCoef + overtimePay)
+        // 缺员补贴（2026-11-24 老爷定）：用户级设置 {amount, startDate, endDate}；
+        // 当月在 [开始月，结束月] 内才计入（按月比，不足月也算整月），直接加进奖金，不乘系数。
+        var shortageSubsidy: Double = 0
+        let ssAmount = userSettings?.shortageSubsidy?.amount ?? 0
+        if ssAmount > 0 {
+            var inRange = true
+            if let s = userSettings?.shortageSubsidy?.startDate, key < String(s.prefix(7)) { inRange = false }
+            if let e = userSettings?.shortageSubsidy?.endDate, key > String(e.prefix(7)) { inRange = false }
+            if inRange { shortageSubsidy = round2(ssAmount) }
+        }
+        let bonusTotal = round2((deptPerf + otherReward) * perfCoef * bonusCoef + overtimePay + shortageSubsidy)
 
         // 年假：全年已用 = 抵扣 + 全年请年假/年休假的天数（只算有班的日子）。
         let annualLeaveTotal = userSettings?.annualLeaveTotal ?? global.annualLeaveTotal ?? 5
@@ -275,6 +289,7 @@ enum PayCalc {
             ? (attendance >= Double(bd) ? "出勤满应出勤 \(bd) 天，高温费发满 \(jsNum(global.heatMonthly ?? 250)) 元" : "按出勤折算：\(jsNum(global.heatMonthly ?? 250)) × \(jsNum(attendance)) 天 ÷ 应出勤 \(bd) 天")
             : "高温费只在 6、7、8、9 月有"
         pay.seniority = seniority
+        pay.educationSubsidy = educationSubsidy
         pay.salarySubtotal = salarySubtotal
         pay.contributionBase = base
         pay.pension = pension
@@ -296,6 +311,7 @@ enum PayCalc {
         pay.overtimePay = overtimePay
         pay.overtimePayPart = overtimePayPart
         pay.overtimeRecorded = record?.overtimeDays != nil
+        pay.shortageSubsidy = shortageSubsidy
         pay.bonusTotal = bonusTotal
         pay.leaveDays = stats.leaveDays
         pay.excessDays = (pay.rosterTotalWork ?? 0) - bd

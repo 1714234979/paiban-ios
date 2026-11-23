@@ -217,6 +217,7 @@ struct PayView: View {
                         currentValue: pay.deptPerf.map { String(format: "%.2f", $0) } ?? "4000",
                         placeholder: "科室绩效（如 3800）")
             staticRow(title: "其他奖罚", valueText: MoneyUtil.money(pay.otherReward), bold: false)
+            staticRow(title: "缺员补贴", valueText: MoneyUtil.money(pay.shortageSubsidy), bold: false)
             editableRow(title: "绩效系数", valueText: MoneyUtil.number(pay.perfCoef), field: .perfCoef,
                         currentValue: pay.perfCoef.map { String(format: "%.2f", $0) } ?? "1",
                         placeholder: "绩效系数（如 1.2）")
@@ -249,6 +250,7 @@ struct PayView: View {
             staticRow(title: "基本工资", valueText: MoneyUtil.money(pay.baseSalary), bold: false)
             staticRow(title: "岗位", valueText: pay.position ?? "—", bold: false)
             staticRow(title: "早夜班补贴", valueText: MoneyUtil.money(pay.allowance), bold: false)
+            staticRow(title: "学历补贴", valueText: MoneyUtil.money(pay.educationSubsidy), bold: false)
             staticRow(title: "高温费", valueText: MoneyUtil.money(pay.heat), bold: false)
             staticRow(title: "工龄津贴", valueText: MoneyUtil.money(pay.seniority), bold: false)
             staticRow(title: "应发工资", valueText: MoneyUtil.money(pay.salarySubtotal), bold: true)

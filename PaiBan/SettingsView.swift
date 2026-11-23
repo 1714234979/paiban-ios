@@ -334,12 +334,17 @@ struct PaySettingsView: View {
     @State private var bonusCoefText = ""
     @State private var pensionText = ""
     @State private var position = "员工"
+    @State private var education = "其他"
+    @State private var shortageAmountText = "0"
+    @State private var shortageStartDate = Date()
+    @State private var shortageEndDate = Calendar.current.date(byAdding: .month, value: 3, to: Date()) ?? Date()
     @State private var utilitiesText = ""
     @State private var deptPerfText = ""
     @State private var isSavingPay = false
     @State private var saveMessage: String?
 
     private let positions = ["员工", "现场组长", "自控组长", "班长"]
+    private let educations = ["专科", "本科", "其他"]
 
     /// 养老月扣反推缴费基数：基数 = 养老月扣 ÷ 0.08（保留两位小数）。
     private var derivedBase: Double? {
@@ -389,6 +394,11 @@ struct PaySettingsView: View {
                         Text(p).tag(p)
                     }
                 }
+                Picker("学历", selection: $education) {
+                    ForEach(educations, id: \.self) { e in
+                        Text(e).tag(e)
+                    }
+                }
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("水电费")
@@ -415,6 +425,21 @@ struct PaySettingsView: View {
                         .multilineTextAlignment(.trailing)
                         .frame(width: 120)
                 }
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("缺员补贴金额")
+                        Text("期限内每月计入奖金，期限到了就不计了；填 0 表示没有")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    TextField("0", text: $shortageAmountText)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 120)
+                }
+                DatePicker("开始日期", selection: $shortageStartDate, displayedComponents: .date)
+                DatePicker("结束日期", selection: $shortageEndDate, displayedComponents: .date)
                 Button {
                     Task { await savePaySettings() }
                 } label: {
@@ -450,6 +475,10 @@ struct PaySettingsView: View {
         let base = settings?.contributionBase ?? 5938
         pensionText = moneyText(PayCalc.round2(base * 0.08))
         position = settings?.position ?? "员工"
+        education = settings?.education ?? "其他"
+        shortageAmountText = settings?.shortageSubsidy?.amount.map { moneyText($0) } ?? "0"
+        if let s = settings?.shortageSubsidy?.startDate, let d = DateUtil.date(from: s) { shortageStartDate = d }
+        if let e = settings?.shortageSubsidy?.endDate, let d = DateUtil.date(from: e) { shortageEndDate = d }
         utilitiesText = settings?.utilities.map { moneyText($0) } ?? "0"
         deptPerfText = settings?.deptPerf.map { moneyText($0) } ?? "4000"
     }
@@ -470,7 +499,28 @@ struct PaySettingsView: View {
         if let value = Double(bonusCoefText) { settings["bonusCoef"] = value }
         if let base = derivedBase { settings["contributionBase"] = base }
         settings["position"] = position
+        settings["education"] = education
         if let value = Double(utilitiesText) { settings["utilities"] = value }
+        // 缺员补贴：金额 0–10000；金额大于 0 才需要期限，结束日期不能早于开始日期。
+        if let value = Double(shortageAmountText) {
+            guard value >= 0, value <= 10000 else {
+                saveMessage = "缺员补贴金额要在 0–10000 之间"
+                return
+            }
+            if value > 0 {
+                guard shortageEndDate >= shortageStartDate else {
+                    saveMessage = "缺员补贴结束日期不能早于开始日期"
+                    return
+                }
+                settings["shortageSubsidy"] = [
+                    "amount": value,
+                    "startDate": DateUtil.string(from: shortageStartDate),
+                    "endDate": DateUtil.string(from: shortageEndDate),
+                ]
+            } else {
+                settings["shortageSubsidy"] = ["amount": 0]
+            }
+        }
         // 默认科室绩效奖金：0–10000，超出不保存并提示。
         if let value = Double(deptPerfText) {
             guard value >= 0, value <= 10000 else {
@@ -545,6 +595,16 @@ struct AboutView: View {
 struct ChangelogView: View {
     var body: some View {
         Form {
+            Section {
+                changelog(version: "1.1.5", items: [
+                    "排班页滑动重叠彻底修复：每页数据拍快照、滑动中不换数据源，六行固定行距、各页对齐",
+                    "日历节日名去掉「节」字：劳动节、儿童节、国庆节等只显示两个字",
+                    "日历放假与请假的「假」字分色：放假白字绿底、请假红字",
+                    "工资页加学历补贴：专科 50 元、本科 100 元、其他 0 元（工资设置里选学历）",
+                    "工资页加缺员补贴：期限内每月计入奖金，期限到了自动停发（工资设置里填金额和期限）",
+                    "新手引导加问学历和缺员补贴",
+                ])
+            }
             Section {
                 changelog(version: "1.1.4", items: [
                     "排班页左右滑修卡顿：固定网格、不再重算、滑页刷新防抖",

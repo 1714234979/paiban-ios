@@ -396,6 +396,17 @@ struct PaySettings: Codable, Equatable {
     var deptPerf: Double?
     var perfCoefDefault: Double?
     var annualLeaveTotal: Int?
+    /// 学历（1.1.5）：专科 / 本科 / 其他，默认其他；专科 50、本科 100、其他 0。
+    var education: String?
+    /// 缺员补贴（1.1.5）：用户级设置，金额 + 期限；期限内每月计入奖金。
+    var shortageSubsidy: ShortageSubsidy?
+}
+
+/// 缺员补贴（用户级设置）：金额 + 期限（开始/结束日期，YYYY-MM-DD；空表示不限）。
+struct ShortageSubsidy: Codable, Equatable {
+    var amount: Double? = nil
+    var startDate: String? = nil
+    var endDate: String? = nil
 }
 
 /// 更换班组记录：从 effectiveFrom 起按 team 排班。
@@ -666,6 +677,7 @@ struct PayMonth: Codable, Equatable {
     var otherRewardFull: Bool? = nil
     var heat: Double? = nil
     var heatNote: String? = nil
+    var educationSubsidy: Double? = nil
     var seniority: Double? = nil
     var salarySubtotal: Double? = nil
     var contributionBase: Double? = nil
@@ -688,6 +700,7 @@ struct PayMonth: Codable, Equatable {
     var overtimePay: Double? = nil
     var overtimePayPart: Double? = nil
     var overtimeRecorded: Bool? = nil
+    var shortageSubsidy: Double? = nil
     var bonusTotal: Double? = nil
     var leaveDays: Int? = nil
     var excessDays: Int? = nil

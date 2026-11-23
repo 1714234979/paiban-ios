@@ -76,24 +76,23 @@ struct CalendarView: View {
                 await store.ensureYearDays(years: Array(years).sorted())
             }
         }
-        // 滑到哪页，Store 就跟到哪月（汇总、调班/请假记录都跟着走），并预取前后月。
-        // 相邻月预取不等当前月刷新完，并行发起，切月不再出现「加载中」。
-        // 1.1.4：网络刷新防抖——原来每换一页就立即 Task { await store.refreshMonth() }，
-        // 回来写一串 @Published（month/swaps/leaves/monthCache…），正好落在滑动动画里，
-        // 整页重绘、正在滑的 TabView 被打断，就一卡一卡。现在等 0.4 秒没再滑页才刷新：
-        // 滑动中只改本地月份 + 预取（都是缓存、不写 @Published、不发网络），
-        // 手指停了、页面落定了再发网络；滑得快时前面的任务直接取消，只刷最后一页。
+        // 滑到哪页，汇总、调班/请假记录跟着走（但要等落定）。
+        // 1.1.5（重叠根因之二）：原来这里立刻调 setCurrentMonth，写一串 @Published，
+        // 正好落在 TabView 的 settle 动画里，整页重绘打断动画，两页错位重叠。
+        // 现在滑页那一刻只记页码，什么数据都不换；等 0.4 秒没再滑页（落定了）
+        // 再换月 + 预取前后月 + 刷新。标题和底部统计直接跟 pageIndex 走（见 pagerTitle /
+        // displayedMonth），不经过 store.currentYearMonth，所以落定前也不错位。
         .onChange(of: pageIndex) { newIndex in
-            let ym = yearMonth(from: newIndex)
-            store.setCurrentMonth(year: ym.year, month: ym.month)
-            let next = yearMonth(from: newIndex + 1)
-            let prev = yearMonth(from: newIndex - 1)
-            store.prefetchMonth(year: next.year, month: next.month)
-            store.prefetchMonth(year: prev.year, month: prev.month)
             refreshTask?.cancel()
             refreshTask = Task {
                 try? await Task.sleep(nanoseconds: 400_000_000)
                 guard !Task.isCancelled else { return }
+                let ym = yearMonth(from: newIndex)
+                store.setCurrentMonth(year: ym.year, month: ym.month)
+                let next = yearMonth(from: newIndex + 1)
+                let prev = yearMonth(from: newIndex - 1)
+                store.prefetchMonth(year: next.year, month: next.month)
+                store.prefetchMonth(year: prev.year, month: prev.month)
                 await store.refreshMonth()
             }
         }
@@ -257,6 +256,8 @@ struct CalendarView: View {
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .frame(height: calendarGridHeight)
+            // 1.1.5：裁剪——每页内容绝不漏到邻页上（重叠的最后一道保险）。
+            .clipped()
             if store.isLoadingMonth {
                 ProgressView("正在加载…")
                     .padding(.top, 8)
@@ -273,8 +274,10 @@ struct CalendarView: View {
     }
 
     /// 汇总与记录看的月份：直接取当前页那份（缓存或本地算，秒出，不等网络）。
+    /// 1.1.5：跟 pageIndex 走，不跟 store.currentYearMonth——setCurrentMonth 现在是
+    /// 落定 0.4 秒后才跑，跟 store 走汇总会比网格慢半拍。
     private var displayedMonth: MonthSchedule? {
-        let ym = store.currentYearMonth
+        let ym = yearMonth(from: pageIndex)
         return store.monthFor(year: ym.year, month: ym.month)
     }
 
@@ -299,7 +302,8 @@ struct CalendarView: View {
     }
 
     private func summaryText(stats: MonthStats) -> String {
-        let ym = store.currentYearMonth
+        // 1.1.5：跟当前页走（见 displayedMonth），不跟 store.currentYearMonth。
+        let ym = yearMonth(from: pageIndex)
         var triple = "—"
         var overtime = "—"
         if let info = store.triplePayInfo(year: ym.year, month: ym.month) {
@@ -429,7 +433,8 @@ struct CalendarView: View {
 // MARK: - 一页月历
 
 /// 滑页里的一页：只画某年某月的网格。数据走 store.monthFor——有缓存用缓存，
-/// 没缓存先按本地 8 天一轮算顶上（秒出、不闪白），真数据到了页面自己刷新。
+/// 没缓存先按本地 8 天一轮算顶上（秒出、不闪白）；1.1.5 起取到的数据先存快照，
+/// 滑动中只读快照，真数据到了也不在滑动中换页（等落定刷新或数据变更时才重拍）。
 struct MonthPageView: View {
     @EnvironmentObject private var store: AppStore
     let year: Int
@@ -439,24 +444,27 @@ struct MonthPageView: View {
     /// 点到上月/下月补的日期时跳到对应月。
     let onSelectAdjacentMonth: (Int, Int) -> Void
 
-    /// 本月占几行（4–6 周）。
-    private var numberOfWeeks: Int {
-        let first = DateUtil.firstWeekday(year: year, month: month)
-        let days = DateUtil.daysInMonth(year: year, month: month)
-        return Int(ceil(Double(first + days) / 7.0))
-    }
-
     /// 一格的身份：上月补的 / 本月 / 下月补的（点上月/下月补的跳到对应月）。
     private enum GridDayKind { case leading, current, trailing }
 
+    /// 1.1.5：本页的数据快照——出现时从 store 取一次存在 @State 里，滑动中只读快照，
+    /// store 再怎么写（prefetch 回来、setCurrentMonth、refresh）都动不了正在滑的这一页。
+    /// 只在三处重拍：刚出现（.task）、日历数据真变了（store.calendarVersion +1：
+    /// 调班/请假保存、刷新成功）、换了班组（viewTeam 变了）。
+    /// 快照没拍好之前的第一帧先用 live 的 gridDays 顶上（只此一帧，不在滑动中）。
+    @State private var snapDays: [(day: DaySchedule, kind: GridDayKind)] = []
+    @State private var snapLoaded = false
+
+    private func takeSnapshot() {
+        snapDays = gridDays
+        snapLoaded = true
+    }
+
     /// 整页的格子（上月补 + 本月 + 下月补，拼满整周）：数据走 store.monthFor（缓存，
-    /// 只算一次），三薪标走 payFor（带 payCache 备忘），滑动时不再现算。
+    /// 只算一次）。格子总数恒等于 行数×7（上月补 + 本月 + 下月补正好拼满整周）。
     /// 1.1.4：原来是 LazyVGrid，滑页中预取回来写 @Published、视图重算，
-    /// LazyVGrid 懒加载重排、格子错位，2027-01 那页第一行就是这么混排的
-    ///（3、4、5、27、28、29、30 挤在一行）。改成固定 VStack + HStack：
-    /// 行数按月定、每格固定 64pt、7 列写死，格子永远在固定位置，
-    /// 滑动中就算重画也只换格子内容、不挪格子位置，混排的根就没了。
-    /// 格子总数恒等于 行数×7（上月补 + 本月 + 下月补正好拼满整周）。
+    /// LazyVGrid 懒加载重排、格子错位。改成固定 VStack + HStack：
+    /// 每格固定 64pt、7 列写死，格子永远在固定位置。
     private var gridDays: [(day: DaySchedule, kind: GridDayKind)] {
         var result: [(DaySchedule, GridDayKind)] = []
         for d in leadingDays { result.append((d, .leading)) }
@@ -466,13 +474,18 @@ struct MonthPageView: View {
     }
 
     var body: some View {
-        // 行距按行数自适应（6 行紧、5 行松），外框总高固定，滑动不伸缩。
+        // 1.1.5：固定 6 行、固定 6pt 行距——原来按行数自适应（5 行松、6 行紧），
+        // 相邻两页行距不同，滑动中两页的行对不上，看着就是两个月绞在一起
+        //（12 月 5 行滑向 1 月 6 行就是这么错位的）。现在所有页几何完全一致，
+        // 滑动时行与行永远对齐；行数不够的月底部留空白格，外框总高仍是 414pt 不伸缩。
         // 周几行已抽到 TabView 外面固定不动，这里只画日期网格。
         // 订阅 payInputsVersion：工资输入到齐时三薪标要出现，日历得重画
         //（之前没订阅，输入到了也不重画，三薪标要等别的状态变了才冒出来）。
+        // 三薪标仍走 live 的 tripleDates（只是 pill 里一行小字，不动网格结构），
+        // 网格本身（snapDays）是快照，滑动中不动。
         let _ = store.payInputsVersion
-        let days = gridDays
-        let weeks = numberOfWeeks
+        let days = snapLoaded ? snapDays : gridDays
+        let weeks = 6
         VStack(spacing: calendarRowSpacing(weeks: weeks)) {
             ForEach(0..<weeks, id: \.self) { w in
                 HStack(spacing: 4) {
@@ -487,6 +500,12 @@ struct MonthPageView: View {
                 }
             }
         }
+        // 1.1.5：裁剪 + 快照——内容不出本页；出现时拍一次快照，数据真变了
+        //（calendarVersion / 换班组）才重拍，滑动中快照一动不动。
+        .clipped()
+        .task { takeSnapshot() }
+        .onChange(of: store.calendarVersion) { _ in takeSnapshot() }
+        .onChange(of: store.viewTeam) { _ in takeSnapshot() }
     }
 
     /// 一格：按身份给不同的点按行为（本月点开详情，上月/下月补的跳到对应月）。
@@ -574,6 +593,18 @@ struct DayCell: View {
         ChineseCalendar.info(for: day.date)
     }
 
+    /// 日历格里显示的阴历/节日小字（1.1.5）：带「节」的节日名去掉「节」只留两个字
+    ///（劳动节→劳动、儿童节→儿童、妇女节→妇女、教师节→教师、国庆节→国庆、
+    /// 圣诞节→圣诞、情人节→情人、愚人节→愚人、万圣节→万圣、元宵节→元宵、
+    /// 中元节→中元）。本来就两个字的（元旦、清明、端午、中秋、春节、除夕）不动；
+    /// 节气名（冬至、小寒等）没有「节」字，也不动。只改这里的显示，
+    /// 不动 ChineseCalendar 的原始数据（当天详情等别处不受影响）。
+    private var displayLunarText: String {
+        let t = extra.lunarText
+        if t.count == 3 && t.hasSuffix("节") { return String(t.dropLast()) }
+        return t
+    }
+
     var body: some View {
         VStack(spacing: 2) {
             // 日期行（三栏，互不重叠）：左 法定假/班 + 请假标上下叠（12pt，没有留空）
@@ -582,20 +613,33 @@ struct DayCell: View {
             HStack(alignment: .top, spacing: 1) {
                 VStack(alignment: .leading, spacing: 1) {
                     if let mark = extra.mark, !isAdjacent {
-                        Text(mark == .holiday ? "假" : "班")
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(mark == .holiday ? .green : .red)
+                        if mark == .holiday {
+                            // 1.1.5：放假的「假」用白色字体——白字得配绿底 pill 才看得见
+                            //（原来是绿字无底；只改字色会白底白字看不见，所以底色跟着换成绿，
+                            // 位置/大小/布局不动）。请假的「假」见下面，用红色字体。
+                            Text("假")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(.white)
+                                .padding(.horizontal, 1)
+                                .padding(.vertical, 1)
+                                .background(Color.green)
+                                .cornerRadius(3)
+                        } else {
+                            Text("班")
+                                .font(.system(size: 9, weight: .bold))
+                                .foregroundColor(.red)
+                        }
                     } else {
                         Color.clear.frame(width: 12, height: 9)
                     }
                     if day.onLeave == true && !isAdjacent {
+                        // 1.1.5：请假的「假」用红色字体——红字配红底看不见，底色去掉变透明
+                        //（位置/大小/布局不动，只换字色和底色，和放假的白字绿底区分开）。
                         Text("假")
                             .font(.system(size: 8, weight: .bold))
-                            .foregroundColor(.white)
+                            .foregroundColor(.red)
                             .padding(.horizontal, 2)
                             .padding(.vertical, 1)
-                            .background(Color.red)
-                            .cornerRadius(3)
                     }
                 }
                 .frame(width: 12, alignment: .leading)
@@ -604,7 +648,7 @@ struct DayCell: View {
                     .foregroundColor(isAdjacent ? .secondary : .primary)
                     .frame(maxWidth: .infinity, alignment: .center)
                 VStack(spacing: 0) {
-                    ForEach(Array(extra.lunarText.enumerated()), id: \.offset) { _, ch in
+                    ForEach(Array(displayLunarText.enumerated()), id: \.offset) { _, ch in
                         Text(String(ch))
                             .font(.system(size: 9))
                             .foregroundColor(extra.isRedText ? .red : .secondary)
