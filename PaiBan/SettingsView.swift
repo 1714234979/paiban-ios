@@ -596,7 +596,7 @@ struct ChangelogView: View {
     var body: some View {
         Form {
             Section {
-                changelog(version: "1.1.5", items: [
+                changelog(version: "1.2.1", items: [
                     "排班页滑动重叠彻底修复：每页数据拍快照、滑动中不换数据源，六行固定行距、各页对齐",
                     "日历节日名去掉「节」字：劳动节、儿童节、国庆节等只显示两个字",
                     "日历放假与请假的「假」字分色：放假白字绿底、请假红字",
