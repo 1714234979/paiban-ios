@@ -2,7 +2,8 @@ import SwiftUI
 
 /// 新用户引导（注册后、onboardingDone=false 时只显示一次）：
 /// (1) 哪个班组 (2) 基本工资 (3) 奖金系数 (4) 养老月扣 → 系统反推社保缴费基数
-/// (5) 学历 (6) 缺员补贴。每步都可跳过（用默认值），最后 PUT /me/profile 保存并标记 onboardingDone=true。
+/// (5) 学历 (6) 缺员补贴 (7) 入职时间（只到月份）(8) 剩余年休假天数。
+/// 每步都可跳过（用默认值），最后 PUT /me/profile 保存并标记 onboardingDone=true。
 struct OnboardingView: View {
     @EnvironmentObject private var store: AppStore
 
@@ -16,6 +17,9 @@ struct OnboardingView: View {
     @State private var shortageAmountText = ""
     @State private var shortageStartDate = Date()
     @State private var shortageEndDate = Calendar.current.date(byAdding: .month, value: 3, to: Date()) ?? Date()
+    @State private var hireYear = Calendar.current.component(.year, from: Date())
+    @State private var hireMonth = Calendar.current.component(.month, from: Date())
+    @State private var annualLeaveText = "5"
     @State private var errorText: String?
     @State private var isBusy = false
 
@@ -26,7 +30,9 @@ struct OnboardingView: View {
         return PayCalc.round2(pension / 0.08)
     }
 
-    private let totalSteps = 6
+    private let totalSteps = 8
+
+    /// 年份选择范围：1990 年到今年。
 
     var body: some View {
         NavigationStack {
@@ -102,8 +108,12 @@ struct OnboardingView: View {
             stepContributionBase
         case 4:
             stepEducation
-        default:
+        case 5:
             stepShortage
+        case 6:
+            stepHireDate
+        default:
+            stepAnnualLeave
         }
     }
 
@@ -255,6 +265,53 @@ struct OnboardingView: View {
         }
     }
 
+    /// 入职时间（1.2.6）：只精确到年月，不用精确到日；工龄津贴按入职年份算。
+    private var stepHireDate: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("你什么时候入职的？")
+                .font(.title2).bold()
+            Text("只填到月份就行，比如 2018 年 10 月；工龄津贴按入职年份算。")
+                .foregroundColor(.secondary)
+            HStack(spacing: 8) {
+                Picker("年份", selection: $hireYear) {
+                    ForEach(1990...Calendar.current.component(.year, from: Date()), id: \.self) { y in
+                        Text("\(y)").tag(y)
+                    }
+                }
+                .pickerStyle(.menu)
+                Text("年")
+                Picker("月份", selection: $hireMonth) {
+                    ForEach(1...12, id: \.self) { m in
+                        Text("\(m)").tag(m)
+                    }
+                }
+                .pickerStyle(.menu)
+                Text("月")
+            }
+            .font(.title3)
+            Text("选错了以后可以在设置 → 工资设置里改。")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    /// 剩余年休假天数（1.2.6）：填现在还剩的天数；年假是累计的，今年没休完的累计到明年，不清零。
+    private var stepAnnualLeave: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("还剩几天年休假？")
+                .font(.title2).bold()
+            Text("填你现在还剩的年休假天数，工资页的年假剩余就按这个数显示。")
+                .foregroundColor(.secondary)
+            TextField("剩余年休假天数", text: $annualLeaveText)
+                .keyboardType(.numberPad)
+                .textFieldStyle(.roundedBorder)
+                .font(.title3)
+            Text("年假是累计的：今年没休完的，剩下的累计到明年，不清零；休了年假会自动扣。以后可以在设置 → 工资设置里改。")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+
     // MARK: 保存
 
     private func parsedDouble(_ text: String, fallback: Double) -> Double {
@@ -282,6 +339,10 @@ struct OnboardingView: View {
             "bonusCoef": (bonusCoef * 10).rounded() / 10,
             "contributionBase": derivedBase ?? 5938,
             "education": education,
+            // 入职时间（只到月份）+ 剩余年休假天数（1.2.6）：存进用户资料。
+            "hireYear": hireYear,
+            "hireMonth": hireMonth,
+            "annualLeaveRemaining": min(365, max(0, Int(annualLeaveText.trimmingCharacters(in: .whitespaces)) ?? 5)),
         ]
         if hasShortage {
             settings["shortageSubsidy"] = [

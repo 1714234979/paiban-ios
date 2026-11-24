@@ -252,7 +252,16 @@ enum PayCalc {
         let bonusTotal = round2((deptPerf + otherReward) * perfCoef * bonusCoef + overtimePay + shortageSubsidy)
 
         // 年假：全年已用 = 抵扣 + 全年请年假/年休假的天数（只算有班的日子）。
-        let annualLeaveTotal = userSettings?.annualLeaveTotal ?? global.annualLeaveTotal ?? 5
+        // 1.2.6：存了剩余天数时（引导里填的余额，含上年结转），全年可用 = 存的余额，
+        // 剩余 = 余额 − 本年已用；不存时仍按全年 5 天 − 已用算（年假累计，不跨年清零）。
+        var annualLeaveTotal = 5
+        if let stored = userSettings?.annualLeaveRemaining {
+            annualLeaveTotal = stored
+        } else if let total = userSettings?.annualLeaveTotal {
+            annualLeaveTotal = total
+        } else if let total = global.annualLeaveTotal {
+            annualLeaveTotal = total
+        }
         var yearUsed = annualLeaveOffset
         var monthUsed = 0
         for d in yearDays {

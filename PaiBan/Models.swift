@@ -396,6 +396,8 @@ struct PaySettings: Codable, Equatable {
     var deptPerf: Double?
     var perfCoefDefault: Double?
     var annualLeaveTotal: Int?
+    /// 剩余年休假天数（1.2.6）：引导里填的余额（含上年结转）；工资页显示用它扣掉本年已用的年假。
+    var annualLeaveRemaining: Int?
     /// 学历（1.1.5）：专科 / 本科 / 其他，默认其他；专科 50、本科 100、其他 0。
     var education: String?
     /// 缺员补贴（1.1.5）：用户级设置，金额 + 期限；期限内每月计入奖金。

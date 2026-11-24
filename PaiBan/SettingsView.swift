@@ -359,6 +359,9 @@ struct PaySettingsView: View {
     @State private var shortageEndDate = Calendar.current.date(byAdding: .month, value: 3, to: Date()) ?? Date()
     @State private var utilitiesText = ""
     @State private var deptPerfText = ""
+    @State private var hireYear = 2018
+    @State private var hireMonth = 10
+    @State private var annualLeaveText = "5"
     @State private var isSavingPay = false
     @State private var saveMessage: String?
 
@@ -417,6 +420,37 @@ struct PaySettingsView: View {
                     ForEach(educations, id: \.self) { e in
                         Text(e).tag(e)
                     }
+                }
+                HStack {
+                    Text("入职时间")
+                    Spacer()
+                    Picker("年份", selection: $hireYear) {
+                        ForEach(1990...Calendar.current.component(.year, from: Date()), id: \.self) { y in
+                            Text("\(y)").tag(y)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    Text("年")
+                    Picker("月份", selection: $hireMonth) {
+                        ForEach(1...12, id: \.self) { m in
+                            Text("\(m)").tag(m)
+                        }
+                    }
+                    .pickerStyle(.menu)
+                    Text("月")
+                }
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("剩余年休假天数")
+                        Text("没休完的累计到明年，不清零；休了年假会自动扣")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    TextField("5", text: $annualLeaveText)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 120)
                 }
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
@@ -500,6 +534,10 @@ struct PaySettingsView: View {
         if let e = settings?.shortageSubsidy?.endDate, let d = DateUtil.date(from: e) { shortageEndDate = d }
         utilitiesText = settings?.utilities.map { moneyText($0) } ?? "0"
         deptPerfText = settings?.deptPerf.map { moneyText($0) } ?? "4000"
+        // 入职时间默认 2018-10（和全局默认一致）；剩余年休假默认 5 天。
+        hireYear = settings?.hireYear ?? 2018
+        hireMonth = settings?.hireMonth ?? 10
+        annualLeaveText = settings?.annualLeaveRemaining.map { String($0) } ?? "5"
     }
 
     private func moneyText(_ value: Double) -> String {
@@ -519,6 +557,16 @@ struct PaySettingsView: View {
         if let base = derivedBase { settings["contributionBase"] = base }
         settings["position"] = position
         settings["education"] = education
+        // 入职时间（只到月份）+ 剩余年休假天数（1.2.6）：整数 0–365，超出不保存并提示。
+        settings["hireYear"] = hireYear
+        settings["hireMonth"] = hireMonth
+        if let value = Int(annualLeaveText.trimmingCharacters(in: .whitespaces)) {
+            guard value >= 0, value <= 365 else {
+                saveMessage = "剩余年休假天数要在 0–365 之间"
+                return
+            }
+            settings["annualLeaveRemaining"] = value
+        }
         if let value = Double(utilitiesText) { settings["utilities"] = value }
         // 缺员补贴：金额 0–10000；金额大于 0 才需要期限，结束日期不能早于开始日期。
         if let value = Double(shortageAmountText) {
@@ -661,6 +709,7 @@ struct ChangelogView: View {
                     "注册页加昵称和手机验证码：昵称建议用真实姓名，验证码发到注册手机号、服务端核验",
                     "「名字」改成「昵称」：注册页、账号与安全页、修改昵称都叫昵称",
                     "账号与安全页加「切换账号」，退出登录移到页面最下面",
+                    "新员工引导加问入职时间（只到月份）和剩余年休假天数，工资页的年假剩余按存的天数显示（年假累计、不清零）",
                     "日历 12 月 24 日节日名改成「平安」",
                 ])
             }
