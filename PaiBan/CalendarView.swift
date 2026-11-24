@@ -333,7 +333,7 @@ struct CalendarView: View {
                         swapRow(row)
                     }
                     ForEach(store.leaves, id: \.date) { leave in
-                        HStack {
+                        HStack(alignment: .top) {
                             Circle()
                                 .fill(Color.red)
                                 .frame(width: 8, height: 8)
@@ -398,7 +398,7 @@ struct CalendarView: View {
     private func swapRow(_ row: SwapRow) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             ForEach(row.records, id: \.date) { record in
-                HStack {
+                HStack(alignment: .top) {
                     Circle()
                         .fill(Color.blue)
                         .frame(width: 8, height: 8)

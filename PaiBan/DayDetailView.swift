@@ -120,6 +120,7 @@ struct DayDetailView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     titleCard
                     detailRows
+                    otherTeamsCard
                     banHint
                     if !canEdit {
                         readOnlyNote
@@ -224,7 +225,7 @@ struct DayDetailView: View {
     }
 
     private func row(_ label: String, _ value: String) -> some View {
-        HStack {
+        HStack(alignment: .top) {
             Text(label)
                 .foregroundColor(.secondary)
                 .frame(width: 76, alignment: .leading)
@@ -232,6 +233,54 @@ struct DayDetailView: View {
             Spacer()
         }
         .font(.subheadline)
+    }
+
+    /// 其他班次：选中这天，其他三个班组按 8 天一轮基础排班算出的班次（横向一排小 chip）。
+    /// 只按基础轮换算，不含调班/请假——App 里没有其他用户的调班记录。
+    /// 正在看的班组不列在这里，它的班次已在上面「实际班次」里显示。
+    /// 班次色沿用 DayCell 那套（日绿/中红/早紫、休息浅青底深青字）。
+    private var otherTeamsCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("其他班次")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            HStack(spacing: 8) {
+                ForEach(otherTeams, id: \.team) { item in
+                    otherTeamChip(team: item.team, shift: item.shift)
+                }
+            }
+        }
+        .padding(AppStyle.cardPadding)
+        .background(Color(.secondarySystemBackground))
+        .cornerRadius(AppStyle.cardRadius)
+    }
+
+    /// 其他三个班组在选中这天的班次（基础轮换）。排除正在看的班组
+    ///（shownDay.team 是正在看的日历班组；它的班次已在「实际班次」里）。
+    private var otherTeams: [(team: String, shift: String)] {
+        let shownTeam = shownDay.team ?? store.myTeam
+        let date = DateUtil.date(from: shownDay.date) ?? Date()
+        return TeamInfo.allTeams
+            .filter { $0 != shownTeam }
+            .map { team in (team, ScheduleCalculator.baseShift(team: team, date: date)) }
+    }
+
+    /// 一个班组的 chip：班组名 + 班次。班次色是底色、白字；
+    /// 休息用浅青底 + 深青字（跟 DayCell 的休息 pill 同一套），显示「休」。
+    private func otherTeamChip(team: String, shift: String) -> some View {
+        HStack(spacing: 4) {
+            Text("\(team)班")
+                .bold()
+            Text(shift == "休息" ? "休" : shift)
+        }
+        .font(.subheadline)
+        .lineLimit(1)
+        .minimumScaleFactor(0.85)
+        .foregroundColor(shift == "休息" ? ShiftStyle.color(for: "休息") : .white)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 8)
+        .background(shift == "休息" ? ShiftStyle.background(for: "休息") : ShiftStyle.color(for: shift))
+        .cornerRadius(8)
     }
 
     /// 连班禁令提示：1.1.4 重排——原来是 .caption 小灰字 + 淡黄底（yellow 0.10），
@@ -582,7 +631,7 @@ struct DayDetailView: View {
                         .foregroundColor(.secondary)
                 }
             } else {
-                Text("给 \(shownDay.date) 调班：我这天是 \(shownDay.shift)（\(ShiftStyle.timeRange(for: shownDay.shift))））。调班就是他先替我上，我再挑一天替他上；还班日也可以先空着，以后再定。")
+                Text("给 \(shownDay.date) 调班：我这天是 \(shownDay.shift)（\(ShiftStyle.timeRange(for: shownDay.shift))）。调班就是他先替我上，我再挑一天替他上；还班日也可以先空着，以后再定。")
                     .font(.subheadline)
                 Text("第 1 步 · 选替我上这个班的人")
                     .font(.subheadline).bold()
@@ -664,7 +713,7 @@ struct DayDetailView: View {
                     .foregroundColor(.secondary)
                 if ev.eligible, let result = ev.result {
                     if ev.ownShift == "休息" {
-                        Text("\(resultLabel)：只上一个班 · \(result)\n这天本来休息，替班后就上这一个班（\(ShiftStyle.timeRange(for: result))）），不算双班")
+                        Text("\(resultLabel)：只上一个班 · \(result)\n这天本来休息，替班后就上这一个班（\(ShiftStyle.timeRange(for: result))），不算双班")
                             .font(.subheadline)
                     } else {
                         Text("\(resultLabel)：\(result)\n\(ShiftStyle.timeRange(for: result))")
@@ -728,13 +777,13 @@ struct DayDetailView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("保存前预览")
                 .font(.subheadline).bold()
-            Text("替班日 \(shownDay.date)：我休息；\(partner)班上 \(partnerShift)（\(ShiftStyle.timeRange(for: partnerShift))））。")
+            Text("替班日 \(shownDay.date)：我休息；\(partner)班上 \(partnerShift)（\(ShiftStyle.timeRange(for: partnerShift))）。")
                 .font(.subheadline)
             if swapLater {
                 Text("还班日：还没定。先这样保存，这条记成「待还班」；以后在当天详情里补填还班日，一直不还就转为请假（这天按请假算）。")
                     .font(.subheadline)
             } else if let payback = swapPayback, let myShift = selectedPaybackMyShift {
-                Text("还班日 \(payback)：我上 \(myShift)（\(ShiftStyle.timeRange(for: myShift))））；\(partner)班休息。")
+                Text("还班日 \(payback)：我上 \(myShift)（\(ShiftStyle.timeRange(for: myShift))）；\(partner)班休息。")
                     .font(.subheadline)
             } else {
                 Text("还班日：还没选。选一天当还班日，或者点「还班日先不填」。")
@@ -870,7 +919,7 @@ struct DayDetailView: View {
                             }
                         }
                         if let partner = leaveCoverPartner, let result = leaveCoverCandidates.first(where: { $0.team == partner })?.ev.result {
-                            Text("\(partner)班顶岗：他这天上 \(result)（\(ShiftStyle.timeRange(for: result))））；我这天请假休息。")
+                            Text("\(partner)班顶岗：他这天上 \(result)（\(ShiftStyle.timeRange(for: result))）；我这天请假休息。")
                                 .font(.subheadline)
                             Button("确认安排顶岗") { Task { await submitLeaveCover() } }
                                 .buttonStyle(.borderedProminent)
