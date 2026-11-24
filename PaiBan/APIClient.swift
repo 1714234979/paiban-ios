@@ -403,16 +403,21 @@ final class APIClient {
     }
 
     /// POST /api/v1/auth/register — 公开注册，成功后同样发 session cookie。
+    /// 1.2.6：昵称（displayName，可空）与短信验证码（code，服务端核验）一起交；
+    /// 昵称空着服务端就用手机号当显示名。
     @discardableResult
-    func register(username: String, password: String) async throws -> PublicUser {
+    func register(username: String, password: String, displayName: String? = nil, code: String? = nil) async throws -> PublicUser {
         guard baseURL != nil else { throw APIError.unreachable }
         let url = try url(for: "/api/v1/auth/register")
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: [
+        var body: [String: Any] = [
             "username": username, "password": password, "confirmPassword": password,
-        ])
+        ]
+        if let displayName, !displayName.isEmpty { body["displayName"] = displayName }
+        if let code, !code.isEmpty { body["code"] = code }
+        req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response): (Data, URLResponse)
         do {
             (data, response) = try await session.data(for: req)

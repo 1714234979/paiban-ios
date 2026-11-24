@@ -50,9 +50,12 @@ struct CalendarView: View {
         }
         .background(Color(.systemGroupedBackground))
         .task {
-            // 进页先对齐到 Store 正在看的月（恢复的缓存可能是别的月），钳在 12 个月窗口里。
-            let ym = store.currentYearMonth
-            pageIndex = min(max(Self.monthIndex(year: ym.year, month: ym.month), pageRange.lowerBound), pageRange.upperBound - 1)
+            // 1.2.6 冷启动回当天：进页对齐到今天所在的月（不再跟 Store 恢复的月份走）。
+            // .task 只在视图第一次创建时跑（冷启动、登录后进主界面），从后台切回来不重跑、
+            // 不强制回当天，保持原地。
+            let now = DateUtil.yearMonth(of: Date())
+            pageIndex = min(max(Self.monthIndex(year: now.year, month: now.month), pageRange.lowerBound), pageRange.upperBound - 1)
+            store.setCurrentMonth(year: now.year, month: now.month)
             if store.month == nil {
                 await store.refreshMonth()
             }

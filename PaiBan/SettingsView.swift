@@ -10,7 +10,7 @@ struct SettingsView: View {
     @State private var showFeedback = false
     @State private var showAdminBackend = false
 
-    /// 账号与安全入口的副标题：名字 · 手机号（脱敏，未绑就写未绑定）。
+    /// 账号与安全入口的副标题：昵称 · 手机号（脱敏，未绑就写未绑定）。
     private var accountSubtitle: String {
         let phone = PhoneUtil.masked(store.user?.phone) ?? "未绑定手机号"
         return "\(store.displayUsername) · \(phone)"
@@ -211,8 +211,8 @@ struct SettingsView: View {
 
 // MARK: - 设置二级页面（1.1.3）
 
-/// 账号与安全（二级页面）：名字、登录账号、班组、手机号（绑定/更换）、
-/// 修改名字、修改密码、退出登录。退出登录放这里，不留在设置页主界面；
+/// 账号与安全（二级页面）：昵称、登录账号、班组、手机号（绑定/更换）、
+/// 修改昵称、修改密码、切换账号、退出登录。退出登录放最下面，切换账号在它上面；
 /// 退出只清登录状态，离线缓存保留。
 struct AccountSecurityView: View {
     @EnvironmentObject private var store: AppStore
@@ -222,12 +222,13 @@ struct AccountSecurityView: View {
     @State private var showChangeName = false
     @State private var showChangePassword = false
     @State private var showLogoutConfirm = false
+    @State private var showSwitchConfirm = false
 
     var body: some View {
         Form {
             Section("账号") {
                 HStack {
-                    Text("名字")
+                    Text("昵称")
                     Spacer()
                     Text(store.displayUsername)
                         .foregroundColor(.secondary)
@@ -271,7 +272,7 @@ struct AccountSecurityView: View {
                     showChangeName = true
                 } label: {
                     HStack {
-                        Text("修改名字")
+                        Text("修改昵称")
                         Spacer()
                         Text("改显示名，登录账号不变")
                             .font(.caption)
@@ -290,6 +291,16 @@ struct AccountSecurityView: View {
                 }
             }
 
+            // 切换账号（1.2.6）：退出当前登录、回登录页换个账号登；离线缓存保留。
+            Section {
+                Button {
+                    showSwitchConfirm = true
+                } label: {
+                    Text("切换账号")
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+            }
+
             Section {
                 Button(role: .destructive) {
                     showLogoutConfirm = true
@@ -302,6 +313,14 @@ struct AccountSecurityView: View {
             }
         }
         .navigationTitle("账号与安全")
+        .alert("切换账号", isPresented: $showSwitchConfirm) {
+            Button("取消", role: .cancel) { }
+            Button("切换", role: .destructive) {
+                Task { await store.logout() }
+            }
+        } message: {
+            Text("确定要切换账号吗？将退出当前登录，返回登录页。")
+        }
         .alert("退出登录", isPresented: $showLogoutConfirm) {
             Button("取消", role: .cancel) { }
             Button("退出", role: .destructive) {
@@ -624,7 +643,7 @@ struct UsageGuideView: View {
                 Text("有新版本时打开 App 会弹提示，点「更新」直接下载安装包安装；也可以在设置页点「检查更新」手动查。点「稍后」后当天不再弹。")
             }
             Section("账号与安全") {
-                Text("改密码、改名字、换手机号、退出登录都在「设置 → 账号与安全」里。退出登录只清登录状态，离线缓存留着，下次登录还能看。换手机号要收新号的验证码验证，30 天内只能换一次。换班组在设置页「更换班组」里，选新班和生效日期，工资跟着新班组算。")
+                Text("改密码、改昵称、换手机号、切换账号、退出登录都在「设置 → 账号与安全」里。退出登录只清登录状态，离线缓存留着，下次登录还能看。换手机号要收新号的验证码验证，30 天内只能换一次。换班组在设置页「更换班组」里，选新班和生效日期，工资跟着新班组算。")
             }
         }
         .navigationTitle("使用说明")
@@ -635,6 +654,36 @@ struct UsageGuideView: View {
 struct ChangelogView: View {
     var body: some View {
         Form {
+            Section {
+                changelog(version: "1.2.6", items: [
+                    "冷启动回当天：杀掉 App 再打开，排班页和工资页都显示在当天/当月；从后台切回来保持原地",
+                    "登录页重做：输入框改下划线样式，登录按钮改全圆角胶囊，底部圆形图标切换密码登录和验证码登录",
+                    "注册页加昵称和手机验证码：昵称建议用真实姓名，验证码发到注册手机号、服务端核验",
+                    "「名字」改成「昵称」：注册页、账号与安全页、修改昵称都叫昵称",
+                    "账号与安全页加「切换账号」，退出登录移到页面最下面",
+                    "日历 12 月 24 日节日名改成「平安」",
+                ])
+            }
+            Section {
+                changelog(version: "1.2.5", items: [
+                    "删掉软件里所有车间名字样",
+                    "登录页隐藏云服务器地址，底部中间显示当前版本号",
+                ])
+            }
+            Section {
+                changelog(version: "1.2.4", items: [
+                    "当天详情加横向其他班次：实际班次和连班禁令之间，显示其他三个班组当天的班次",
+                    "全 App 文字排版优化",
+                ])
+            }
+            Section {
+                changelog(version: "1.2.3", items: [
+                    "账号改用手机号登录，不能用中文登录",
+                    "管理员账号可以登录 App（用户端和管理端两边都能进）",
+                    "内置 admin 删掉，张晓文就是最高权限管理者、账号是 18765766628",
+                    "张晓文的 App 里能直接进管理端",
+                ])
+            }
             Section {
                 changelog(version: "1.2.2", items: [
                     "日历日期修复：窄屏手机（如 iPhone 15）上两位数的号不再截成「…」，阳历数字按屏宽自适应",
@@ -718,7 +767,7 @@ struct ChangelogView: View {
     }
 }
 
-// MARK: - 绑定手机号 / 改名字 / 改密码（1.1.3）
+// MARK: - 绑定手机号 / 改昵称 / 改密码（1.1.3）
 
 /// 绑定手机号的两种模式：首次绑定 / 更换手机号。
 enum BindPhoneMode {
@@ -866,7 +915,7 @@ struct BindPhoneSheet: View {
     }
 }
 
-/// 改名字：改的是显示名（displayName），随意改、不限次数、不用验证码；
+/// 改昵称：改的是显示名（displayName），随意改、不限次数、不用验证码；
 /// 登录用的账号名（username）不动。留空保存 = 清回登录账号名。
 struct ChangeNameSheet: View {
     @EnvironmentObject private var store: AppStore
@@ -880,9 +929,9 @@ struct ChangeNameSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("显示名（最多 32 个字）", text: $name)
+                    TextField("昵称（最多 32 个字）", text: $name)
                 } footer: {
-                    Text("改的是显示名，登录用的账号名不变；留空保存会清回账号名。")
+                    Text("改的是昵称，登录用的账号名不变；留空保存会清回账号名。")
                 }
                 if let message {
                     Section {
@@ -890,7 +939,7 @@ struct ChangeNameSheet: View {
                     }
                 }
             }
-            .navigationTitle("修改名字")
+            .navigationTitle("修改昵称")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

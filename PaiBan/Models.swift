@@ -90,7 +90,7 @@ enum DateUtil {
         weekdayCN(calendar.component(.weekday, from: date) - 1)
     }
 
-    /// 上个月（工资页默认显示上个月）。
+    /// 上个月（1.2.6 前工资页默认显示上个月；1.2.6 起冷启动回当天，工资页默认显示当月）。
     static func lastMonth(from date: Date = Date()) -> (year: Int, month: Int) {
         let prev = addingMonths(date, -1)
         return yearMonth(of: prev)
@@ -821,7 +821,7 @@ enum ChineseCalendar {
     private static let gregorianFestivals: [String: String] = [
         "01-01": "元旦", "02-14": "情人节", "03-08": "妇女节", "04-01": "愚人节",
         "06-01": "儿童节", "09-10": "教师节",
-        "10-31": "万圣节", "12-24": "平安夜", "12-25": "圣诞节",
+        "10-31": "万圣节", "12-24": "平安", "12-25": "圣诞节",
     ]
 
     /// 阴历节日（农历月-日 → 名）。除夕是腊月最后一天，单独算。

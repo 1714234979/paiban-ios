@@ -1,8 +1,12 @@
 import SwiftUI
 
-/// 登录页：两种方式都能进——账号密码登录 / 手机号验证码登录（1.1.3）。
-/// 验证码登录：输手机号 → 点获取验证码（60 秒倒计时）→ 输 6 位码 → 登录；
-/// 新手机号会自动建账号（用户名是「手机+后 4 位」），显示名在设置页改。错误中文原样展示。
+/// 登录页（1.2.6 重做，模仿考试宝、换成我们自己的藏青「班」图标）：
+/// 两种方式都能进——账号密码登录 / 手机号验证码登录；没有一键登录（阿里云一键登录
+/// 免费次数只有 100 次，不够用，1.2.6 不做、不留入口）。
+/// 输入框是下划线样式（只有底部细线，不要方框直角），登录按钮是全圆角胶囊；
+/// 两种方式在底部「其他登录方式」用圆形图标切换。验证码登录：输手机号 → 点获取
+/// 验证码（60 秒倒计时）→ 输 6 位码 → 登录；新手机号会自动建账号（用户名是
+/// 「手机+后 4 位」），昵称在设置页改。错误中文原样展示。
 struct LoginView: View {
     @EnvironmentObject private var store: AppStore
 
@@ -15,6 +19,7 @@ struct LoginView: View {
 
     @State private var username = ""
     @State private var password = ""
+    @State private var showPassword = false
     // 短信登录
     @State private var phone = ""
     @State private var smsCode = ""
@@ -27,9 +32,8 @@ struct LoginView: View {
     var body: some View {
         NavigationStack {
             ScrollView {
-                VStack(spacing: AppStyle.sectionSpacing) {
+                VStack(spacing: 24) {
                     header
-                    modePicker
                     formCard
                     if let errorText {
                         Text(errorText)
@@ -42,10 +46,12 @@ struct LoginView: View {
                     if loginMode == .password {
                         registerLink
                     }
+                    Spacer(minLength: 24)
+                    otherMethods
                     versionLine
                 }
-                .padding(.horizontal, AppStyle.pagePadding)
-                .padding(.top, 32)
+                .padding(.horizontal, 32)
+                .padding(.top, 48)
                 .padding(.bottom, 24)
             }
             .background(Color(.systemGroupedBackground))
@@ -75,16 +81,6 @@ struct LoginView: View {
         }
     }
 
-    /// 两种登录方式切换（分段选择器）。
-    private var modePicker: some View {
-        Picker("登录方式", selection: $loginMode) {
-            ForEach(LoginMode.allCases, id: \.self) { mode in
-                Text(mode.rawValue).tag(mode)
-            }
-        }
-        .pickerStyle(.segmented)
-    }
-
     private var formCard: some View {
         Group {
             if loginMode == .password {
@@ -95,54 +91,80 @@ struct LoginView: View {
         }
     }
 
-    private var passwordForm: some View {
-        VStack(spacing: 16) {
-            TextField("手机号", text: $username)
-                .keyboardType(.numberPad)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .textFieldStyle(.roundedBorder)
-            SecureField("密码", text: $password)
-                .textFieldStyle(.roundedBorder)
+    /// 下划线输入框：只有底部一条细线，不要方框直角（1.2.6）。
+    private func underlineField<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(spacing: 0) {
+            content()
+                .padding(.vertical, 12)
+            Rectangle()
+                .fill(Color(.separator))
+                .frame(height: 1)
         }
-        .padding(AppStyle.cardPadding)
-        .background(Color(.systemBackground))
-        .cornerRadius(16)
-        .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
+    }
+
+    private var passwordForm: some View {
+        VStack(spacing: 8) {
+            underlineField {
+                TextField("请输入手机号", text: $username)
+                    .keyboardType(.numberPad)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            }
+            underlineField {
+                HStack(spacing: 8) {
+                    Group {
+                        if showPassword {
+                            TextField("请输入密码", text: $password)
+                        } else {
+                            SecureField("请输入密码", text: $password)
+                        }
+                    }
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    Button {
+                        showPassword.toggle()
+                    } label: {
+                        Image(systemName: showPassword ? "eye" : "eye.slash")
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+        }
     }
 
     /// 短信登录：手机号 + 获取验证码（60 秒倒计时）+ 6 位码。
     private var smsForm: some View {
-        VStack(spacing: 16) {
-            TextField("手机号（11 位大陆手机号）", text: $phone)
-                .keyboardType(.numberPad)
-                .textInputAutocapitalization(.never)
-                .autocorrectionDisabled()
-                .textFieldStyle(.roundedBorder)
-            HStack(spacing: 12) {
-                TextField("6 位验证码", text: $smsCode)
+        VStack(spacing: 8) {
+            underlineField {
+                TextField("请输入手机号", text: $phone)
                     .keyboardType(.numberPad)
-                    .textFieldStyle(.roundedBorder)
-                Button {
-                    Task { await sendSmsCode() }
-                } label: {
-                    Text(smsCountdown > 0 ? "\(smsCountdown) 秒后重发" : "获取验证码")
-                        .font(.subheadline)
-                        .frame(minWidth: 104)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+            }
+            underlineField {
+                HStack(spacing: 12) {
+                    TextField("请输入验证码", text: $smsCode)
+                        .keyboardType(.numberPad)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Button {
+                        Task { await sendSmsCode() }
+                    } label: {
+                        Text(smsCountdown > 0 ? "\(smsCountdown) 秒后重发" : "获取验证码")
+                            .font(.subheadline)
+                            .foregroundColor(.blue)
+                    }
+                    .disabled(smsSending || smsCountdown > 0 || !isValidPhone(phone))
                 }
-                .buttonStyle(.bordered)
-                .disabled(smsSending || smsCountdown > 0 || !isValidPhone(phone))
             }
             Text("新手机号登录会自动建账号；已有账号先在设置页绑手机号，绑完就能用验证码登录。")
                 .font(.caption)
                 .foregroundColor(.secondary)
+                .padding(.top, 8)
         }
-        .padding(AppStyle.cardPadding)
-        .background(Color(.systemBackground))
-        .cornerRadius(16)
-        .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
     }
 
+    /// 全圆角胶囊登录按钮（1.2.6）。
     private var loginButton: some View {
         Button {
             Task { await doLogin() }
@@ -158,7 +180,7 @@ struct LoginView: View {
             .frame(height: AppStyle.buttonHeight)
             .background(AppStyle.navy)
             .foregroundColor(.white)
-            .cornerRadius(AppStyle.buttonRadius)
+            .cornerRadius(AppStyle.buttonHeight / 2)
         }
         .buttonStyle(.plain)
         .disabled(isBusy || !canLogin)
@@ -177,6 +199,54 @@ struct LoginView: View {
             showRegister = true
         }
         .font(.subheadline)
+    }
+
+    /// 底部「其他登录方式」：圆形图标切换两种登录方式（1.2.6；只有密码和验证码两种）。
+    private var otherMethods: some View {
+        VStack(spacing: 16) {
+            HStack(spacing: 12) {
+                Rectangle()
+                    .fill(Color(.separator))
+                    .frame(height: 1)
+                Text("其他登录方式")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Rectangle()
+                    .fill(Color(.separator))
+                    .frame(height: 1)
+            }
+            HStack(spacing: 56) {
+                methodButton(mode: .password, icon: "lock.fill", label: "密码登录")
+                methodButton(mode: .sms, icon: "message.fill", label: "验证码登录")
+            }
+        }
+    }
+
+    private func methodButton(mode: LoginMode, icon: String, label: String) -> some View {
+        let isActive = loginMode == mode
+        return Button {
+            loginMode = mode
+            errorText = nil
+        } label: {
+            VStack(spacing: 6) {
+                ZStack {
+                    Circle()
+                        .fill(isActive ? AppStyle.navy : Color(.systemBackground))
+                        .frame(width: 56, height: 56)
+                        .overlay(
+                            Circle()
+                                .stroke(isActive ? Color.clear : Color(.separator), lineWidth: 1)
+                        )
+                    Image(systemName: icon)
+                        .font(.system(size: 22))
+                        .foregroundColor(isActive ? .white : .secondary)
+                }
+                Text(label)
+                    .font(.caption)
+                    .foregroundColor(isActive ? .primary : .secondary)
+            }
+        }
+        .buttonStyle(.plain)
     }
 
     /// 底部当前版本号：从 bundle 读，升版自动跟着变。

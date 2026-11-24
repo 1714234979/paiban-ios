@@ -82,8 +82,8 @@ final class AppStore: ObservableObject {
     @Published var overtime: [OvertimeRecord] = []
     @Published var isLoadingMonth = false
 
-    // 工资（默认看上个月；本地算，服务端只给原始数据）
-    @Published var payYearMonth: (year: Int, month: Int) = DateUtil.lastMonth()
+    // 工资（1.2.6 冷启动回当天：默认看当月；本地算，服务端只给原始数据）
+    @Published var payYearMonth: (year: Int, month: Int) = DateUtil.yearMonth(of: Date())
     @Published var pay: PayMonth?
     @Published var isLoadingPay = false
 
@@ -293,14 +293,16 @@ final class AppStore: ObservableObject {
         await checkForUpdateAfterLaunch()
     }
 
-    func register(username: String, password: String) async throws {
+    /// 注册（1.2.6）：昵称（displayName，可空）与短信验证码（code，服务端核验）一起交；
+    /// 昵称空着就用手机号当显示名（服务端默认同用户名）。
+    func register(username: String, password: String, displayName: String? = nil, code: String? = nil) async throws {
         if !serverReachable, !(await api.resolveServer()) {
             throw APIError.unreachable
         }
         serverBaseURL = api.baseURL
         serverKind = api.serverKind
         serverReachable = true
-        _ = try await api.register(username: username, password: password)
+        _ = try await api.register(username: username, password: password, displayName: displayName, code: code)
         let me = try await api.fetchMe()
         user = me
         isLoggedIn = true

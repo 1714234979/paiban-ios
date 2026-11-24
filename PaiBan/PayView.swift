@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 预估工资页：月份步进（默认上个月），只按月看（全年视图已删）。
+/// 预估工资页：月份步进（1.2.6 冷启动回当天：默认当月），只按月看（全年视图已删）。
 /// 数字在手机本地算（服务端只给排班与工资配置原始数据），切月秒出。
 /// 1.1.4：切月改成原生 TabView 分页滑（和排班页一样，跟着手指走、左右月预渲染）。
 /// 原来是自定义 DragGesture（minimumDistance 12）+ onEnded 里才调 stepPayMonth，
@@ -18,11 +18,12 @@ struct PayView: View {
     @State private var editError: String?
     @FocusState private var editFieldFocused: Bool
     /// 滑页的页码 = 月份绝对序号（年*12 + 月-1），与排班页同一套。
-    @State private var pageIndex: Int = PayView.monthIndex(year: DateUtil.lastMonth().year, month: DateUtil.lastMonth().month)
+    /// 1.2.6 冷启动回当天：默认当月。
+    @State private var pageIndex: Int = PayView.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
     /// 滑页范围：一次生成 12 个月，当前月居中（前后各 5–6 个月），和排班页对齐。
     @State private var windowStartIndex: Int = {
-        let lm = DateUtil.lastMonth()
-        return PayView.monthIndex(year: lm.year, month: lm.month) - 5
+        let now = DateUtil.yearMonth(of: Date())
+        return PayView.monthIndex(year: now.year, month: now.month) - 5
     }()
     private var pageRange: Range<Int> { windowStartIndex..<(windowStartIndex + 12) }
 
@@ -67,11 +68,12 @@ struct PayView: View {
         // 切到别的页面（排班/设置）时，敞着的编辑框自动收起，丢弃未保存的改动。
         .onDisappear { dismissEdit() }
         .task {
-            // 进页先对齐到 Store 正在看的月（恢复的缓存可能是别的月），
-            // 窗口以这个月为中心重定（默认就是上个月，和初始值一致，不闪）。
-            let ym = store.payYearMonth
-            windowStartIndex = Self.monthIndex(year: ym.year, month: ym.month) - 5
-            pageIndex = Self.monthIndex(year: ym.year, month: ym.month)
+            // 1.2.6 冷启动回当天：进页先对齐到今天所在的月（不再跟 Store 恢复的月份走），
+            // 窗口以当月为中心重定。只在视图第一次创建时跑，从后台切回来不重跑、不强制回当月。
+            let now = DateUtil.yearMonth(of: Date())
+            windowStartIndex = Self.monthIndex(year: now.year, month: now.month) - 5
+            pageIndex = Self.monthIndex(year: now.year, month: now.month)
+            store.setPayMonth(year: now.year, month: now.month)
             if store.pay == nil {
                 await store.refreshPay()
             }

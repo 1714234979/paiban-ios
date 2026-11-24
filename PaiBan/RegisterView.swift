@@ -1,12 +1,17 @@
 import SwiftUI
 
-/// 注册页：手机号 + 密码 + 确认密码，校验提示中文；成功后直接登录并进引导。
-/// 用户名就是手机号（11 位大陆手机号，1 开头）。
+/// 注册页：昵称 + 手机号 + 手机验证码 + 密码 + 确认密码，校验提示中文；成功后直接登录并进引导。
+/// 用户名就是手机号（11 位大陆手机号，1 开头）；昵称是显示名，可空，空着就用手机号当显示名；
+/// 验证码发到注册的手机号，服务端核验通过才建账号（1.2.6）。
 struct RegisterView: View {
     @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
 
+    @State private var nickname = ""
     @State private var username = ""
+    @State private var smsCode = ""
+    @State private var smsCountdown = 0
+    @State private var smsSending = false
     @State private var password = ""
     @State private var confirmPassword = ""
     @State private var errorText: String?
@@ -28,11 +33,34 @@ struct RegisterView: View {
                     .padding(.top, 16)
 
                     VStack(spacing: 16) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            TextField("昵称", text: $nickname)
+                                .textInputAutocapitalization(.never)
+                                .autocorrectionDisabled()
+                                .textFieldStyle(.roundedBorder)
+                            Text("建议使用真实姓名，以便管理员管理")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
                         TextField("手机号（11 位大陆手机号）", text: $username)
                             .keyboardType(.numberPad)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .textFieldStyle(.roundedBorder)
+                        HStack(spacing: 12) {
+                            TextField("6 位验证码", text: $smsCode)
+                                .keyboardType(.numberPad)
+                                .textFieldStyle(.roundedBorder)
+                            Button {
+                                Task { await sendSmsCode() }
+                            } label: {
+                                Text(smsCountdown > 0 ? "\(smsCountdown) 秒后重发" : "获取验证码")
+                                    .font(.subheadline)
+                                    .frame(minWidth: 104)
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(smsSending || smsCountdown > 0 || !PhoneUtil.isValid(username))
+                        }
                         SecureField("密码（至少 6 位，不能含冒号）", text: $password)
                             .textFieldStyle(.roundedBorder)
                         SecureField("再输一次密码", text: $confirmPassword)
@@ -94,6 +122,10 @@ struct RegisterView: View {
             errorText = "请输入 11 位大陆手机号（1 开头）"
             return
         }
+        if smsCode.count != 6 {
+            errorText = "请输入 6 位验证码"
+            return
+        }
         if password.count < 6 {
             errorText = "密码至少 6 位"
             return
@@ -110,8 +142,30 @@ struct RegisterView: View {
         isBusy = true
         defer { isBusy = false }
         do {
-            try await store.register(username: name, password: password)
+            let nick = nickname.trimmingCharacters(in: .whitespaces)
+            try await store.register(username: name, password: password,
+                                     displayName: nick.isEmpty ? nil : nick,
+                                     code: smsCode.trimmingCharacters(in: .whitespaces))
             dismiss()
+        } catch {
+            errorText = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    /// 发验证码：成功后开始 60 秒倒计时（每秒 -1）；失败把服务端中文错误显示出来。
+    private func sendSmsCode() async {
+        errorText = nil
+        smsSending = true
+        defer { smsSending = false }
+        do {
+            try await store.api.sendSmsCode(phone: username.trimmingCharacters(in: .whitespaces))
+            smsCountdown = 60
+            Task {
+                while smsCountdown > 0 {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    smsCountdown -= 1
+                }
+            }
         } catch {
             errorText = (error as? APIError)?.message ?? error.localizedDescription
         }
