@@ -91,15 +91,17 @@ struct ContentView: View {
         // 剪贴板一旦出问题用户看不到码（1.1.2 报的“点更新没复制”就是这么来的，
         // 另：1.1.1 的 VersionInfo 根本没有 extractionCode 字段，点更新本来就不会复制）。
         // 点「更新」先复制提取码再打开链接；万一粘贴不到，照着这个码手动输入也行。
+        // 1.2.2：没有提取码 = 服务器直链，提示里不写提取码那句，改写直接下载。
         if let code = info.trimmedExtractionCode {
             text += "\n\n提取码：\(code)（点「更新」会自动复制，打开网盘后粘贴即可；粘贴不到就手动输入这个码）"
+        } else {
+            text += "\n\n点「更新」直接下载安装包，无需提取码。"
         }
         return text
     }
 
-    /// 点「更新」：先把网盘提取码复制到剪贴板（有码才复制，没码就只打开链接），
-    /// 再在系统浏览器里打开清单里的 downloadUrl（网盘链接），
-    /// 用户在网盘里粘贴提取码、下载新 IPA 安装；不在 App 内直接下载安装包。
+    /// 点「更新」：有提取码时先把网盘提取码复制到剪贴板再打开链接（老行为）；
+    /// 1.2.2 起没有提取码 = 服务器 IPA 直链，不复制、直接在系统浏览器里打开 downloadUrl 下载安装。
     /// 复制在先、打开在后：复制失败也不影响打开链接，提示框里也直接写了提取码可手动输入。
     private func openDownloadURL(_ info: VersionInfo) {
         guard let urlString = info.downloadUrl, let url = URL(string: urlString) else { return }

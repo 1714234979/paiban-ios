@@ -253,6 +253,61 @@ final class APIClient {
         }
     }
 
+    /// 直接按完整响应体解码（{ok, ...} 信封里 payload 字段不是 data 的接口用，
+    /// 如反馈列表的 items、回复的 reply）；ok=false 时由调用方按 error 抛中文错误；
+    /// 401 时用 Basic 重试一次（跟 request 同一套逻辑）。
+    private func requestResponse<E: Decodable>(
+        path: String,
+        method: String = "GET",
+        jsonBody: [String: Any]? = nil,
+        retriedWithBasic: Bool = false
+    ) async throws -> E {
+        let url = try url(for: path)
+        var req = URLRequest(url: url)
+        req.httpMethod = method
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let jsonBody {
+            req.httpBody = try JSONSerialization.data(withJSONObject: jsonBody)
+        }
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await session.data(for: req)
+        } catch {
+            AppLogger.shared.log("\(method) \(path) 联不上服务器", tag: "API")
+            throw APIError.unreachable
+        }
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if status == 401, !retriedWithBasic, let creds = KeychainHelper.load() {
+            var retry = req
+            let token = Data("\(creds.username):\(creds.password)".utf8).base64EncodedString()
+            retry.setValue("Basic \(token)", forHTTPHeaderField: "Authorization")
+            do {
+                let (retryData, retryResponse) = try await session.data(for: retry)
+                return try decodeResponse(data: retryData, status: (retryResponse as? HTTPURLResponse)?.statusCode ?? 0)
+            } catch let apiError as APIError {
+                throw apiError
+            } catch {
+                AppLogger.shared.log("\(method) \(path) Basic 重试也联不上服务器", tag: "API")
+                throw APIError.unreachable
+            }
+        }
+        if status >= 400 {
+            AppLogger.shared.log("\(method) \(path) HTTP \(status)", tag: "API")
+        }
+        return try decodeResponse(data: data, status: status)
+    }
+
+    /// requestResponse 的解码：整包按 E 解，解不出按老规矩报中文错。
+    private func decodeResponse<E: Decodable>(data: Data, status: Int) throws -> E {
+        do {
+            return try decoder.decode(E.self, from: data)
+        } catch {
+            if status == 401 { throw APIError.notLoggedIn }
+            AppLogger.shared.log("解码失败（HTTP \(status)，\(data.count) 字节）", tag: "API")
+            throw APIError(message: "服务器返回了看不懂的数据（HTTP \(status)）")
+        }
+    }
+
     // MARK: 登录 / 注册
 
     // MARK: - 手机号验证码登录（1.1.3）
@@ -488,6 +543,26 @@ final class APIClient {
         ]
         if let imageBase64 { body["image"] = imageBase64 }
         try await requestNoData(path: "/api/v1/me/feedback", method: "POST", jsonBody: body)
+    }
+
+    /// GET /api/v1/me/feedback — 我的反馈列表（只返回自己的，最新在前），每条带回复 thread。
+    /// 返回体是 {ok, items}，不是 {ok, data}，所以走 requestResponse（见上）。
+    func fetchMyFeedback() async throws -> [FeedbackItem] {
+        let resp: FeedbackListResponse = try await requestResponse(path: "/api/v1/me/feedback")
+        guard resp.ok else { throw APIError(message: resp.error ?? "加载我的反馈失败") }
+        return resp.items ?? []
+    }
+
+    /// POST /api/v1/me/feedback/:file/reply — 给某条反馈继续回一句话（1–2000 字，
+    /// 服务端校验，失败中文错误原样透传）。成功返回新那条回复。
+    func postFeedbackReply(file: String, text: String) async throws -> FeedbackReply {
+        let encoded = file.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? file
+        let resp: FeedbackReplyResponse = try await requestResponse(
+            path: "/api/v1/me/feedback/\(encoded)/reply", method: "POST", jsonBody: ["text": text])
+        guard resp.ok, let reply = resp.reply else {
+            throw APIError(message: resp.error ?? "回复发送失败")
+        }
+        return reply
     }
 
     /// GET /api/v1/me/range?start=YYYY-MM-DD&days=N —— 连续若干天的 day 对象。

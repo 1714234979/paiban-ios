@@ -2,8 +2,12 @@ import Foundation
 
 /// 版本清单里的一条记录：GET <baseURL>/api/v1/version 返回的 data。
 /// {latestVersion, releaseNotes, downloadUrl, extractionCode} —— downloadUrl 是服务端可配的
-/// 网盘链接（服务端版本文件 / 管理端接口里改），App 里不要写死。
+/// 下载链接（服务端版本文件 / 管理端接口里改），App 里不要写死。
 /// extractionCode 是网盘提取码（服务端配，没有码时为空）；点「更新」时先复制到剪贴板再打开链接。
+/// 1.2.2：downloadUrl 改成服务器 IPA 直链（不再是网盘链接），extractionCode 为空；
+/// 没有码时不复制、直接打开链接下载安装（见 ContentView.openDownloadURL）。
+/// 服务端 1.2.2 起多回的 androidVersion / androidDownloadUrl / androidReleaseNotes 等字段，
+/// Codable 合成解码默认忽略未知键，不用特意声明，解码不受影响。
 struct VersionInfo: Codable, Equatable, Identifiable {
     var latestVersion: String
     var releaseNotes: String?

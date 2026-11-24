@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// 日历格固定高 64pt；网格外框总高固定 414pt（按 6 行 × 64 + 5 × 6 算），
 /// 行距按行数自适应：6 行紧（6pt）、5 行松（23.5pt）、4 行更松。
@@ -576,6 +577,8 @@ struct MonthPageView: View {
 /// 双班时在同一个 28pt 高度里上下叠两个 13pt 小 pill，不撑高格子。
 /// 整格固定 64pt（日期行 26 + 间距 2 + pill 28 + 上下边距 8），行距自适应靠网格间距调。
 /// 1.1.3：阳历数字 18→16pt（收一收、别太高）；日期与色块间距 4→2pt；
+/// 1.2.2：窄屏（<400pt，如 iPhone 15 的 393pt）阳历数字 16→15pt + 缩放兜底，
+/// 左右两列 12/9→11/8——之前两位数的号在窄屏上被截成「…」。
 /// 请假「假」标从号数旁边移到左列、和法定「假/班」上下叠放（之前号数+红标太宽、压着右边阴历字）；
 /// 三薪日：同一个 28pt 色块里上下两行——上面班次名、下面半透明白字「三薪」，
 /// 和色块重叠、不另起一行；法定「假/班」保持原样，两套标法不混。
@@ -589,6 +592,14 @@ struct DayCell: View {
     var isTriplePay: Bool = false
 
     private let pillHeight: CGFloat = 28
+
+    /// 1.2.2：阳历数字字号按屏宽自适应——iPhone 15 标准版屏宽只有 393pt，
+    /// 日期行里左 11pt 假/班列 + 右 8pt 阴历列是写死的，中间只剩约 24pt，
+    /// 两位数的号在 16pt 下会被截成「…」；窄屏（<400pt）用 15pt，
+    /// 宽屏保持 16pt；再加 lineLimit(1) + minimumScaleFactor(0.75) 兜底，绝不截断。
+    private var dayNumberFontSize: CGFloat {
+        UIScreen.main.bounds.width < 400 ? 15 : 16
+    }
 
     /// 当天的阴历/节气/节日/假班信息（查表 + 中国日历算，带缓存，渲染时不重算）。
     private var extra: ChineseCalendar.DayInfo {
@@ -609,9 +620,10 @@ struct DayCell: View {
 
     var body: some View {
         VStack(spacing: 2) {
-            // 日期行（三栏，互不重叠）：左 法定假/班 + 请假标上下叠（12pt，没有留空）
+            // 日期行（三栏，互不重叠）：左 法定假/班 + 请假标上下叠（11pt，没有留空）
             // + 中 阳历大数字（居中） + 右 阴历/节气/节日小字（竖排两字，节气/节日红字、阴历灰字）。
             // 请假标放左列：之前跟在号数后面，号数+红标比中间栏宽、压着右边阴历字（11-02、11-03 就是这么叠上的）。
+            // 1.2.2：左列 12→11、右列 9→8，给中间阳历数字多腾 2pt（窄屏两位数的号不再截成「…」）。
             HStack(alignment: .top, spacing: 1) {
                 VStack(alignment: .leading, spacing: 1) {
                     if let mark = extra.mark, !isAdjacent {
@@ -632,7 +644,7 @@ struct DayCell: View {
                                 .foregroundColor(.red)
                         }
                     } else {
-                        Color.clear.frame(width: 12, height: 9)
+                        Color.clear.frame(width: 11, height: 9)
                     }
                     if day.onLeave == true && !isAdjacent {
                         // 1.1.5：请假的「假」用红色字体——红字配红底看不见，底色去掉变透明
@@ -644,9 +656,11 @@ struct DayCell: View {
                             .padding(.vertical, 1)
                     }
                 }
-                .frame(width: 12, alignment: .leading)
+                .frame(width: 11, alignment: .leading)
                 Text("\(day.dayNumber)")
-                    .font(.system(size: 16, weight: isToday ? .bold : .semibold))
+                    .font(.system(size: dayNumberFontSize, weight: isToday ? .bold : .semibold))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                     .foregroundColor(isAdjacent ? .secondary : .primary)
                     .frame(maxWidth: .infinity, alignment: .center)
                 VStack(spacing: 0) {
@@ -656,7 +670,7 @@ struct DayCell: View {
                             .foregroundColor(extra.isRedText ? .red : .secondary)
                     }
                 }
-                .frame(width: 9, alignment: .leading)
+                .frame(width: 8, alignment: .leading)
                 .padding(.top, 1)
             }
             .frame(height: 26)

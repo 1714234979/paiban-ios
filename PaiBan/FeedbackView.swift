@@ -31,9 +31,19 @@ struct FeedbackView: View {
     @State private var isSending = false
     @State private var resultText: String?
 
+    /// 1.2.2 反馈双向回复：自己的反馈列表（最新在前），点开一条看回复 thread、能继续回。
+    @State private var myFeedback: [FeedbackItem] = []
+    @State private var isLoadingMyFeedback = false
+    @State private var myFeedbackError: String?
+    @State private var expandedFile: String?
+    @State private var replyText = ""
+    @State private var isReplying = false
+    @State private var replyError: String?
+
     var body: some View {
         NavigationStack {
-            VStack(alignment: .leading, spacing: 16) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
                 Text("遇到什么问题？")
                     .font(.title2).bold()
                 Text("选一下类型和出问题的页面，再写清楚是哪个月出了问题。发送时会附上最近 24 小时的运行日志（只含 App 自己的运行记录，不含密码）。")
@@ -104,7 +114,6 @@ struct FeedbackView: View {
                         .font(.subheadline)
                         .foregroundColor(resultText.hasPrefix("已发送") ? .green : .red)
                 }
-                Spacer()
                 Button {
                     Task { await send() }
                 } label: {
@@ -118,14 +127,22 @@ struct FeedbackView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSending)
+
+                Divider()
+                    .padding(.top, 4)
+                myFeedbackSection
             }
             .padding(AppStyle.pagePadding)
+            }
             .navigationTitle("反馈问题")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("取消") { dismiss() }
                 }
+            }
+            .task {
+                await loadMyFeedback()
             }
         }
     }
@@ -177,5 +194,209 @@ struct FeedbackView: View {
             AppLogger.shared.log("反馈发送失败：\((error as? APIError)?.message ?? error.localizedDescription)", tag: "Feedback")
             resultText = (error as? APIError)?.message ?? error.localizedDescription
         }
+    }
+
+    // MARK: - 我的反馈（1.2.2 双向回复）
+
+    /// 「我的反馈」区：自己的反馈列表（最新在前），点开一条看回复 thread、能继续回。
+    /// 每次打开反馈页拉一次；新反馈发完关页面，下次打开就能看到。
+    private var myFeedbackSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("我的反馈")
+                    .font(.headline)
+                Spacer()
+                if isLoadingMyFeedback { ProgressView() }
+            }
+            if let myFeedbackError {
+                Text(myFeedbackError)
+                    .font(.subheadline)
+                    .foregroundColor(.red)
+            } else if myFeedback.isEmpty && !isLoadingMyFeedback {
+                Text("还没有反馈记录，上面提交后会出现在这里。")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+            ForEach(myFeedback) { item in
+                feedbackRow(item)
+            }
+        }
+    }
+
+    /// 一条反馈的行：时间、类型、页面；点开展开回复 thread 和回复框。
+    private func feedbackRow(_ item: FeedbackItem) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                withAnimation {
+                    if expandedFile == item.file {
+                        expandedFile = nil
+                    } else {
+                        expandedFile = item.file
+                        replyText = ""
+                        replyError = nil
+                    }
+                }
+            } label: {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(feedbackTitle(item))
+                            .font(.subheadline).bold()
+                            .foregroundColor(.primary)
+                        Text(Self.displayTime(item.at))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    Text(replyCountText(item))
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Image(systemName: expandedFile == item.file ? "chevron.up" : "chevron.down")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .buttonStyle(.plain)
+            if expandedFile == item.file {
+                Divider()
+                replyThread(item)
+                replyComposer(item)
+            }
+        }
+        .padding(12)
+        .background(Color(.secondarySystemBackground))
+        .cornerRadius(AppStyle.buttonRadius)
+    }
+
+    /// 行标题：类型 · 页面（有截图的再加「有截图」）。
+    private func feedbackTitle(_ item: FeedbackItem) -> String {
+        let typeLabel: String
+        switch item.type {
+        case "bug": typeLabel = "Bug"
+        case "suggestion": typeLabel = "建议"
+        default: typeLabel = item.type ?? "反馈"
+        }
+        var title = "\(typeLabel) · \(item.location ?? "其他")"
+        if item.hasImage == true { title += " · 有截图" }
+        return title
+    }
+
+    /// 右边小字：有几条回复，没有就写「暂无回复」。
+    private func replyCountText(_ item: FeedbackItem) -> String {
+        let count = item.replies?.count ?? 0
+        return count == 0 ? "暂无回复" : "\(count) 条回复"
+    }
+
+    /// 回复 thread：管理员和自己的回复按时间排；管理员那条带浅 navy 底、名字写「管理员」，
+    /// 自己的那条写「我」（服务端 by 有名字时显示名字）。
+    private func replyThread(_ item: FeedbackItem) -> some View {
+        let replies = (item.replies ?? []).sorted { $0.at < $1.at }
+        return VStack(alignment: .leading, spacing: 8) {
+            if replies.isEmpty {
+                Text("还没有回复，管理员回复后会出现在这里。")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            }
+            ForEach(replies) { reply in
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack {
+                        Text(replySpeaker(reply))
+                            .font(.caption).bold()
+                            .foregroundColor(reply.from == "admin" ? AppStyle.navy : .primary)
+                        Text(Self.displayTime(reply.at))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Text(reply.text)
+                        .font(.subheadline)
+                }
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(reply.from == "admin" ? AppStyle.navy.opacity(0.08) : Color(.systemBackground))
+                .cornerRadius(8)
+            }
+        }
+    }
+
+    /// 回复人名字：服务端 by 有名字显示名字，没有时管理员写「管理员」、自己写「我」。
+    private func replySpeaker(_ reply: FeedbackReply) -> String {
+        if let by = reply.by, !by.isEmpty { return by }
+        return reply.from == "admin" ? "管理员" : "我"
+    }
+
+    /// 回复框：输入 + 发送；失败显示服务端中文错误（1–2000 字是服务端校验）。
+    private func replyComposer(_ item: FeedbackItem) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                TextField("继续回复…", text: $replyText)
+                    .textFieldStyle(.roundedBorder)
+                Button {
+                    Task { await sendReply(to: item) }
+                } label: {
+                    Text(isReplying ? "发送中…" : "发送")
+                        .font(.subheadline).bold()
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        .background(AppStyle.navy)
+                        .foregroundColor(.white)
+                        .cornerRadius(8)
+                }
+                .buttonStyle(.plain)
+                .disabled(replyText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isReplying)
+            }
+            if let replyError {
+                Text(replyError)
+                    .font(.subheadline)
+                    .foregroundColor(.red)
+            }
+        }
+    }
+
+    private func loadMyFeedback() async {
+        isLoadingMyFeedback = true
+        defer { isLoadingMyFeedback = false }
+        do {
+            myFeedback = try await store.api.fetchMyFeedback()
+            myFeedbackError = nil
+        } catch {
+            myFeedbackError = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    /// 继续回一条：成功就把新回复追加到本地这条的 thread 里，不用整列表重拉。
+    private func sendReply(to item: FeedbackItem) async {
+        let text = replyText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else { return }
+        isReplying = true
+        defer { isReplying = false }
+        do {
+            let reply = try await store.api.postFeedbackReply(file: item.file, text: text)
+            if let idx = myFeedback.firstIndex(where: { $0.file == item.file }) {
+                var updated = myFeedback[idx]
+                var replies = updated.replies ?? []
+                replies.append(reply)
+                updated.replies = replies
+                myFeedback[idx] = updated
+            }
+            replyText = ""
+            replyError = nil
+            AppLogger.shared.log("反馈回复已发送", tag: "Feedback")
+        } catch {
+            AppLogger.shared.log("反馈回复失败：\((error as? APIError)?.message ?? error.localizedDescription)", tag: "Feedback")
+            replyError = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    /// 服务端 at 是 ISO 时间戳，显示成“11-24 10:31”；解析不出就原样截一段显示。
+    private static func displayTime(_ iso: String) -> String {
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = parser.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
+        guard let date else {
+            return String(iso.prefix(16)).replacingOccurrences(of: "T", with: " ")
+        }
+        let out = DateFormatter()
+        out.locale = Locale(identifier: "zh_CN")
+        out.dateFormat = "MM-dd HH:mm"
+        return out.string(from: date)
     }
 }

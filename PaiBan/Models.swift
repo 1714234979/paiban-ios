@@ -528,6 +528,46 @@ struct SwapSaveResult: Decodable {
     var paybackDate: String?
 }
 
+// MARK: - 反馈双向回复（1.2.2）
+
+/// 自己的某一条反馈（GET /api/v1/me/feedback 的 items 里的一条，最新在前）：
+/// file 是服务端文件名（回复接口的 :file 就用它），at 是提交时间（ISO 时间戳），
+/// replies 是这条反馈下的来回回复（管理员 + 自己），按时间排。
+struct FeedbackItem: Codable, Equatable, Identifiable {
+    var file: String
+    var at: String
+    var type: String?
+    var location: String?
+    var hasImage: Bool?
+    var size: Int?
+    var replies: [FeedbackReply]?
+    var id: String { file }
+}
+
+/// 一条反馈下的一次回复：from 是 "admin"（管理员）或 "user"（自己），by 是说话人名字。
+struct FeedbackReply: Codable, Equatable, Identifiable {
+    var id: String
+    var from: String?
+    var by: String?
+    var at: String
+    var text: String
+}
+
+/// GET /api/v1/me/feedback 返回：{ok, items}（注意：这里是 items，不是 data，
+/// 通用 request 只解 {ok, data}，所以走 APIClient.requestResponse）。
+struct FeedbackListResponse: Decodable {
+    var ok: Bool
+    var items: [FeedbackItem]?
+    var error: String?
+}
+
+/// POST /api/v1/me/feedback/:file/reply 返回：{ok, reply}（同样不是 data，见上）。
+struct FeedbackReplyResponse: Decodable {
+    var ok: Bool
+    var reply: FeedbackReply?
+    var error: String?
+}
+
 /// GET /api/v1/me/teams/range 返回：{start, teams: {A:[DaySchedule], B:[...], C:[...], D:[...]}}。
 /// 调班候选卡片与还班日列表用（四班同取）；自己班的日程以 /me/month 为准，不用这里的。
 struct TeamsRangeResponse: Decodable {
