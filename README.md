@@ -1,6 +1,6 @@
 # 排班空间 PaiBan（iOS 原生版）
 
-603车间排班与工资的 iOS 应用：原生 SwiftUI，数据走 NAS 上的排班空间 API（`~/workspace/paiban-api/`，CONTRACT.md v1）。
+排班与工资的 iOS 应用：原生 SwiftUI，数据走 NAS 上的排班空间 API（`~/workspace/paiban-api/`，CONTRACT.md v1）。
 
 ## 用法
 

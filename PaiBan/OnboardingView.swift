@@ -111,7 +111,7 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("你在哪个班？")
                 .font(.title2).bold()
-            Text("603车间四个班，都是 8 天一轮倒班。")
+            Text("四个班，都是 8 天一轮倒班。")
                 .foregroundColor(.secondary)
             Picker("班组", selection: $team) {
                 ForEach(TeamInfo.allTeams, id: \.self) { t in

@@ -69,7 +69,7 @@ struct LoginView: View {
             Text("排班空间")
                 .font(.title)
                 .bold()
-            Text("603车间 · 8天一轮倒班")
+            Text("8天一轮倒班")
                 .font(.subheadline)
                 .foregroundColor(.secondary)
         }
