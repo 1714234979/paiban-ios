@@ -42,7 +42,7 @@ struct LoginView: View {
                     if loginMode == .password {
                         registerLink
                     }
-                    serverLine
+                    versionLine
                 }
                 .padding(.horizontal, AppStyle.pagePadding)
                 .padding(.top, 32)
@@ -179,24 +179,16 @@ struct LoginView: View {
         .font(.subheadline)
     }
 
-    private var serverLine: some View {
-        Group {
-            if let base = store.serverBaseURL {
-                Text("服务器：\(store.serverKind.displayName) · \(base)")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-            } else if store.isStarting {
-                Text("正在连接服务器…")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            } else {
-                Text("服务器连不上：请检查网络后重试")
-                    .font(.caption)
-                    .foregroundColor(.red)
-                    .multilineTextAlignment(.center)
-            }
-        }
+    /// 底部当前版本号：从 bundle 读，升版自动跟着变。
+    private var versionLine: some View {
+        Text("当前版本 \(appVersion)")
+            .font(.caption)
+            .foregroundColor(.secondary)
+            .multilineTextAlignment(.center)
+    }
+
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
     }
 
     private func doLogin() async {
