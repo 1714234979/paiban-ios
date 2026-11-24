@@ -31,24 +31,22 @@ iOS 子代理按此写 Swift 客户端；两者都以此为准，不要自行改
   个税累计预扣法，税从奖金里扣。
 
 ## 账号规矩（2026-11-23 老爷亲口定）
-- **老爷本人的用户端账号是「张晓文」（username `张晓文`，role=user，B 班）。**
+- **老爷本人的用户端账号是「张晓文」（username `18765766628`，role=admin，B 班）。**
   他在 App 里用的就是这个号，不是普通同事。他的数据和排班空间同步：
-  App 里登录张晓文，看到的就是他自己的那份数据（班次、工资设置和空间里一致）。
-  服务端：以用户名 `张晓文` 为 owner 标识（server.js 里一个清楚标明的常量
-  `OWNER_USERNAME = '张晓文'`），他的 /me/* 一律按全局 config 解析
+  App 里登录 18765766628，看到的就是他自己的那份数据（班次、工资设置和空间里一致）。
+  服务端：以用户名 `18765766628` 为 owner 标识（server.js 里一个清楚标明的常量
+  `OWNER_USERNAME = '18765766628'`），他的 /me/* 一律按全局 config 解析
   （班组、调班/请假、工资设置、出勤录入都走全局，和空间同步）。
   他的 paySettings 为空、teamHistory 为 B 时，/me/pay 必须等于全局 /api/v1/pay。
-- **管理账号 `admin`（role=admin）只进管理端，不能登录 App。**
-  App 专用登录接口 `POST /api/v1/auth/login`（见下），只允许普通用户账号
-  （role=user）；role=admin 调它返回 403，错误信息固定为
-  「管理账号不能登录 App，请使用用户账号登录」。
-  管理端登录 `POST /api/v1/admin/login` 不受影响（admin 照常进管理端）。
-  App 客户端也要做一道拦截：登录返回的 user.role 是 admin 时拒绝进 App，
-  显示同一句提示（纵深防御）。
+- **内置管理账号 `admin` 已删（2026-11-24）。张晓文（账号 18765766628，role=admin）就是最高权限的管理者。**
+  管理员账号可以登录 App（用户端）和管理端，两边都能进（老爷 2026-11-24 亲口定）。
+  App 专用登录接口 `POST /api/v1/auth/login`（见下）对普通用户和管理账号都放行；
+  管理端登录 `POST /api/v1/admin/login` 不受影响（张晓文照常进管理端）。
+  App 客户端原来那道「role=admin 拒绝进 App」的拦截已在 1.2.3 删掉。
 - App 登录一律走 `POST /api/v1/auth/login`，不要再用 `/api/v1/admin/login`
   （那个只给管理端用）。`POST /api/v1/auth/login` body `{username, password}`，
   成功返回 `{ok, user}` 并发 7 天 session cookie（与 admin/login 同形）；
-  账号密码不对 401；账号停用 403；role=admin 403（上句提示）。
+  账号密码不对 401；账号停用 403。账号就是手机号（11 位），不能用中文登录。
 
 ## 身份模型
 - 管理员账号（role=admin）= 老爷本人 = 与空间同步的那份数据。
@@ -160,10 +158,9 @@ iOS 子代理按此写 Swift 客户端；两者都以此为准，不要自行改
   保持原样，不要改签名。
 
 ## 客户端（iOS）需要的数据
-- 登录：App 用 POST /api/v1/auth/login（只允许 role=user；admin 调它返回 403
-  「管理账号不能登录 App，请使用用户账号登录」），成功发 7 天 session cookie；
+- 登录：App 用 POST /api/v1/auth/login（普通用户和管理账号都能登录），成功发 7 天 session cookie；
   或用 Basic（账号密码存钥匙串）。管理端登录 POST /api/v1/admin/login 只给网页管理端用，
-  App 不再调它。
+  App 不再调它。账号就是手机号（11 位），不能用中文登录；注册时用户名必须是 11 位大陆手机号。
 - 启动流程：读本地缓存立刻显示 → 后台调 GET /api/v1/me + /me/month + /me/pay
   刷新 → 写回本地缓存。
 - 本地缓存：App 沙盒 Documents 下一个 JSON 文件（按用户 id 分文件），
