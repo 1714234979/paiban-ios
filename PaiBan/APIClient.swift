@@ -11,8 +11,6 @@ struct APIError: LocalizedError {
 
     static let unreachable = APIError(message: "连不上服务器（云服务器与 NAS 备份都试过了），请检查网络后再试")
     static let notLoggedIn = APIError(message: "未登录，请先登录")
-    /// 管理账号不能进 App（CONTRACT.md 账号规矩）：服务端 403 与客户端拦截共用同一句提示。
-    static let adminBlocked = APIError(message: "管理账号不能登录 App，请使用用户账号登录")
 }
 
 // MARK: - 通用信封
@@ -328,7 +326,7 @@ final class APIClient {
 
     /// POST /api/v1/auth/sms/login — 手机号 + 验证码登录。
     /// 返回形同密码登录（{ok, user}，新注册还会带 apiKey）；成功后服务端发 7 天 session。
-    /// 没有密码，不存 Keychain；role=admin 照样拦（服务端 403 + 这里的客户端拦截）。
+    /// 没有密码，不存 Keychain；管理员账号（role=admin）也可以登录 App（2026-11-24 新规矩）。
     @discardableResult
     func loginWithSms(phone: String, code: String) async throws -> PublicUser {
         guard baseURL != nil else { throw APIError.unreachable }
@@ -353,10 +351,6 @@ final class APIClient {
         guard auth.ok, let user = auth.user else {
             throw APIError(message: auth.error ?? "验证码不对或已过期")
         }
-        if user.role == "admin" {
-            clearSessionCookies()
-            throw APIError.adminBlocked
-        }
         return user
     }
 
@@ -374,8 +368,8 @@ final class APIClient {
                           jsonBody: ["phone": phone, "code": code, "newPassword": newPassword])
     }
 
-    /// POST /api/v1/auth/login — App 专用登录（CONTRACT.md 账号规矩）：
-    /// 只允许 role=user 的普通账号；role=admin 返回 403，错误原样透传。
+    /// POST /api/v1/auth/login — App 专用登录：
+    /// 普通账号与管理员账号都能登录（2026-11-24 新规矩，admin 两边都能进）。
     /// 成功后服务端 Set-Cookie: paiban_session（7 天）。
     /// 注意：不要再用 /api/v1/admin/login，那个只给管理端（网页）用。
     @discardableResult
@@ -400,15 +394,8 @@ final class APIClient {
             throw APIError(message: "登录失败（HTTP \(status)）")
         }
         guard auth.ok, let user = auth.user else {
-            // 服务端 403 的管理账号提示（auth.error）原样透传给用户。
+            // 服务端返回的错误（auth.error）原样透传给用户。
             throw APIError(message: auth.error ?? "账号或密码不对")
-        }
-        // 客户端纵深防御：万一服务端放行了 admin（旧版/异常），这里拦住——
-        // 不存 Keychain、不进 App，并清掉可能已发的 session cookie。
-        // 张晓文与普通同事的 role 都是 "user"，不会触发这一支。
-        if user.role == "admin" {
-            clearSessionCookies()
-            throw APIError.adminBlocked
         }
         // 登录成功：把账号密码存进 Keychain，供以后 Basic 兜底。
         KeychainHelper.save(username: username, password: password)

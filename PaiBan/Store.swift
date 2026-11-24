@@ -195,15 +195,6 @@ final class AppStore: ObservableObject {
         }
         do {
             let me = try await api.fetchMe()
-            // 纵深防御：旧版 App 用 admin/login 留下的 session 若还是 admin，
-            // 不进 App，清掉 session 并报同一句提示。
-            if me.isAdmin {
-                await api.logout()
-                isStarting = false
-                isLoggedIn = false
-                startupError = APIError.adminBlocked.message
-                return
-            }
             user = me
             isLoggedIn = true
             viewTeam = me.displayTeam
@@ -241,12 +232,6 @@ final class AppStore: ObservableObject {
         }
         do {
             let me = try await api.fetchMe()
-            if me.isAdmin {
-                await api.logout()
-                isLoggedIn = false
-                startupError = APIError.adminBlocked.message
-                return
-            }
             user = me
             isLoggedIn = true
             isOffline = false
@@ -275,13 +260,6 @@ final class AppStore: ObservableObject {
         serverReachable = true
         _ = try await api.login(username: username, password: password)
         let me = try await api.fetchMe()
-        // 客户端纵深防御（第二道）：登录返回的 role 是 admin 时拒绝进 App，
-        // 清掉刚建的 session 与 Keychain，显示同一句提示。
-        // 张晓文与普通同事的 role 都是 "user"，不会触发这一支。
-        if me.isAdmin {
-            await api.logout()
-            throw APIError.adminBlocked
-        }
         user = me
         isLoggedIn = true
         isOffline = false
@@ -304,10 +282,6 @@ final class AppStore: ObservableObject {
         serverReachable = true
         _ = try await api.loginWithSms(phone: phone, code: code)
         let me = try await api.fetchMe()
-        if me.isAdmin {
-            await api.logout()
-            throw APIError.adminBlocked
-        }
         user = me
         isLoggedIn = true
         isOffline = false
