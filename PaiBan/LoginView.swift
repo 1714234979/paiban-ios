@@ -97,7 +97,8 @@ struct LoginView: View {
 
     private var passwordForm: some View {
         VStack(spacing: 16) {
-            TextField("账号（注册时的名字，可以用中文）", text: $username)
+            TextField("手机号", text: $username)
+                .keyboardType(.numberPad)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled()
                 .textFieldStyle(.roundedBorder)

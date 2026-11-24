@@ -142,8 +142,9 @@ final class AppStore: ObservableObject {
                            holiday: nil, weekday: nil)
     }
 
-    /// 是不是老爷（张晓文）：他的工资走全局录入数 + 生效表；同事走自己的设置。
-    var isOwner: Bool { user?.username == "张晓文" }
+    /// 是不是老爷（张晓文，账号是手机号 18765766628）：他的工资走全局录入数 + 生效表；同事走自己的设置。
+    /// 2026-11-24 起账号改用手机号，isOwner 改认手机号，不再认中文名「张晓文」。
+    var isOwner: Bool { user?.username == "18765766628" }
 
     /// 月份缓存 key：班组 + 年月（看别的班也分开存，不会串月）。
     private func monthCacheKey(team: String, year: Int, month: Int) -> String {

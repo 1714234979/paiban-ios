@@ -1,6 +1,7 @@
 import SwiftUI
 
-/// 注册页：账号 + 密码 + 确认密码，校验提示中文；成功后直接登录并进引导。
+/// 注册页：手机号 + 密码 + 确认密码，校验提示中文；成功后直接登录并进引导。
+/// 用户名就是手机号（11 位大陆手机号，1 开头）。
 struct RegisterView: View {
     @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
@@ -27,7 +28,8 @@ struct RegisterView: View {
                     .padding(.top, 16)
 
                     VStack(spacing: 16) {
-                        TextField("账号名（就是你的名字，可以用中文，最多 32 字）", text: $username)
+                        TextField("手机号（11 位大陆手机号）", text: $username)
+                            .keyboardType(.numberPad)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
                             .textFieldStyle(.roundedBorder)
@@ -87,16 +89,9 @@ struct RegisterView: View {
 
     private func doRegister() async {
         let name = username.trimmingCharacters(in: .whitespaces)
-        if name.isEmpty {
-            errorText = "账号名不能为空"
-            return
-        }
-        if name.count > 32 {
-            errorText = "账号名最多 32 个字符"
-            return
-        }
-        if name.contains(" ") || name.contains(":") {
-            errorText = "账号名不能含空格或冒号"
+        // 用户名就是手机号：11 位数字、1 开头（共用 PhoneUtil），不对不让提交。
+        if !PhoneUtil.isValid(name) {
+            errorText = "请输入 11 位大陆手机号（1 开头）"
             return
         }
         if password.count < 6 {
