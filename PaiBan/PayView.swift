@@ -303,20 +303,18 @@ struct PayView: View {
                     .foregroundColor(.secondary)
                 Spacer()
                 Text(valueText)
-                if store.isOwner {
-                    Button {
-                        openEdit(field, currentValue: currentValue)
-                    } label: {
-                        Text("可改")
-                            .font(.caption)
-                            .foregroundColor(.blue)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.blue.opacity(0.08))
-                            .cornerRadius(6)
-                    }
-                    .buttonStyle(.plain)
+                Button {
+                    openEdit(field, currentValue: currentValue)
+                } label: {
+                    Text("可改")
+                        .font(.caption)
+                        .foregroundColor(.blue)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color.blue.opacity(0.08))
+                        .cornerRadius(6)
                 }
+                .buttonStyle(.plain)
             }
             .font(.subheadline)
             .padding(.vertical, 5)
@@ -346,9 +344,8 @@ struct PayView: View {
         }
     }
 
-    /// 打开某行的 inline 编辑框（只有老爷能改；打开时填当前值、弹键盘）。
+    /// 打开某行的 inline 编辑框（1.2.7 起每人改自己的当月数，不再只对老爷开放；打开时填当前值、弹键盘）。
     private func openEdit(_ field: PayRecordField, currentValue: String) {
-        guard store.isOwner else { return }
         editText = currentValue
         editError = nil
         editSaving = false

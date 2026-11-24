@@ -379,4 +379,151 @@ enum PayCalc {
         }
         return result
     }
+
+    // MARK: - 今日预估工资与实时倒计时（1.2.7，老爷 2026-11-25 定）
+
+    /// 单个班次的起止（从 0 点起的分钟数）：早班 00:00–08:00，日班 08:00–16:00，中班 16:00–24:00。
+    static func segmentRange(for part: String) -> (start: Int, end: Int)? {
+        switch part {
+        case "早班": return (0, 480)
+        case "日班": return (480, 960)
+        case "中班": return (960, 1440)
+        default: return nil
+        }
+    }
+
+    /// 某天是不是法定节假日三薪日（三薪表里那几天）。
+    static func isStatutoryDay(_ dateString: String) -> Bool {
+        guard let year = Int(dateString.prefix(4)) else { return false }
+        return statutoryMap(year: year)[dateString] != nil
+    }
+
+    /// 解析基本工资：与 monthPay 同链——生效表（当月）> 个人设置 > 全局 > 2420。
+    static func resolvedBaseSalary(effective: [String: PayEffective], userSettings: PaySettings?, global: PayGlobalSettings, monthKey: String) -> Double {
+        let eff = effectiveFor(effective, key: monthKey)
+        if let v = eff.baseSalary { return v }
+        if let v = userSettings?.baseSalary { return v }
+        if let v = global.baseSalary { return v }
+        return 2420
+    }
+
+    /// 今日预估工资（第 19 条口径，老爷 2026-11-25 定）：按班次算。
+    /// 每个班 = 日工资（基本工资 ÷ 21.75）+ 班次补贴（早 70 / 中 30 / 日 0）+ 餐补 10；
+    /// 法定节假日三薪那天，每班再加 3 倍日工资；双班两班都算；休息 0 元。
+    /// 注意：这里是老爷亲口定的单日口径（例：基本工资 2420 的早班三薪日 = 111.26 + 333.79 + 70 + 10 = ¥525.05），
+    /// 不走月度工资里「三薪提纯」（超出基本天数的部分才算三薪）那条——单日预估按当天全额算。
+    /// - shift: 今日实际班次（日班/中班/早班/休息/早中班/日中班）。
+    /// - baseSalary: 基本工资（已按生效表/个人设置/全局解析好）。
+    /// - dateString: 今日 "yyyy-MM-dd"，用于查三薪表。
+    /// - earlyRate/midRate/mealRate: 补贴率（全局设置，缺失用 70/30/10）。
+    /// 返回 (total: 当日预估总额，isRest: 是否休息，isTriple: 是否三薪日）。
+    static func todayEstimate(shift: String, baseSalary: Double, dateString: String,
+                              earlyRate: Double = 70, midRate: Double = 30, mealRate: Double = 10) -> (total: Double, isRest: Bool, isTriple: Bool) {
+        if shift == "休息" { return (0, true, false) }
+        let dailyRate = baseSalary / 21.75
+        let triple = isStatutoryDay(dateString)
+        // 每项先取整到分再加（老爷的算法：111.26 + 333.79 + 70 + 10 = 525.05）；
+        // 先加未取整的数再取整会得 525.06，差一分。
+        let dayPay = round2(dailyRate)
+        let triplePay = round2(3 * dailyRate)
+        var total: Double = 0
+        for p in ShiftStyle.parts(of: shift) {
+            var pay = dayPay + mealRate
+            if p == "早班" { pay += earlyRate }
+            else if p == "中班" { pay += midRate }
+            if triple { pay += triplePay }
+            total += pay
+        }
+        return (round2(total), false, triple)
+    }
+
+    /// 今日的班次时段（供倒计时用）：每个单班一段，起止是当天 0 点起的 Date。
+    /// 早中班两段（00:00–08:00 与 16:00–24:00，中间歇着）；日中班两段连着（08:00–24:00）。
+    /// 每段带该段的预估工资（按 todayEstimate 的口径分段算）。
+    static func todaySegments(shift: String, day: Date, baseSalary: Double, dateString: String,
+                              earlyRate: Double = 70, midRate: Double = 30, mealRate: Double = 10) -> [(start: Date, end: Date, pay: Double)] {
+        let cal = DateUtil.calendar
+        let startOfDay = cal.startOfDay(for: day)
+        let dailyRate = baseSalary / 21.75
+        let triple = isStatutoryDay(dateString)
+        // 每项先取整到分再加（与 todayEstimate 同口径：111.26 + 333.79 + 70 + 10 = 525.05）。
+        let dayPay = round2(dailyRate)
+        let triplePay = round2(3 * dailyRate)
+        var out: [(start: Date, end: Date, pay: Double)] = []
+        for p in ShiftStyle.parts(of: shift) {
+            guard let r = segmentRange(for: p) else { continue }
+            guard let s = cal.date(byAdding: .minute, value: r.start, to: startOfDay),
+                  let e = cal.date(byAdding: .minute, value: r.end, to: startOfDay) else { continue }
+            var pay = dayPay + mealRate
+            if p == "早班" { pay += earlyRate }
+            else if p == "中班" { pay += midRate }
+            if triple { pay += triplePay }
+            out.append((start: s, end: e, pay: round2(pay)))
+        }
+        return out.sorted { $0.start < $1.start }
+    }
+
+    /// 今日实时状态（第 20 条：倒计时 + 工资实时涨）。
+    enum TodayLiveState: Equatable {
+        case rest                                        // 休息 / 请假：¥0
+        case before(start: Date, total: Double)          // 上班前：倒计时到上班，已挣 ¥0
+        case working(end: Date, earned: Double, total: Double) // 上班中：倒计时到下班，已挣实时涨
+        case between(nextStart: Date, earned: Double, total: Double) // 两班之间歇着：倒计时到下一班
+        case done(total: Double)                         // 下班后：今日已挣全额
+    }
+
+    /// 今日实时状态：今日总工资 ÷ 班时长 = 每秒单价；已挣 = 已过时间 × 每秒单价。
+    /// 双班按两个班连着算（每段各有自己的单价）；跨夜的早班是当天 00:00–08:00，不跨日期。
+    /// - shift: 今日实际班次；onLeave: 请假按休息算（¥0）。
+    /// - day: 今天 0 点；now: 当前时刻。
+    static func todayLiveState(shift: String, onLeave: Bool, day: Date, now: Date,
+                               baseSalary: Double, dateString: String,
+                               earlyRate: Double = 70, midRate: Double = 30, mealRate: Double = 10) -> TodayLiveState {
+        if onLeave || shift == "休息" { return .rest }
+        let segs = todaySegments(shift: shift, day: day, baseSalary: baseSalary, dateString: dateString, earlyRate: earlyRate, midRate: midRate, mealRate: mealRate)
+        guard let first = segs.first, let last = segs.last else { return .rest }
+        let total = round2(segs.reduce(0) { $0 + $1.pay })
+        if now < first.start { return .before(start: first.start, total: total) }
+        if now >= last.end { return .done(total: total) }
+        var earned: Double = 0
+        for seg in segs {
+            if now >= seg.end {
+                earned += seg.pay
+            } else if now >= seg.start {
+                let duration = seg.end.timeIntervalSince(seg.start)
+                let elapsed = now.timeIntervalSince(seg.start)
+                let rate = duration > 0 ? seg.pay / duration : 0
+                earned += elapsed * rate
+                return .working(end: seg.end, earned: round2(earned), total: total)
+            } else {
+                return .between(nextStart: seg.start, earned: round2(earned), total: total)
+            }
+        }
+        return .done(total: total)
+    }
+
+    /// 小组件时间线刷新点（第 20 条）：班中每 15 分钟 + 上下班边界各一次 + 次日 0 点。
+    /// 返回今天从 now 起的刷新时刻（已按时间升序，含 now 本身与次日 0 点）。
+    static func todayRefreshDates(shift: String, day: Date, now: Date) -> [Date] {
+        let cal = DateUtil.calendar
+        var dates: [Date] = [now]
+        let startOfDay = cal.startOfDay(for: day)
+        guard let nextMidnight = cal.date(byAdding: .day, value: 1, to: startOfDay) else { return dates }
+        var bounds: [Date] = []
+        for p in ShiftStyle.parts(of: shift) {
+            guard let r = segmentRange(for: p) else { continue }
+            if let s = cal.date(byAdding: .minute, value: r.start, to: startOfDay) { bounds.append(s) }
+            if let e = cal.date(byAdding: .minute, value: r.end, to: startOfDay) { bounds.append(e) }
+            var m = r.start + 15
+            while m < r.end {
+                if let d = cal.date(byAdding: .minute, value: m, to: startOfDay) { bounds.append(d) }
+                m += 15
+            }
+        }
+        for d in bounds.sorted() where d > now && d < nextMidnight {
+            dates.append(d)
+        }
+        dates.append(nextMidnight)
+        return dates
+    }
 }

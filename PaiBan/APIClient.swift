@@ -680,7 +680,8 @@ final class APIClient {
         try await requestNoData(path: "/api/v1/me/overtime", method: "DELETE", query: ["date": date])
     }
 
-    /// POST /api/v1/me/pay/month — 老爷改自己当月录入数里的某一个字段
+    /// POST /api/v1/me/pay/month — 改自己当月录入数里的某一个字段
+    ///（1.2.7 起每人改自己的：老爷改全局，老爷以外改自己账号的单月录入）
     ///（科室绩效 / 绩效系数 / 奖金系数 / 加班天数 / 水电费）。value 传 nil 发 null，清掉该覆盖值。
     /// 成功返回重算后的当月工资。
     func postPayMonthField(monthKey: String, field: PayRecordField, value: Double?) async throws -> PayMonth {

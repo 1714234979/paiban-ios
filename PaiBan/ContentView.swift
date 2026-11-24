@@ -8,6 +8,9 @@ import UIKit
 /// 新版本提示（Alert）也挂在这里：启动检查或设置页手动检查到新版时弹出。
 struct ContentView: View {
     @EnvironmentObject private var store: AppStore
+    /// 1.2.7：回到前台时再查一次更新（第 16 条 iOS 一半；启动时已查过，见 startup）。
+    /// 安卓 1.2.7 同款（ON_RESUME 再查）；当天已点「稍后」的不重复弹（checkAfterLaunch 里拦）。
+    @Environment(\.scenePhase) private var scenePhase
 
     /// 本次启动里已放行过强制绑定门（只在短信服务没开通/查不到状态时才放行；
     /// 换账号登录时重置，免得另一个没绑手机号的账号也被放行）。
@@ -48,6 +51,11 @@ struct ContentView: View {
             await store.startup()
         }
         .onChange(of: store.isLoggedIn) { _ in bindGateDismissedForSession = false }
+        .onChange(of: scenePhase) { newPhase in
+            if newPhase == .active {
+                Task { await store.checkForUpdateAfterLaunch() }
+            }
+        }
         .alert("发现新版本", isPresented: updateAlertBinding) {
             if let info = store.pendingUpdate, info.hasDownloadURL {
                 Button("更新") {

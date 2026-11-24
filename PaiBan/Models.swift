@@ -376,6 +376,8 @@ struct UserProfile: Codable, Equatable {
     var team: String?
     var teamHistory: [TeamHistoryEntry]?
     var paySettings: PaySettings?
+    /// 1.2.7：自己账号的单月录入（各改各的；GET /me 回传，服务端存 user.payMonths）。
+    var payMonths: [String: PayMonthRecord]?
     var onboardingDone: Bool?
 
     var displayTeam: String { team ?? "B" }

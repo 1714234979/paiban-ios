@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import WidgetKit
 
 // MARK: - 本地缓存
 
@@ -20,6 +21,7 @@ struct CachedData: Codable {
     var yearDays: [String: [DaySchedule]]?         // key: "yyyy"，/me/range 全年天数
     var payConfig: PayConfigData?                   // GET /api/v1/config 的 pay 一节
     var payMonths: [String: PayMonth]?              // key: "yyyy-MM"，本地算好的工资
+    var userMonths: [String: PayMonthRecord]?       // 1.2.7：同事自己的单月录入（各改各的，服务端存 user.payMonths）
     var savedAt: Date?
 }
 
@@ -91,6 +93,15 @@ final class AppStore: ObservableObject {
     var payConfig: PayConfigData?
     var yearDaysCache: [String: [DaySchedule]] = [:]   // key: "yyyy"
     var payCache: [String: PayMonth] = [:]             // key: "yyyy-MM"，本地算好的工资
+    /// 1.2.7：同事自己的单月录入（各改各的；老爷的仍走全局 payConfig.months）。
+    /// 服务端存 user.payMonths，GET /me 回传；离线时走磁盘缓存里的 userMonths。
+    var userMonths: [String: PayMonthRecord] = [:]
+    /// 小组件深链要跳的 Tab（0 排班 / 1 工资）：MainTabView 跟着它切。
+    @Published var selectedTab = 0
+    /// 没登录时点小组件进来的深链：先记下来，登录后进主界面再跳。
+    var pendingDeepLinkTab: Int?
+    /// 上次发给小组件的快照（内容不变时不重复写、不重复刷新，WidgetCenter 刷新有系统预算）。
+    private var lastPublishedSnapshot: WidgetSnapshot?
 
     // 按月缓存（内存里一份，磁盘缓存里也有一份）
     // monthCache 是 @Published：滑页时每页直接读它，数据到了页面自己刷新，不用等整页重载。
@@ -364,7 +375,14 @@ final class AppStore: ObservableObject {
         swapsCache = [:]
         leavesCache = [:]
         localMonthCache = [:]
+        userMonths = [:]
         cacheSavedAt = nil
+        selectedTab = 0
+        pendingDeepLinkTab = nil
+        // 退出后小组件没数据可显示：清掉共享区的快照，让它显示占位。
+        lastPublishedSnapshot = nil
+        WidgetSnapshotStore.clear()
+        WidgetCenter.shared.reloadAllTimelines()
     }
 
     // MARK: 缓存
@@ -383,6 +401,12 @@ final class AppStore: ObservableObject {
         if let cachedUser = cache.user, user == nil {
             user = cachedUser
             viewTeam = cachedUser.displayTeam
+        }
+        // 1.2.7：同事自己的单月录入（缓存里的优先，其次是缓存用户对象里带的）。
+        if let um = cache.userMonths {
+            userMonths = um
+        } else if let um = user?.payMonths {
+            userMonths = um
         }
         // 按月缓存：读进内存；只把“当前看的月份 + 当前班组”的那份放到界面上，避免月份错位。
         monthCache = cache.months ?? [:]
@@ -431,9 +455,12 @@ final class AppStore: ObservableObject {
             months: monthCache, monthSwaps: swapsCache, monthLeaves: leavesCache,
             monthOvertime: overtimeCache,
             yearDays: yearDaysCache, payConfig: payConfig, payMonths: payCache,
+            userMonths: userMonths,
             savedAt: Date()
         ))
         cacheSavedAt = Date()
+        // 数据写盘后顺手给小组件发一份快照（内容不变时不重复发，见 publishWidgetSnapshot）。
+        publishWidgetSnapshot()
     }
 
     // MARK: 刷新
@@ -449,6 +476,7 @@ final class AppStore: ObservableObject {
         if let me = await meTask {
             user = me
             viewTeam = me.displayTeam
+            if let pm = me.payMonths { userMonths = pm }
         }
         persistCache()
         // 1.1.4：重装恢复——登录后把账号的完整数据从云端拉回来（后台静默，不拖登录）。
@@ -659,7 +687,7 @@ final class AppStore: ObservableObject {
     func computeLocalPay(year: Int, month: Int) -> PayMonth? {
         guard let cfg = payConfig?.settings,
               let days = yearDaysCache[String(year)], !days.isEmpty else { return nil }
-        let recorded = isOwner ? (payConfig?.months ?? [:]) : [:]
+        let recorded = isOwner ? (payConfig?.months ?? [:]) : userMonths
         let effective = isOwner ? (payConfig?.effective ?? [:]) : [:]
         let offset = isOwner ? (cfg.annualLeaveUsedOffset?[String(year)] ?? 0) : 0
         return PayCalc.computePay(
@@ -950,22 +978,32 @@ final class AppStore: ObservableObject {
         syncInBackground { try await self.api.deleteOvertime(date: date) }
     }
 
-    /// 改当月录入数里的某一个字段（只有老爷能改）：本地先改掉当月录入数、立刻重算，后台再同步到服务端。
+    /// 改当月录入数里的某一个字段（1.2.7 起每人改自己的）：
+    /// 老爷改全局 config.pay.months；同事改自己账号的单月录入（服务端存 user.payMonths，不碰全局）。
+    /// 本地先改掉当月录入数、立刻重算，后台再同步到服务端。
     /// value 传 nil 表示清掉该覆盖值（恢复公式计算）。
     func updatePayMonthField(monthKey: String, field: PayRecordField, value: Double?) async {
-        var cfg = payConfig ?? PayConfigData()
-        var months = cfg.months ?? [:]
-        var rec = months[monthKey] ?? PayMonthRecord()
-        switch field {
-        case .deptPerf: rec.deptPerf = value
-        case .perfCoef: rec.perfCoef = value
-        case .bonusCoef: rec.bonusCoef = value
-        case .overtimeDays: rec.overtimeDays = value
-        case .utilities: rec.utilities = value
+        // 先算出改完的那条记录（两边同一段 switch，只写一次）。
+        func applying(_ rec: PayMonthRecord) -> PayMonthRecord {
+            var r = rec
+            switch field {
+            case .deptPerf: r.deptPerf = value
+            case .perfCoef: r.perfCoef = value
+            case .bonusCoef: r.bonusCoef = value
+            case .overtimeDays: r.overtimeDays = value
+            case .utilities: r.utilities = value
+            }
+            return r
         }
-        months[monthKey] = rec
-        cfg.months = months
-        payConfig = cfg
+        if isOwner {
+            var cfg = payConfig ?? PayConfigData()
+            var months = cfg.months ?? [:]
+            months[monthKey] = applying(months[monthKey] ?? PayMonthRecord())
+            cfg.months = months
+            payConfig = cfg
+        } else {
+            userMonths[monthKey] = applying(userMonths[monthKey] ?? PayMonthRecord())
+        }
         await refreshPay()
         persistCache()
         Task {
@@ -974,10 +1012,112 @@ final class AppStore: ObservableObject {
             } catch {
                 errorMessage = (error as? APIError)?.message ?? error.localizedDescription
                 AppLogger.shared.log("单月录入同步失败：\(errorMessage ?? "")", tag: "Sync")
-                await refreshPayInputs()
+                // 同步失败要把本地乐观改动刷回来：老爷重取全局配置，同事重取自己的 profile（payMonths）。
+                if isOwner {
+                    await refreshPayInputs()
+                } else if let me = try? await api.fetchMe() {
+                    user = me
+                    if let pm = me.payMonths { userMonths = pm }
+                }
                 await refreshPay()
             }
         }
+    }
+
+    // MARK: - 今日预估与小组件
+
+    /// 今日预估用的基本工资与补贴率（与 monthPay 同链）：生效表（当月）> 个人设置 > 全局 > 默认。
+    /// 排班页今日卡片、当天详情、小组件快照共用。
+    var todayPayInputs: (baseSalary: Double, earlyRate: Double, midRate: Double, mealRate: Double) {
+        let ym = DateUtil.yearMonth(of: Date())
+        let key = payCacheKey(year: ym.year, month: ym.month)
+        let global = payConfig?.settings ?? PayGlobalSettings()
+        let base = PayCalc.resolvedBaseSalary(effective: payConfig?.effective ?? [:], userSettings: user?.paySettings, global: global, monthKey: key)
+        return (base, global.earlyRate ?? 70, global.midRate ?? 30, global.mealRate ?? 10)
+    }
+
+    /// 小组件深链：paiban://schedule 进排班页，paiban://pay 进工资页。
+    /// 没登录时先记下来，登录后进主界面再跳（MainTabView 的 .task 里应用）。
+    func handleDeepLink(_ url: URL) {
+        guard url.scheme == "paiban" else { return }
+        let tab: Int?
+        switch url.host {
+        case "schedule": tab = 0
+        case "pay": tab = 1
+        default: tab = nil
+        }
+        guard let tab else { return }
+        if isLoggedIn {
+            selectedTab = tab
+        } else {
+            pendingDeepLinkTab = tab
+        }
+    }
+
+    /// 小组件快照：App 数据变了就写一份到 App Group 共享区，并通知小组件刷新。
+    /// 内容不变时不重复写（WidgetCenter 刷新有系统预算，别浪费）。
+    func publishWidgetSnapshot() {
+        guard isLoggedIn else { return }
+        let snap = buildWidgetSnapshot()
+        guard snap != lastPublishedSnapshot else { return }
+        lastPublishedSnapshot = snap
+        WidgetSnapshotStore.save(snap)
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+
+    /// 小组件快照：今天 + 本周 7 天 + 本月每天（带调班/请假）+ 本月工资 + 解析好的工资口径。
+    /// 本周从周日开头；本月天数优先用已加载的全年天数/当月数据，缺的按换班记录解析后的班组 + 8 天一轮基础班次补。
+    private func buildWidgetSnapshot() -> WidgetSnapshot {
+        let now = Date()
+        let todayString = DateUtil.string(from: now)
+        let ym = DateUtil.yearMonth(of: now)
+        let history = user?.teamHistory ?? []
+        let inputs = todayPayInputs
+        // 某天的数据：优先全年天数/当月数据（带调班请假），没有就按班组 + 8 天一轮基础班次算。
+        func dayFor(_ date: Date) -> WidgetSnapshot.Day {
+            let ds = DateUtil.string(from: date)
+            let y = DateUtil.yearMonth(of: date).year
+            if let d = yearDaysCache[String(y)]?.first(where: { $0.date == ds }) {
+                return WidgetSnapshot.Day(date: ds, shift: d.shift, onLeave: d.onLeave == true, leaveType: d.leaveType, isToday: ds == todayString)
+            }
+            if let d = month?.day(for: ds) {
+                return WidgetSnapshot.Day(date: ds, shift: d.shift, onLeave: d.onLeave == true, leaveType: d.leaveType, isToday: ds == todayString)
+            }
+            let team = ScheduleCalculator.teamForDate(ds, history: history, fallbackTeam: myTeam)
+            let base = ScheduleCalculator.baseShift(team: team, date: date)
+            return WidgetSnapshot.Day(date: ds, shift: base, onLeave: false, leaveType: nil, isToday: ds == todayString)
+        }
+        // 本周（周日开头）。
+        let weekday = DateUtil.calendar.component(.weekday, from: now) - 1 // 0=周日
+        let weekStart = DateUtil.addingDays(now, -weekday)
+        let week = (0..<7).map { dayFor(DateUtil.addingDays(weekStart, $0)) }
+        // 本月每天。
+        let dim = DateUtil.daysInMonth(year: ym.year, month: ym.month)
+        var monthDays: [WidgetSnapshot.Day] = []
+        for d in 1...dim {
+            if let date = DateUtil.calendar.date(from: DateComponents(year: ym.year, month: ym.month, day: d)) {
+                monthDays.append(dayFor(date))
+            }
+        }
+        // 本月工资（本地算好的那份）。
+        let payMonth = payFor(year: ym.year, month: ym.month)
+        let pay = payMonth.map { WidgetSnapshot.Pay(year: ym.year, month: ym.month, salarySubtotal: $0.salarySubtotal, salaryNet: $0.salaryNet, bonusAfterTax: $0.bonusAfterTax, grandTotal: $0.grandTotal, bonusTotal: $0.bonusTotal, incomeTax: $0.incomeTax, attendance: $0.attendance, tripleDays: $0.tripleDays, overtimeDays: $0.overtimeDays) }
+        return WidgetSnapshot(
+            savedAt: now,
+            displayName: user?.displayName ?? user?.username,
+            team: myTeam,
+            teamHistory: history,
+            today: dayFor(now),
+            week: week,
+            monthDays: monthDays,
+            monthYear: ym.year,
+            month: ym.month,
+            pay: pay,
+            baseSalary: inputs.baseSalary,
+            earlyRate: inputs.earlyRate,
+            midRate: inputs.midRate,
+            mealRate: inputs.mealRate
+        )
     }
 
     /// 保存资料：引导流程与设置页共用（team / paySettings / onboardingDone / displayName 只传给定的字段）。
@@ -992,7 +1132,9 @@ final class AppStore: ObservableObject {
         merged.paySettings = updated.paySettings ?? merged.paySettings
         merged.onboardingDone = updated.onboardingDone ?? merged.onboardingDone
         merged.displayName = updated.displayName ?? merged.displayName
+        merged.payMonths = updated.payMonths ?? merged.payMonths
         user = merged
+        if let pm = merged.payMonths { userMonths = pm }
         if let team { viewTeam = team }
         persistCache()
     }

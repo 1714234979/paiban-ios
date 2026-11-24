@@ -29,6 +29,17 @@
 		4E40A5F3BEB30BD8BD06BC61 /* Store.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE48ED7CB11C49CDE38DBC43 /* Store.swift */; };
 		0832B97529F1958263FCFDA2 /* TeamChangeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED9CCFE310BC5F5DEE554FD1 /* TeamChangeView.swift */; };
 		385075F4922623F648613F5E /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB520360AEB3A336C8749C5E /* UpdateChecker.swift */; };
+
+		79F162A81021FBC665F5A230 /* PaiBanWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82499500979304680FB830D2 /* PaiBanWidget.swift */; };
+		E8DAB00797A2B1D5D627744A /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B83D5E372F06A2F0C59E32A /* Models.swift */; };
+		134A6DEC1F4C6F4609E3193A /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5163033015F453E6304D7BB0 /* DesignSystem.swift */; };
+		E5AD046FCC4C132B77037778 /* PayCalc.swift in Sources */ = {isa = PBXBuildFile; fileRef = 835B8CA20F8F4A969A2ABE96 /* PayCalc.swift */; };
+		52A6C8A5045AEF9151BB6650 /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7A1DAC372E4A65B4E59E2E0 /* WidgetSnapshot.swift */; };
+		D18C106D78127960072B7592 /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7A1DAC372E4A65B4E59E2E0 /* WidgetSnapshot.swift */; };
+		B1BF5D6791425E21E7485370 /* PaiBanWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 9E4E81336F078B0AF8075E97 /* PaiBanWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		2FA6B94712D2509303CCBDA9 /* WidgetViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3215243FC9D19D67D035FAFE /* WidgetViews.swift */; };
+		811181B98DD57F6033013526 /* WidgetViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3215243FC9D19D67D035FAFE /* WidgetViews.swift */; };
+		FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = F181B69F0A58209D8BE07E36 /* WidgetPreviewGallery.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -56,7 +67,51 @@
 		CE48ED7CB11C49CDE38DBC43 /* Store.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Store.swift; sourceTree = "<group>"; };
 		ED9CCFE310BC5F5DEE554FD1 /* TeamChangeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamChangeView.swift; sourceTree = "<group>"; };
 		FB520360AEB3A336C8749C5E /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
+
+		82499500979304680FB830D2 /* PaiBanWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaiBanWidget.swift; sourceTree = "<group>"; };
+		A6BB5B4BBE7E9595772D0FAA /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		1B2A6BDBC5FE1078D25D142D /* PaiBanWidget.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PaiBanWidget.entitlements; sourceTree = "<group>"; };
+		9ECE1EC6686D20864C7D3338 /* PaiBan.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = PaiBan.entitlements; sourceTree = "<group>"; };
+		B7A1DAC372E4A65B4E59E2E0 /* WidgetSnapshot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetSnapshot.swift; sourceTree = "<group>"; };
+		9E4E81336F078B0AF8075E97 /* PaiBanWidget.appex */ = {isa = PBXFileReference; explicitFileType = wrapper.app-extension; includeInIndex = 0; path = PaiBanWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		3215243FC9D19D67D035FAFE /* WidgetViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetViews.swift; sourceTree = "<group>"; };
+		F181B69F0A58209D8BE07E36 /* WidgetPreviewGallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetPreviewGallery.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+
+
+/* Begin PBXContainerItemProxy section */
+		7A5940777A8963FD75043D38 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 10F7C050188A46A7AB290DCB /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 526F2F4715F34111B8E266BB;
+			remoteInfo = PaiBanWidget;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXTargetDependency section */
+		ECCD54B27E62ACCFD05DAB19 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = PaiBanWidget;
+			target = 526F2F4715F34111B8E266BB /* PaiBanWidget */;
+			targetProxy = 7A5940777A8963FD75043D38 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		B959973438ABA81433ED1627 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				B1BF5D6791425E21E7485370 /* PaiBanWidget.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFrameworksBuildPhase section */
         4034341406AC4E0DB67E4141 /* Frameworks */ = {
@@ -66,6 +121,14 @@
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
+
+		326DB67B9BAD2AF1D9020791 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -73,6 +136,7 @@
             isa = PBXGroup;
             children = (
                 50F8A56EF02A43A3BFEC2E45 /* PaiBan */,
+                7FCADB4C61F92A0A524C6FF3 /* PaiBanWidget */,
                 ADCD5FB35B1D44F581D9EE8F /* Products */,
             );
             sourceTree = "<group>";
@@ -81,6 +145,7 @@
             isa = PBXGroup;
             children = (
                 B6619A93AD2F4ECBA6E1D092 /* PaiBan.app */,
+            9E4E81336F078B0AF8075E97 /* PaiBanWidget.appex */,
             );
             name = Products;
             sourceTree = "<group>";
@@ -111,10 +176,25 @@
 				CE48ED7CB11C49CDE38DBC43 /* Store.swift */,
 				ED9CCFE310BC5F5DEE554FD1 /* TeamChangeView.swift */,
 				FB520360AEB3A336C8749C5E /* UpdateChecker.swift */,
+            B7A1DAC372E4A65B4E59E2E0 /* WidgetSnapshot.swift */,
+                        3215243FC9D19D67D035FAFE /* WidgetViews.swift */,
+F181B69F0A58209D8BE07E36 /* WidgetPreviewGallery.swift */,
+9ECE1EC6686D20864C7D3338 /* PaiBan.entitlements */,
             );
             path = PaiBan;
             sourceTree = "<group>";
         };
+
+		7FCADB4C61F92A0A524C6FF3 /* PaiBanWidget */ = {
+			isa = PBXGroup;
+			children = (
+				82499500979304680FB830D2 /* PaiBanWidget.swift */,
+				A6BB5B4BBE7E9595772D0FAA /* Info.plist */,
+				1B2A6BDBC5FE1078D25D142D /* PaiBanWidget.entitlements */,
+			);
+			path = PaiBanWidget;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -125,16 +205,36 @@
                 F5A0A98DEA8243D6AADFF560 /* Sources */,
                 4034341406AC4E0DB67E4141 /* Frameworks */,
                 52B0692F4001408C8F106CC7 /* Resources */,
+                B959973438ABA81433ED1627 /* Embed App Extensions */,
             );
             buildRules = (
             );
             dependencies = (
+            ECCD54B27E62ACCFD05DAB19 /* PBXTargetDependency */,
             );
             name = PaiBan;
             productName = PaiBan;
             productReference = B6619A93AD2F4ECBA6E1D092 /* PaiBan.app */;
             productType = "com.apple.product-type.application";
         };
+
+		526F2F4715F34111B8E266BB /* PaiBanWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = EE90D309251A4A4F50FA3DD3 /* Build configuration list for PBXNativeTarget "PaiBanWidget" */;
+			buildPhases = (
+				434E6E5B729A3A813031B5BA /* Sources */,
+				326DB67B9BAD2AF1D9020791 /* Frameworks */,
+				2EA0D21C2E4BFE18D24CA4F6 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PaiBanWidget;
+			productName = PaiBanWidget;
+			productReference = 9E4E81336F078B0AF8075E97 /* PaiBanWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -147,6 +247,9 @@
                 TargetAttributes = {
                     FE051C5561394B29BB9A1DD4 = {
                         CreatedOnToolsVersion = 16.0;
+                    };
+                    526F2F4715F34111B8E266BB = {
+                    	CreatedOnToolsVersion = 16.0;
                     };
                 };
             };
@@ -164,6 +267,7 @@
             projectRoot = "";
             targets = (
                 FE051C5561394B29BB9A1DD4 /* PaiBan */,
+            526F2F4715F34111B8E266BB /* PaiBanWidget */,
             );
         };
 /* End PBXProject section */
@@ -177,7 +281,30 @@
             );
             runOnlyForDeploymentPostprocessing = 0;
         };
+
+		2EA0D21C2E4BFE18D24CA4F6 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		434E6E5B729A3A813031B5BA /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				79F162A81021FBC665F5A230 /* PaiBanWidget.swift in Sources */,
+				E8DAB00797A2B1D5D627744A /* Models.swift in Sources */,
+				134A6DEC1F4C6F4609E3193A /* DesignSystem.swift in Sources */,
+				E5AD046FCC4C132B77037778 /* PayCalc.swift in Sources */,
+				52A6C8A5045AEF9151BB6650 /* WidgetSnapshot.swift in Sources */,2FA6B94712D2509303CCBDA9 /* WidgetViews.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
         F5A0A98DEA8243D6AADFF560 /* Sources */ = {
@@ -205,7 +332,10 @@
 				4E40A5F3BEB30BD8BD06BC61 /* Store.swift in Sources */,
 				0832B97529F1958263FCFDA2 /* TeamChangeView.swift in Sources */,
 				385075F4922623F648613F5E /* UpdateChecker.swift in Sources */,
-            );
+				D18C106D78127960072B7592 /* WidgetSnapshot.swift in Sources */,
+                        2FA6B94712D2509303CCBDA9 /* WidgetViews.swift in Sources */,
+FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
+);
             runOnlyForDeploymentPostprocessing = 0;
         };
 /* End PBXSourcesBuildPhase section */
@@ -216,8 +346,10 @@
             buildSettings = {
                 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
                 ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+                CODE_SIGN_ENTITLEMENTS = PaiBan/PaiBan.entitlements;
+
                 CODE_SIGN_STYLE = Automatic;
-                CURRENT_PROJECT_VERSION = 13;
+                CURRENT_PROJECT_VERSION = 14;
                 GENERATE_INFOPLIST_FILE = NO;
                 INFOPLIST_FILE = PaiBan/Info.plist;
                 INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -226,7 +358,7 @@
                     "$(inherited)",
                     "@executable_path/Frameworks",
                 );
-                MARKETING_VERSION = 1.2.6;
+                MARKETING_VERSION = 1.2.7;
                 PRODUCT_BUNDLE_IDENTIFIER = com.paiban.app;
                 PRODUCT_NAME = "$(TARGET_NAME)";
                 SWIFT_VERSION = 5.0;
@@ -239,8 +371,10 @@
             buildSettings = {
                 ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
                 ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+                CODE_SIGN_ENTITLEMENTS = PaiBan/PaiBan.entitlements;
+
                 CODE_SIGN_STYLE = Automatic;
-                CURRENT_PROJECT_VERSION = 13;
+                CURRENT_PROJECT_VERSION = 14;
                 GENERATE_INFOPLIST_FILE = NO;
                 INFOPLIST_FILE = PaiBan/Info.plist;
                 INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -249,7 +383,7 @@
                     "$(inherited)",
                     "@executable_path/Frameworks",
                 );
-                MARKETING_VERSION = 1.2.6;
+                MARKETING_VERSION = 1.2.7;
                 PRODUCT_BUNDLE_IDENTIFIER = com.paiban.app;
                 PRODUCT_NAME = "$(TARGET_NAME)";
                 SWIFT_VERSION = 5.0;
@@ -371,6 +505,53 @@
             };
             name = Release;
         };
+
+		DB316FB972962B285F342005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = PaiBanWidget/PaiBanWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 14;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = PaiBanWidget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.2.7;
+				PRODUCT_BUNDLE_IDENTIFIER = com.paiban.app.PaiBanWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Debug;
+		};
+		A34164FA27F6DED661DC8CF6 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = PaiBanWidget/PaiBanWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 14;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = PaiBanWidget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.2.7;
+				PRODUCT_BUNDLE_IDENTIFIER = com.paiban.app.PaiBanWidget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 1;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -392,6 +573,16 @@
             defaultConfigurationIsVisible = 0;
             defaultConfigurationName = Release;
         };
+
+		EE90D309251A4A4F50FA3DD3 /* Build configuration list for PBXNativeTarget "PaiBanWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DB316FB972962B285F342005 /* Debug */,
+				A34164FA27F6DED661DC8CF6 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
 /* End XCConfigurationList section */
     };
     rootObject = 10F7C050188A46A7AB290DCB /* Project object */;

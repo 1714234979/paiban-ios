@@ -192,6 +192,10 @@ struct DayDetailView: View {
             if shownDay.isDouble == true {
                 row("双班", ShiftStyle.parts(of: shownDay.shift).joined(separator: " + ") + "（共 \(shownDay.totalHours ?? 16) 小时）")
             }
+            // 1.2.7：预估工资（只看自己班时显示；看别的班不显示——那是别人的工资口径）。
+            if (shownDay.team ?? store.myTeam) == store.myTeam {
+                row("预估工资", estimateText(for: shownDay))
+            }
             if let holiday = shownDay.holiday, !holiday.isEmpty {
                 row("节假日", holiday)
             }
@@ -233,6 +237,22 @@ struct DayDetailView: View {
             Spacer()
         }
         .font(.subheadline)
+    }
+
+    /// 1.2.7：当天预估工资（与 PayCalc.todayEstimate 同口径）：
+    /// 每个班 = 日工资（基本工资 ÷ 21.75）+ 班次补贴（早 70/中 30/日 0）+ 餐补 10，
+    /// 法定节假日三薪那天再加 3 倍日工资；双班两个班都算；休息 0 元；请假不算钱。
+    /// 基本工资按当天所在月的生效表解析（不是今天的口径——看 12 月的日子就用 12 月的数）。
+    private func estimateText(for day: DaySchedule) -> String {
+        if day.onLeave == true { return "请假" }
+        let date = DateUtil.date(from: day.date) ?? Date()
+        let ym = DateUtil.yearMonth(of: date)
+        let key = String(format: "%04d-%02d", ym.year, ym.month)
+        let global = store.payConfig?.settings ?? PayGlobalSettings()
+        let base = PayCalc.resolvedBaseSalary(effective: store.payConfig?.effective ?? [:], userSettings: store.user?.paySettings, global: global, monthKey: key)
+        let est = PayCalc.todayEstimate(shift: day.shift, baseSalary: base, dateString: day.date, earlyRate: global.earlyRate ?? 70, midRate: global.midRate ?? 30, mealRate: global.mealRate ?? 10)
+        if est.isRest { return "今日休息" }
+        return "预估 " + MoneyUtil.money(est.total) + (est.isTriple ? "（三薪）" : "")
     }
 
     /// 其他班次：选中这天，其他三个班组按 8 天一轮基础排班算出的班次（横向一排小 chip）。

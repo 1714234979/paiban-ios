@@ -113,6 +113,7 @@ struct CalendarView: View {
     // MARK: 头部
 
     /// 顶栏黑框：今天的年月日、周几、什么班（切到别的月份也照样显示今天）。
+    /// 1.2.7：下面再加两行实时行——倒计时 + 已挣/预估（只那一小块每秒刷新，不带动整页）。
     private var headerCard: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(todayDateLine)
@@ -121,6 +122,10 @@ struct CalendarView: View {
             Text(todayShiftLine)
                 .font(.subheadline)
                 .foregroundColor(.white.opacity(0.75))
+            if let day = store.todaySchedule {
+                let inputs = store.todayPayInputs
+                TodayLiveRow(day: day, baseSalary: inputs.baseSalary, earlyRate: inputs.earlyRate, midRate: inputs.midRate, mealRate: inputs.mealRate)
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
@@ -756,5 +761,82 @@ struct DayCell: View {
             RoundedRectangle(cornerRadius: 8)
                 .stroke(isToday ? Color.green : (isSelected ? Color.blue : Color.clear), lineWidth: isToday ? 2 : 1.5)
         )
+    }
+}
+
+/// 今日倒计时 + 实时工资（1.2.7）：只这个小视图每秒刷新（TimelineView 1 秒一格），不带动整页。
+/// 上班前：距上班 + 已挣 ¥0.00 · 预估 ¥XXX；上班中：距下班 + 已挣实时涨 · 预估 ¥XXX；
+/// 下班后：今日已下班 + 今日已挣 ¥XXX；休息/请假：今日休息/今日请假（钱那行不显示）。
+private struct TodayLiveRow: View {
+    let day: DaySchedule
+    let baseSalary: Double
+    let earlyRate: Double
+    let midRate: Double
+    let mealRate: Double
+
+    var body: some View {
+        TimelineView(.periodic(from: Date(), by: 1)) { context in
+            let now = context.date
+            let today = DateUtil.calendar.startOfDay(for: now)
+            let state = PayCalc.todayLiveState(
+                shift: day.shift, onLeave: day.onLeave == true, day: today, now: now,
+                baseSalary: baseSalary, dateString: day.date,
+                earlyRate: earlyRate, midRate: midRate, mealRate: mealRate
+            )
+            let triple = PayCalc.isStatutoryDay(day.date)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(countdownText(state: state, now: now))
+                    .font(.subheadline)
+                    .foregroundColor(.white)
+                if let money = moneyText(state: state, triple: triple) {
+                    Text(money)
+                        .font(.subheadline)
+                        .foregroundColor(.white.opacity(0.75))
+                }
+            }
+        }
+    }
+
+    /// 倒计时文案：距上班/下班 HH:MM:SS（秒数跟着走）。
+    private func countdownText(state: PayCalc.TodayLiveState, now: Date) -> String {
+        switch state {
+        case .rest:
+            return day.onLeave == true ? "今日请假" : "今日休息"
+        case .before(let start, _):
+            return "距上班 " + durationText(from: now, to: start)
+        case .working(let end, _, _):
+            return "距下班 " + durationText(from: now, to: end)
+        case .between(let nextStart, _, _):
+            return "距下一班 " + durationText(from: now, to: nextStart)
+        case .done:
+            return "今日已下班"
+        }
+    }
+
+    /// 时长 HH:MM:SS（不足 1 小时也写 00:MM:SS，保持位数不动、不跳行）。
+    private func durationText(from: Date, to: Date) -> String {
+        let total = max(0, Int(to.timeIntervalSince(from)))
+        let h = total / 3600
+        let m = (total % 3600) / 60
+        let s = total % 60
+        return String(format: "%02d:%02d:%02d", h, m, s)
+    }
+
+    /// 钱那行：上班中/上班前显示已挣 + 预估；下班后显示今日已挣；休息/请假不显示。
+    /// 三薪那天末尾带「（三薪）」，免得数字大得让人摸不着头脑。
+    private func moneyText(state: PayCalc.TodayLiveState, triple: Bool) -> String? {
+        let suffix = triple ? "（三薪）" : ""
+        switch state {
+        case .rest:
+            return nil
+        case .before(_, let total):
+            return "已挣 ¥0.00 · 预估 \(MoneyUtil.money(total))\(suffix)"
+        case .working(_, let earned, let total):
+            return "已挣 \(MoneyUtil.money(earned)) · 预估 \(MoneyUtil.money(total))\(suffix)"
+        case .between(_, let earned, let total):
+            return "已挣 \(MoneyUtil.money(earned)) · 预估 \(MoneyUtil.money(total))\(suffix)"
+        case .done(let total):
+            return "今日已挣 \(MoneyUtil.money(total))\(suffix)"
+        }
     }
 }

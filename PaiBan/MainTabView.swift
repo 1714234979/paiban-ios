@@ -6,7 +6,7 @@ struct MainTabView: View {
     @EnvironmentObject private var store: AppStore
 
     var body: some View {
-        TabView {
+        TabView(selection: $store.selectedTab) {
             NavigationStack {
                 CalendarView()
                     .navigationTitle("排班")
@@ -15,6 +15,7 @@ struct MainTabView: View {
             .tabItem {
                 Label("排班", systemImage: "calendar")
             }
+            .tag(0)
 
             NavigationStack {
                 PayView()
@@ -24,12 +25,21 @@ struct MainTabView: View {
             .tabItem {
                 Label("工资", systemImage: "yensign.circle")
             }
+            .tag(1)
 
             NavigationStack {
                 SettingsView()
             }
             .tabItem {
                 Label("设置", systemImage: "gearshape")
+            }
+            .tag(2)
+        }
+        // 没登录时点小组件进来的深链：登录后进主界面再跳（store.handleDeepLink 先记下来）。
+        .task {
+            if let tab = store.pendingDeepLinkTab {
+                store.pendingDeepLinkTab = nil
+                store.selectedTab = tab
             }
         }
     }
