@@ -480,9 +480,9 @@ struct LockWidgetView: View {
 private func shiftPillText(_ shift: String) -> String {
     let parts = ShiftStyle.parts(of: shift)
     if parts.count == 2 {
-        return parts.map { ShiftStyle.shortName($0) }.joined()
+        return parts.map { TeamInfo.shortName($0) }.joined()
     }
-    return ShiftStyle.shortName(shift)
+    return TeamInfo.shortName(shift)
 }
 
 /// 班次色：双班取第一个班的颜色（早中班取早班紫，日中班取日班绿），其余照 ShiftStyle。
