@@ -28,7 +28,9 @@ enum WidgetServerClient {
     /// 本月 + 本周 + 本月工资，一次拉齐，拼成 WidgetSnapshot。
     /// 失败返回 nil（调用方回落缓存/占位）。
     static func fetchSnapshot(apiKey: String, now: Date = Date()) async -> WidgetSnapshot? {
-        guard let base = await ServerConfig.resolve() else { return nil }
+        // resolve() 回的是 (baseURL, kind) 元组；小组件只要地址，云优先、云不通走 NAS 隧道。
+        guard let resolved = await ServerConfig.resolve() else { return nil }
+        let base = resolved.baseURL
         let cal = DateUtil.calendar
         let ym = DateUtil.yearMonth(of: now)
         let weekday = cal.component(.weekday, from: now) // 1=周日

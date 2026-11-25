@@ -525,7 +525,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
 				CURRENT_PROJECT_VERSION = 14;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PaiBanWidget/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
@@ -548,7 +548,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
 				CURRENT_PROJECT_VERSION = 14;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PaiBanWidget/Info.plist;
-				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
