@@ -18,17 +18,9 @@ struct ShareScheduleView: View {
 
     var body: some View {
         List {
-            // 三步（图四）。
+            // 三步（图四）。抽成单独属性，避免 body 表达式过大导致类型检查超时。
             Section {
-                VStack(alignment: .leading, spacing: 10) {
-                    shareStep(number: "1", title: "分享给同事排班表",
-                              subtitle: "把你的基础日历（倒班方式 + 班组）发给同事")
-                    shareStep(number: "2", title: "同事完成排班",
-                              subtitle: "同事在他的 App 里看到你的班表")
-                    shareStep(number: "3", title: "查看对应日期班次以协商调换班",
-                              subtitle: "点开同事分享给你的班表，对照日期看班次，调班只改自己的日历")
-                }
-                .padding(.vertical, 4)
+                shareSteps
             }
 
             // 分享给同事：输对方账号（手机号/用户名）+ 备注。
@@ -66,10 +58,10 @@ struct ShareScheduleView: View {
                 ForEach(store.sharesSent) { share in
                     VStack(alignment: .leading, spacing: 4) {
                         HStack {
-                            Text(share.toDisplayName ?? share.toUsername)
+                            Text(share.toUsername ?? "")
                                 .bold()
                             Spacer()
-                            Text(share.modeId == "manual" ? "手动排班" : (RotationModes.mode(id: share.modeId)?.name ?? share.modeId))
+                            Text(modeName(for: share))
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -98,7 +90,7 @@ struct ShareScheduleView: View {
                             Text(share.fromDisplayName ?? share.fromUsername ?? "")
                                 .bold()
                             Spacer()
-                            Text(share.modeId == "manual" ? "手动排班" : (RotationModes.mode(id: share.modeId)?.name ?? share.modeId))
+                            Text(modeName(for: share))
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -159,6 +151,26 @@ struct ShareScheduleView: View {
         }
     }
 
+    /// 分享记录的倒班方式名（modeId 是可选的，先解包）。
+    private func modeName(for share: ScheduleShare) -> String {
+        guard let modeId = share.modeId else { return "—" }
+        if modeId == "manual" { return "手动排班" }
+        return RotationModes.mode(id: modeId)?.name ?? modeId
+    }
+
+    /// 三步（图四）：单独抽出来，避免 body 表达式过大导致类型检查超时。
+    private var shareSteps: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            shareStep(number: "1", title: "分享给同事排班表",
+                      subtitle: "把你的基础日历（倒班方式 + 班组）发给同事")
+            shareStep(number: "2", title: "同事完成排班",
+                      subtitle: "同事在他的 App 里看到你的班表")
+            shareStep(number: "3", title: "查看对应日期班次以协商调换班",
+                      subtitle: "点开同事分享给你的班表，对照日期看班次，调班只改自己的日历")
+        }
+        .padding(.vertical, 4)
+    }
+
     private func shareStep(number: String, title: String, subtitle: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Text(number)
@@ -217,9 +229,14 @@ private struct SharedMonthView: View {
     @State private var isLoading = false
     @State private var errorText: String?
 
-    private var senderName: String { share.fromDisplayName ?? share.fromUsername ?? "同事" }
+    private var senderName: String {
+        let name = share.fromName
+        return name.isEmpty ? "同事" : name
+    }
     private var modeName: String {
-        share.modeId == "manual" ? "手动排班" : (RotationModes.mode(id: share.modeId)?.name ?? share.modeId)
+        guard let modeId = share.modeId else { return "—" }
+        if modeId == "manual" { return "手动排班" }
+        return RotationModes.mode(id: modeId)?.name ?? modeId
     }
 
     var body: some View {
@@ -297,8 +314,7 @@ private struct SharedMonthView: View {
         isLoading = true
         defer { isLoading = false }
         do {
-            let resp = try await store.api.fetchShareMonth(id: share.id, year: yearMonth.year, month: yearMonth.month)
-            days = resp.days ?? []
+            days = try await store.api.fetchShareMonth(id: share.id, year: yearMonth.year, month: yearMonth.month)
             errorText = nil
         } catch {
             errorText = (error as? APIError)?.message ?? error.localizedDescription

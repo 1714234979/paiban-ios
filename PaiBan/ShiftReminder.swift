@@ -49,6 +49,8 @@ enum ShiftReminder {
 
     /// 打开提醒：请求权限 → 排未来 7 天的班前 30 分钟通知。
     /// 权限被拒返回 false（调用方把开关关掉并提示去系统设置）。
+    /// AppStore 是 @MainActor，读 store 的班次要走主线程。
+    @MainActor
     static func enable(store: AppStore) async -> Bool {
         let granted = await requestPermission()
         guard granted else { return false }
@@ -62,6 +64,8 @@ enum ShiftReminder {
     }
 
     /// 重新排未来 7 天的班前提醒（排班变了调用）。
+    /// AppStore 是 @MainActor，读 store 的班次要走主线程。
+    @MainActor
     static func reschedule(store: AppStore) async {
         let center = UNUserNotificationCenter.current()
         center.removeAllPendingNotificationRequests()
@@ -83,7 +87,7 @@ enum ShiftReminder {
             guard fire > now else { continue }
             let content = UNMutableNotificationContent()
             content.title = "上班提醒"
-            content.body = "还有 30 分钟上\(shift)（\(ShiftStyle.timeRange(for: shift)））"
+            content.body = "还有 30 分钟上\(shift)（\(ShiftStyle.timeRange(for: shift))）"
             content.sound = .default
             var comps = DateUtil.calendar.dateComponents([.year, .month, .day, .hour, .minute], from: fire)
             comps.second = 0

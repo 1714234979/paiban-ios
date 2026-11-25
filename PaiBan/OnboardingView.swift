@@ -214,7 +214,7 @@ struct OnboardingView: View {
                 baseDate: DateUtil.string(from: baseDate)
             )
             rotation.teamNames = store.rotation.teamNames
-            try await store.saveProfile(team: team, rotation: rotation, onboardingDone: true)
+            try await store.saveProfile(team: team, onboardingDone: true, rotation: rotation)
             try await seedInitialTeamHistory()
             await store.refreshMonth()
         } catch {

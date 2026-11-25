@@ -53,6 +53,28 @@ struct DayDetailView: View {
         return teamDay(store.myTeam, date)
     }
 
+    /// 我前一天 / 后一天的日程（连班禁令用）。
+    private func myPrevDay(_ date: String) -> DaySchedule? {
+        guard let d = DateUtil.date(from: date) else { return nil }
+        return myDayOn(DateUtil.string(from: DateUtil.addingDays(d, -1)))
+    }
+
+    private func myNextDay(_ date: String) -> DaySchedule? {
+        guard let d = DateUtil.date(from: date) else { return nil }
+        return myDayOn(DateUtil.string(from: DateUtil.addingDays(d, 1)))
+    }
+
+    /// 某班组前一天 / 后一天的日程（请假顶岗候选的邻日禁令用）。
+    private func prevDayOf(team: String, date: String) -> DaySchedule? {
+        guard let d = DateUtil.date(from: date) else { return nil }
+        return teamDay(team, DateUtil.string(from: DateUtil.addingDays(d, -1)))
+    }
+
+    private func nextDayOf(team: String, date: String) -> DaySchedule? {
+        guard let d = DateUtil.date(from: date) else { return nil }
+        return teamDay(team, DateUtil.string(from: DateUtil.addingDays(d, 1)))
+    }
+
     /// 当月窗口的起止（上月末、次月初各多取一天，供邻日校验）。
     private var teamsWindow: (start: String, days: Int) {
         let comps = DateUtil.yearMonth(of: DateUtil.date(from: shownDay.date) ?? Date())
