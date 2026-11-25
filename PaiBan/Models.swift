@@ -582,9 +582,13 @@ struct SharesResponse: Decodable {
 }
 
 /// 共享班表某月的一天（GET /api/v1/me/shares/:id?year=&month=）。
-struct ShareMonthDay: Codable, Equatable {
+struct ShareMonthDay: Codable, Equatable, Identifiable {
     var date: String
     var shift: String
+
+    var id: String { date }
+    /// 日号（从日期取，如 2026-11-24 → 24）。
+    var day: Int { Int(date.suffix(2)) ?? 0 }
 }
 
 /// 本地基础排班计算：只按班组 + 基准日算 8 天一轮（不含调班/请假），
