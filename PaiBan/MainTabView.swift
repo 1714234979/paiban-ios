@@ -17,15 +17,19 @@ struct MainTabView: View {
             }
             .tag(0)
 
-            NavigationStack {
-                PayView()
-                    .navigationTitle("预估工资")
-                    .navigationBarTitleDisplayMode(.inline)
+            // 工资 Tab：只有有工资权限的人才显示（1.2.7.001，第 23 条）。
+            // 没权限的人只有排班 / 设置两个 Tab；年休假跟着工资走，也一并隐藏。
+            if store.payAccess {
+                NavigationStack {
+                    PayView()
+                        .navigationTitle("预估工资")
+                        .navigationBarTitleDisplayMode(.inline)
+                }
+                .tabItem {
+                    Label("工资", systemImage: "yensign.circle")
+                }
+                .tag(1)
             }
-            .tabItem {
-                Label("工资", systemImage: "yensign.circle")
-            }
-            .tag(1)
 
             NavigationStack {
                 SettingsView()
@@ -40,6 +44,12 @@ struct MainTabView: View {
             if let tab = store.pendingDeepLinkTab {
                 store.pendingDeepLinkTab = nil
                 store.selectedTab = tab
+            }
+        }
+        // 工资权限没了（管理员关了）而当前正停在工资 Tab：切回排班。
+        .onChange(of: store.payAccess) { newValue in
+            if !newValue && store.selectedTab == 1 {
+                store.selectedTab = 0
             }
         }
     }

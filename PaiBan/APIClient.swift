@@ -482,14 +482,81 @@ final class APIClient {
 
     /// PUT /api/v1/me/profile — 只传给定的字段（合并更新）。
     /// displayName：改显示名（≤32 字，空串清回用户名）；登录用的 username 不动。
-    func updateProfile(team: String? = nil, paySettings: [String: Any]? = nil, onboardingDone: Bool? = nil, displayName: String? = nil) async throws -> UserProfile {
+    /// rotation：倒班设置（1.2.7.001：modeId/team/baseDate/teamNames/manualShifts 的字典；
+    /// 服务端校验 modeId 必须是 5 种方式之一或 "manual"，team 必须是 A/B/C/D）。
+    func updateProfile(team: String? = nil, paySettings: [String: Any]? = nil, onboardingDone: Bool? = nil, displayName: String? = nil, rotation: [String: Any]? = nil, displaySettings: [String: Any]? = nil) async throws -> UserProfile {
         var body: [String: Any] = [:]
         if let team { body["team"] = team }
         if let paySettings { body["paySettings"] = paySettings }
         if let onboardingDone { body["onboardingDone"] = onboardingDone }
         if let displayName { body["displayName"] = displayName }
+        if let rotation { body["rotation"] = rotation }
+        if let displaySettings { body["displaySettings"] = displaySettings }
         // PUT /me/profile 返回更新后的 profile（data 包装）。
         return try await request(path: "/api/v1/me/profile", method: "PUT", jsonBody: body)
+    }
+
+    // MARK: 倒班方式目录（1.2.7.001，第 23 条）
+
+    /// GET /api/v1/rotation-modes —— 倒班方式目录（5 种四班三倒 + 即将推出的分类）。
+    /// 服务端返回的目录与 App 内置的 RotationModes.fourThree 一致；App 优先用服务端的，
+    /// 服务端没给（老版本）时用内置的。
+    func fetchRotationModes() async throws -> [RotationMode] {
+        struct ModesResponse: Decodable { var modes: [RotationMode]? }
+        let resp: ModesResponse = try await request(path: "/api/v1/rotation-modes")
+        return resp.modes ?? []
+    }
+
+    // MARK: 节假日（1.2.7.001，第 23 条）
+
+    /// GET /api/v1/holidays?year= —— 服务端缓存的节假日数据（timor.tech 拉取、归一化）。
+    /// kind = legal（法定/三薪）/ rest（普通放假）/ workday（调休上班日）。
+    func fetchHolidays(year: Int) async throws -> HolidaysResponse {
+        try await request(path: "/api/v1/holidays", query: ["year": String(year)])
+    }
+
+    // MARK: 共享班表（1.2.7.001，第 24 条）
+
+    /// GET /api/v1/me/shares —— 我分享出去的 + 同事分享给我的。
+    func fetchShares() async throws -> SharesResponse {
+        try await request(path: "/api/v1/me/shares")
+    }
+
+    /// POST /api/v1/me/shares —— 分享我的基础日历给同事（toUsername 是对方账号名/手机号）。
+    /// 只分享基础日历（方式/班组/基准日/班组名），不含调班/请假/加班、不含工资。
+    func shareSchedule(toUsername: String, note: String? = nil) async throws -> ScheduleShare {
+        var body: [String: Any] = ["toUsername": toUsername]
+        if let note, !note.isEmpty { body["note"] = note }
+        return try await request(path: "/api/v1/me/shares", method: "POST", jsonBody: body)
+    }
+
+    /// GET /api/v1/me/shares/:id?year=&month= —— 看一条分享的基础日历（指定月份）。
+    func fetchShareMonth(id: String, year: Int, month: Int) async throws -> [ShareMonthDay] {
+        struct ShareMonthResponse: Decodable {
+            var share: ScheduleShare?
+            var days: [ShareMonthDay]?
+        }
+        let resp: ShareMonthResponse = try await request(
+            path: "/api/v1/me/shares/\(id)",
+            query: ["year": String(year), "month": String(month)])
+        return resp.days ?? []
+    }
+
+    /// DELETE /api/v1/me/shares/:id —— 撤销我发出的分享（或拒收发给我的）。
+    func deleteShare(id: String) async throws {
+        try await requestNoData(path: "/api/v1/me/shares/\(id)", method: "DELETE")
+    }
+
+    /// POST /api/v1/me/shares/:id/refresh —— 分享人基础轮次变了，更新快照。
+    func refreshShare(id: String) async throws -> ScheduleShare {
+        try await request(path: "/api/v1/me/shares/\(id)/refresh", method: "POST")
+    }
+
+    /// POST /api/v1/me/shares/:id/link —— 生成分享链接/口令（对方点开就能看基础日历）。
+    func createShareLink(id: String) async throws -> String {
+        struct LinkResponse: Decodable { var url: String?; var token: String? }
+        let resp: LinkResponse = try await request(path: "/api/v1/me/shares/\(id)/link", method: "POST")
+        return resp.url ?? ""
     }
 
     /// GET /api/v1/me/team-history
@@ -634,12 +701,17 @@ final class APIClient {
                           query: ["start": start, "days": String(days)])
     }
 
-    /// POST /api/v1/me/swap —— 互换调班：替班日我休息、对方上我的班；
-    /// paybackDate 为空 = 待还班（以后再补填），给了就同时写还班日那对。
+    /// POST /api/v1/me/swap —— 调班（1.2.7.001 第 25 条重做：只改自己的日历）：
+    /// 选一天把那天的班改成 myShift（新版）；不传 myShift 时走旧版（替班日变休息，
+    /// 需 partner/partnerShift）。note 只是跟谁换的备注，不联动对方。
+    /// paybackDate 为空 = 待还班（以后再补填），给了就同时写还班日（我上 paybackMyShift）。
     /// 成功返回 {coverDate, paybackDate}。
-    func postSwap(date: String, partner: String, partnerShift: String, note: String?,
-                  paybackDate: String?, paybackMyShift: String?) async throws -> SwapSaveResult {
-        var body: [String: Any] = ["date": date, "partner": partner, "partnerShift": partnerShift]
+    func postSwap(date: String, myShift: String?, partner: String? = nil, partnerShift: String? = nil,
+                  note: String?, paybackDate: String?, paybackMyShift: String?) async throws -> SwapSaveResult {
+        var body: [String: Any] = ["date": date]
+        if let myShift, !myShift.isEmpty { body["myShift"] = myShift }
+        if let partner, !partner.isEmpty { body["partner"] = partner }
+        if let partnerShift, !partnerShift.isEmpty { body["partnerShift"] = partnerShift }
         if let note, !note.isEmpty { body["note"] = note }
         if let paybackDate, !paybackDate.isEmpty { body["paybackDate"] = paybackDate }
         if let paybackMyShift, !paybackMyShift.isEmpty { body["paybackMyShift"] = paybackMyShift }

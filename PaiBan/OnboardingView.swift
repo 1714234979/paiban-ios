@@ -1,38 +1,25 @@
 import SwiftUI
 
-/// 新用户引导（注册后、onboardingDone=false 时只显示一次）：
-/// (1) 哪个班组 (2) 基本工资 (3) 奖金系数 (4) 养老月扣 → 系统反推社保缴费基数
-/// (5) 学历 (6) 缺员补贴 (7) 入职时间（只到月份）(8) 剩余年休假天数。
-/// 每步都可跳过（用默认值），最后 PUT /me/profile 保存并标记 onboardingDone=true。
+/// 新用户引导（注册后、onboardingDone=false 时只显示一次），1.2.7.001：
+/// 只问排班（排班方式 + 倒班方式/班组/基准日），工资相关的选择全部隐藏
+/// （基本工资、奖金系数、社保基数、入职时间、剩余年休假、学历都不问；
+/// 工资设置以后在设置页填，或管理员帮填）。
+/// 第 1 步：排班方式（手动/周期，两张大卡片，图五样式）；
+/// 第 2 步：周期 → 选倒班方式 + 班组 + 基准日；手动 → 只选班组。
+/// 最后 PUT /me/profile 保存 rotation + team 并标记 onboardingDone=true。
 struct OnboardingView: View {
     @EnvironmentObject private var store: AppStore
 
     @State private var step = 0
+    @State private var method: String = "periodic"   // manual / periodic
+    @State private var modeId = RotationModes.defaultModeId
     @State private var team = "B"
-    @State private var baseSalaryText = "2420"
-    @State private var bonusCoef = 1.0
-    @State private var pensionText = "475.04"
-    @State private var education = "其他"
-    @State private var hasShortage = false
-    @State private var shortageAmountText = ""
-    @State private var shortageStartDate = Date()
-    @State private var shortageEndDate = Calendar.current.date(byAdding: .month, value: 3, to: Date()) ?? Date()
-    @State private var hireYear = Calendar.current.component(.year, from: Date())
-    @State private var hireMonth = Calendar.current.component(.month, from: Date())
-    @State private var annualLeaveText = "5"
+    @State private var baseDate = DateUtil.date(from: RotationModes.commonBaseDate) ?? Date()
     @State private var errorText: String?
     @State private var isBusy = false
 
-    /// 养老月扣反推缴费基数：基数 = 养老月扣 ÷ 0.08（保留两位小数）。
-    /// 医疗 = 基数 × 2%、失业 = 基数 × 0.3%，当场算出来对照工资条。
-    private var derivedBase: Double? {
-        guard let pension = Double(pensionText.trimmingCharacters(in: .whitespaces)), pension > 0 else { return nil }
-        return PayCalc.round2(pension / 0.08)
-    }
-
-    private let totalSteps = 8
-
-    /// 年份选择范围：1990 年到今年。
+    private var totalSteps: Int { 2 }
+    private var isManual: Bool { method == "manual" }
 
     var body: some View {
         NavigationStack {
@@ -62,14 +49,12 @@ struct OnboardingView: View {
                         Button("上一步") { step -= 1 }
                             .buttonStyle(.bordered)
                     }
-                    Button("跳过这步") { nextStep() }
-                        .buttonStyle(.bordered)
                     Spacer()
                     Button(step == totalSteps - 1 ? "完成" : "下一步") {
                         if step == totalSteps - 1 {
                             Task { await finish() }
                         } else {
-                            nextStep()
+                            step += 1
                         }
                     }
                     .buttonStyle(.borderedProminent)
@@ -89,60 +74,118 @@ struct OnboardingView: View {
         }
     }
 
-    private func nextStep() {
-        if step < totalSteps - 1 { step += 1 }
-    }
-
     // MARK: 各步内容
 
     @ViewBuilder
     private var stepBody: some View {
-        switch step {
-        case 0:
-            stepTeam
-        case 1:
-            stepBaseSalary
-        case 2:
-            stepBonusCoef
-        case 3:
-            stepContributionBase
-        case 4:
-            stepEducation
-        case 5:
-            stepShortage
-        case 6:
-            stepHireDate
-        default:
-            stepAnnualLeave
+        if step == 0 {
+            stepMethod
+        } else {
+            stepSchedule
         }
     }
 
-    private var stepTeam: some View {
+    /// 第 1 步：排班方式（图五样式，两张大卡片）。
+    private var stepMethod: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("你在哪个班？")
+            Text("你的班次怎么排？")
                 .font(.title2).bold()
-            Text("四个班，都是 8 天一轮倒班。")
+            Text("先选一种排班方式，之后在设置 → 倒班方式设置里随时能改。")
                 .foregroundColor(.secondary)
+            Button {
+                method = "manual"
+            } label: {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("手动排班").font(.headline).foregroundColor(.white)
+                    Text("班次无周期规律\n灵活性强但需逐日点击")
+                        .font(.subheadline).foregroundColor(.white.opacity(0.9))
+                }
+                .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
+                .padding(16)
+                .background(Color.green.gradient)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(method == "manual" ? Color.primary : Color.clear, lineWidth: 2)
+                )
+            }
+            .buttonStyle(.plain)
+            Button {
+                method = "periodic"
+            } label: {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("周期排班").font(.headline).foregroundColor(.white)
+                    Text("班次周期固定\n一次生成多月日历")
+                        .font(.subheadline).foregroundColor(.white.opacity(0.9))
+                }
+                .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
+                .padding(16)
+                .background(Color.blue.gradient)
+                .clipShape(RoundedRectangle(cornerRadius: 14))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(method == "periodic" ? Color.primary : Color.clear, lineWidth: 2)
+                )
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    /// 第 2 步：周期 → 选倒班方式 + 班组 + 基准日；手动 → 只选班组。
+    private var stepSchedule: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            if isManual {
+                Text("你在哪个班？")
+                    .font(.title2).bold()
+                Text("手动排班没有周期规律。选好班组后，去排班页点某一天设当天班次。")
+                    .foregroundColor(.secondary)
+            } else {
+                Text("选倒班方式和班组")
+                    .font(.title2).bold()
+                Text("四班三倒，8 小时三班。方式 A 是最标准的 8 天循环。")
+                    .foregroundColor(.secondary)
+                ForEach(RotationModes.fourThree) { mode in
+                    Button {
+                        modeId = mode.id
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(mode.name)
+                                    .foregroundColor(.primary)
+                                Text("\(mode.cycleDays) 天一循环 · \(mode.sequence)")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            if modeId == mode.id {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                            }
+                        }
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(modeId == mode.id ? Color.blue.opacity(0.08) : Color(.secondarySystemBackground))
+                    .cornerRadius(10)
+                }
+            }
+
+            Text("你在哪个班？")
+                .font(.headline)
             Picker("班组", selection: $team) {
                 ForEach(TeamInfo.allTeams, id: \.self) { t in
                     Text("\(t)班").tag(t)
                 }
             }
             .pickerStyle(.segmented)
-            ForEach(TeamInfo.allTeams, id: \.self) { t in
-                HStack {
-                    Text("\(t)班")
-                        .bold()
-                        .frame(width: 36, alignment: .leading)
-                    Text(TeamInfo.cycleText(team: t))
-                        .font(.subheadline)
-                        .foregroundColor(t == team ? .primary : .secondary)
+
+            if !isManual {
+                DatePicker("基准日", selection: $baseDate, displayedComponents: .date)
+                if let mode = RotationModes.mode(id: modeId) {
+                    Text("\(team)班在基准日上 \(RotationModes.shiftName(for: mode.cycles[team]?.first ?? "D"))；基准日是循环第 1 天。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
-                .padding(10)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(t == team ? Color.blue.opacity(0.08) : Color(.secondarySystemBackground))
-                .cornerRadius(10)
-                .onTapGesture { team = t }
             }
             Text("日=日班 08–16，中=中班 16–24，早=早班 00–08，休=休息")
                 .font(.caption)
@@ -150,173 +193,7 @@ struct OnboardingView: View {
         }
     }
 
-    private var stepBaseSalary: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("基本工资")
-                .font(.title2).bold()
-            Text("每月的基本工资（元），以后可以在设置里改。")
-                .foregroundColor(.secondary)
-            TextField("基本工资", text: $baseSalaryText)
-                .keyboardType(.decimalPad)
-                .textFieldStyle(.roundedBorder)
-                .font(.title3)
-            Text("默认 2420 元，和车间现在的一样。")
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-    }
-
-    private var stepBonusCoef: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("奖金系数")
-                .font(.title2).bold()
-            Text("奖金 =（科室绩效 + 其他奖罚）× 绩效系数 × 奖金系数 + 加班费。")
-                .foregroundColor(.secondary)
-            HStack {
-                Text(String(format: "%.1f", bonusCoef))
-                    .font(.largeTitle).bold()
-                    .frame(width: 90)
-                Stepper("", value: $bonusCoef, in: 1.0...2.0, step: 0.1)
-                    .labelsHidden()
-            }
-            Slider(value: $bonusCoef, in: 1.0...2.0, step: 0.1)
-            Text("范围 1.0–2.0，保留一位小数；默认 1.0。")
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-    }
-
-    private var stepContributionBase: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("养老月扣")
-                .font(.title2).bold()
-            Text("直接输工资条上的养老月扣（元/月），系统自动反推社保缴费基数。")
-                .foregroundColor(.secondary)
-            TextField("养老月扣", text: $pensionText)
-                .keyboardType(.decimalPad)
-                .textFieldStyle(.roundedBorder)
-                .font(.title3)
-            if let base = derivedBase {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("算出来的数，对照工资条：")
-                        .bold()
-                    Text("社保缴费基数 \(PayCalc.jsNum(base)) 元/月")
-                    Text("医疗 \(MoneyUtil.money(PayCalc.round2(base * 0.02)))（基数 × 2%）")
-                    Text("失业 \(MoneyUtil.money(PayCalc.round2(base * 0.003)))（基数 × 0.3%）")
-                    Text("三项都和工资条对上才算准。")
-                        .foregroundColor(.secondary)
-                }
-                .font(.subheadline)
-                .padding(14)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.green.opacity(0.10))
-                .cornerRadius(12)
-            } else {
-                Text("输一个大于 0 的数，比如 475.04。")
-                    .font(.subheadline)
-                    .foregroundColor(.red)
-            }
-            Text("不填就按默认 5938（养老 475.04、医疗 118.76、失业 17.81）。")
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-    }
-
-    private var stepEducation: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("你的学历？")
-                .font(.title2).bold()
-            Text("学历补贴每月发进工资：专科 50 元，本科 100 元，其他 0 元。")
-                .foregroundColor(.secondary)
-            Picker("学历", selection: $education) {
-                Text("专科").tag("专科")
-                Text("本科").tag("本科")
-                Text("其他").tag("其他")
-            }
-            .pickerStyle(.segmented)
-            Text("选错了以后可以在设置 → 工资设置里改。")
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-    }
-
-    private var stepShortage: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("有没有缺员补贴？")
-                .font(.title2).bold()
-            Text("缺员补贴按月发进奖金：期限内每月计入，期限到了就不计了。")
-                .foregroundColor(.secondary)
-            Picker("缺员补贴", selection: $hasShortage) {
-                Text("没有").tag(false)
-                Text("有").tag(true)
-            }
-            .pickerStyle(.segmented)
-            if hasShortage {
-                TextField("每月金额（元）", text: $shortageAmountText)
-                    .keyboardType(.decimalPad)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.title3)
-                DatePicker("开始日期", selection: $shortageStartDate, displayedComponents: .date)
-                DatePicker("结束日期", selection: $shortageEndDate, displayedComponents: .date)
-                Text("期限到了自动停发，不用再来改。")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-        }
-    }
-
-    /// 入职时间（1.2.6）：只精确到年月，不用精确到日；工龄津贴按入职年份算。
-    private var stepHireDate: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("你什么时候入职的？")
-                .font(.title2).bold()
-            Text("只填到月份就行，比如 2018 年 10 月；工龄津贴按入职年份算。")
-                .foregroundColor(.secondary)
-            HStack(spacing: 8) {
-                Picker("年份", selection: $hireYear) {
-                    ForEach(1990...Calendar.current.component(.year, from: Date()), id: \.self) { y in
-                        Text("\(y)").tag(y)
-                    }
-                }
-                .pickerStyle(.menu)
-                Text("年")
-                Picker("月份", selection: $hireMonth) {
-                    ForEach(1...12, id: \.self) { m in
-                        Text("\(m)").tag(m)
-                    }
-                }
-                .pickerStyle(.menu)
-                Text("月")
-            }
-            .font(.title3)
-            Text("选错了以后可以在设置 → 工资设置里改。")
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-    }
-
-    /// 剩余年休假天数（1.2.6）：填现在还剩的天数；年假是累计的，今年没休完的累计到明年，不清零。
-    private var stepAnnualLeave: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            Text("还剩几天年休假？")
-                .font(.title2).bold()
-            Text("填你现在还剩的年休假天数，工资页的年假剩余就按这个数显示。")
-                .foregroundColor(.secondary)
-            TextField("剩余年休假天数", text: $annualLeaveText)
-                .keyboardType(.numberPad)
-                .textFieldStyle(.roundedBorder)
-                .font(.title3)
-            Text("年假是累计的：今年没休完的，剩下的累计到明年，不清零；休了年假会自动扣。以后可以在设置 → 工资设置里改。")
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-    }
-
     // MARK: 保存
-
-    private func parsedDouble(_ text: String, fallback: Double) -> Double {
-        Double(text.trimmingCharacters(in: .whitespaces)) ?? fallback
-    }
 
     /// 把起始班组写成第一条换班记录：没有更早记录的日期按第一条的班组算。
     /// 生效日取完成引导的当天；同一天重复写会替换，不会多出一条。
@@ -328,40 +205,24 @@ struct OnboardingView: View {
 
     private func finish() async {
         errorText = nil
-        if hasShortage && shortageEndDate < shortageStartDate {
-            errorText = "缺员补贴结束日期不能早于开始日期"
-            return
-        }
         isBusy = true
         defer { isBusy = false }
-        var settings: [String: Any] = [
-            "baseSalary": parsedDouble(baseSalaryText, fallback: 2420),
-            "bonusCoef": (bonusCoef * 10).rounded() / 10,
-            "contributionBase": derivedBase ?? 5938,
-            "education": education,
-            // 入职时间（只到月份）+ 剩余年休假天数（1.2.6）：存进用户资料。
-            "hireYear": hireYear,
-            "hireMonth": hireMonth,
-            "annualLeaveRemaining": min(365, max(0, Int(annualLeaveText.trimmingCharacters(in: .whitespaces)) ?? 5)),
-        ]
-        if hasShortage {
-            settings["shortageSubsidy"] = [
-                "amount": parsedDouble(shortageAmountText, fallback: 0),
-                "startDate": DateUtil.string(from: shortageStartDate),
-                "endDate": DateUtil.string(from: shortageEndDate),
-            ]
-        } else {
-            settings["shortageSubsidy"] = ["amount": 0]
-        }
         do {
-            try await store.saveProfile(team: team, paySettings: settings, onboardingDone: true)
+            var rotation = RotationSetting(
+                modeId: isManual ? RotationModes.manualId : modeId,
+                team: team,
+                baseDate: DateUtil.string(from: baseDate)
+            )
+            rotation.teamNames = store.rotation.teamNames
+            try await store.saveProfile(team: team, rotation: rotation, onboardingDone: true)
             try await seedInitialTeamHistory()
+            await store.refreshMonth()
         } catch {
             errorText = (error as? APIError)?.message ?? error.localizedDescription
         }
     }
 
-    /// “以后再说”：只标记引导完成，班组和工资全用默认值。
+    /// “以后再说”：只标记引导完成，班组和倒班方式全用默认值（周期 A 方式、B 班）。
     private func skipAll() async {
         errorText = nil
         isBusy = true

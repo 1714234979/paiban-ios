@@ -226,20 +226,385 @@ enum TeamInfo {
         default: return shift
         }
     }
+
+    /// 班组显示名：有自定义班组名时用自定义名，否则用班组 ID（A/B/C/D）。
+    /// teamNames 按 A/B/C/D 的顺序排（下标 0=A、1=B、2=C、3=D）。
+    static func displayName(team: String, teamNames: [String]? = nil) -> String {
+        guard let names = teamNames,
+              let idx = allTeams.firstIndex(of: team),
+              idx < names.count, !names[idx].isEmpty else { return team }
+        return names[idx]
+    }
+}
+
+// MARK: - 倒班方式（1.2.7.001，第 23 条）
+
+/// 倒班方式目录里的一种：id、名称、循环天数、班次时长、周均工时、
+/// 单班序列、4 个班各自的循环数组（长度 = 循环天数，基准日统一 2026-11-01）。
+/// 某班某天的班次 = cycles[班][(该日 - 基准日) mod 循环天数]。
+/// 只做四班三倒的 5 种（全是 8 小时三班制，同一套调班引擎 + 同一套禁令，只换循环表）；
+/// 其他分类（四班两倒、三班三倒等）在目录里列出来、available=false、标「即将推出」。
+struct RotationMode: Codable, Equatable, Identifiable {
+    var id: String
+    var name: String
+    var cycleDays: Int
+    var shiftHours: Int
+    var weeklyHours: Double
+    var sequence: String
+    var cycles: [String: [String]]
+    var isAvailable: Bool
+    var note: String?
+
+    /// 该方式下某班某天的班次（基准日 = 2026-11-01）。
+    func shift(team: String, date: Date) -> String {
+        guard let cycle = cycles[team], !cycle.isEmpty,
+              let base = DateUtil.date(from: RotationModes.commonBaseDate) else { return "休息" }
+        let startOfDay = DateUtil.calendar.startOfDay(for: date)
+        let baseDay = DateUtil.calendar.startOfDay(for: base)
+        let diff = DateUtil.calendar.dateComponents([.day], from: baseDay, to: startOfDay).day ?? 0
+        let idx = ((diff % cycleDays) + cycleDays) % cycleDays
+        return cycle[idx]
+    }
+}
+
+enum RotationModes {
+    /// 各方式统一的基准日。B 方式（分休式）用这组循环数组 + 该基准日，
+    /// 与现有 TeamInfo.cycles + 各班基准日逐日一致（已验算 2026-11 全月）。
+    static let commonBaseDate = "2026-11-01"
+
+    /// 手动排班的 modeId（不是一种循环方式，是「逐日点」）。
+    static let manualId = "manual"
+
+    /// 班次码 → 班次名：D 日班、M 中班、N 早班、- 休息。
+    static func shiftName(for code: String) -> String {
+        switch code {
+        case "D": return "日班"
+        case "M": return "中班"
+        case "N": return "早班"
+        default: return "休息"
+        }
+    }
+
+    /// 四班三倒 5 种方式（A–E）。方式 A 是新用户默认推荐（最标准）。
+    static let fourThree: [RotationMode] = [
+        RotationMode(
+            id: "4-3-a", name: "8天循环·连休式", cycleDays: 8, shiftHours: 8, weeklyHours: 42,
+            sequence: "日日中中早早休休",
+            cycles: [
+                "A": ["日班", "日班", "中班", "中班", "早班", "早班", "休息", "休息"],
+                "B": ["中班", "中班", "早班", "早班", "休息", "休息", "日班", "日班"],
+                "C": ["早班", "早班", "休息", "休息", "日班", "日班", "中班", "中班"],
+                "D": ["休息", "休息", "日班", "日班", "中班", "中班", "早班", "早班"],
+            ],
+            isAvailable: true, note: "6上2休，连休2天"
+        ),
+        RotationMode(
+            id: "4-3-b", name: "8天循环·分休式", cycleDays: 8, shiftHours: 8, weeklyHours: 42,
+            sequence: "早早休日日中中休",
+            cycles: [
+                "A": ["早班", "早班", "休息", "日班", "日班", "中班", "中班", "休息"],
+                "B": ["休息", "日班", "日班", "中班", "中班", "休息", "早班", "早班"],
+                "C": ["日班", "中班", "中班", "休息", "早班", "早班", "休息", "日班"],
+                "D": ["中班", "休息", "早班", "早班", "休息", "日班", "日班", "中班"],
+            ],
+            isAvailable: true, note: "6上2休，休息日分开（现有方式）"
+        ),
+        RotationMode(
+            id: "4-3-c", name: "12天循环·三三制", cycleDays: 12, shiftHours: 8, weeklyHours: 42,
+            sequence: "日日日休中中中休早早早休",
+            cycles: [
+                "A": ["日班", "日班", "日班", "休息", "中班", "中班", "中班", "休息", "早班", "早班", "早班", "休息"],
+                "B": ["休息", "中班", "中班", "中班", "休息", "早班", "早班", "早班", "休息", "日班", "日班", "日班"],
+                "C": ["中班", "休息", "早班", "早班", "早班", "休息", "日班", "日班", "日班", "休息", "中班", "中班"],
+                "D": ["早班", "早班", "休息", "日班", "日班", "日班", "休息", "中班", "中班", "中班", "休息", "早班"],
+            ],
+            isAvailable: true, note: "9上3休，每上3天休1天"
+        ),
+        RotationMode(
+            id: "4-3-d", name: "12天循环·九三制", cycleDays: 12, shiftHours: 8, weeklyHours: 42,
+            sequence: "日日日中中中早早早休休休",
+            cycles: [
+                "A": ["日班", "日班", "日班", "中班", "中班", "中班", "早班", "早班", "早班", "休息", "休息", "休息"],
+                "B": ["中班", "中班", "中班", "早班", "早班", "早班", "休息", "休息", "休息", "日班", "日班", "日班"],
+                "C": ["早班", "早班", "早班", "休息", "休息", "休息", "日班", "日班", "日班", "中班", "中班", "中班"],
+                "D": ["休息", "休息", "休息", "日班", "日班", "日班", "中班", "中班", "中班", "早班", "早班", "早班"],
+            ],
+            isAvailable: true, note: "9上3休，连休3天"
+        ),
+        RotationMode(
+            id: "4-3-e", name: "4天循环", cycleDays: 4, shiftHours: 8, weeklyHours: 42,
+            sequence: "早日中休",
+            cycles: [
+                "A": ["早班", "日班", "中班", "休息"],
+                "B": ["日班", "中班", "休息", "早班"],
+                "C": ["中班", "休息", "早班", "日班"],
+                "D": ["休息", "早班", "日班", "中班"],
+            ],
+            isAvailable: true, note: "3上1休，每4天只休1天"
+        ),
+    ]
+
+    /// 其他分类（调研报告里的分类清单）：先只列出来、不可选。
+    /// 四班两倒要另做禁令组和工资口径、五班三倒要改班组数量上限、三班三倒要替休人员概念、六班三倒序列未核实——都后做。
+    static let comingSoon: [(category: String, note: String)] = [
+        ("四班两倒", "12小时班次，禁令与工资口径另做"),
+        ("三班三倒", "需替休人员概念"),
+        ("三班二倒", "12小时班次"),
+        ("两班倒", "8/12小时"),
+        ("五班三倒", "需第5个班组"),
+        ("五班四倒", "6小时班次"),
+        ("六班三倒", "序列未核实"),
+        ("巴拿马 2-2-3", "28天长周期"),
+        ("杜邦", "28天长周期"),
+        ("四班 6 小时工作制", "6小时班次"),
+    ]
+
+    static func mode(id: String) -> RotationMode? {
+        fourThree.first { $0.id == id }
+    }
+
+    /// 默认推荐：方式 A（8天连休式，最标准）。
+    static let defaultModeId = "4-3-a"
+    /// 现有用户的方式：B（分休式）。
+    static let legacyModeId = "4-3-b"
+}
+
+/// 用户的倒班设置（per-user，存 profile 的 rotation 字段；服务端与 App 同结构）。
+/// modeId = 倒班方式 id（"manual" = 手动排班）；team = 所在班组 id；
+/// baseDate = 基准日（该日 = 循环第 0 天）；teamNames = 班组名（按 A/B/C/D 顺序）；
+/// manualShifts = 手动模式逐日班次（key 日期、value 班次码 D/M/N/-，未填的当天算休）。
+struct RotationSetting: Codable, Equatable {
+    var modeId: String
+    var team: String
+    var baseDate: String
+    var teamNames: [String]
+    var manualShifts: [String: String]
+
+    init(modeId: String = RotationModes.legacyModeId, team: String = "B",
+         baseDate: String = RotationModes.commonBaseDate,
+         teamNames: [String] = ["A", "B", "C", "D"],
+         manualShifts: [String: String] = [:]) {
+        self.modeId = modeId
+        self.team = team
+        self.baseDate = baseDate
+        self.teamNames = teamNames
+        self.manualShifts = manualShifts
+    }
+
+    static let `default` = RotationSetting()
+
+    var isManual: Bool { modeId == RotationModes.manualId }
+    var mode: RotationMode? { RotationModes.mode(id: modeId) }
+
+    /// 班组显示名（自定义名优先）。
+    func teamName(for teamId: String) -> String {
+        TeamInfo.displayName(team: teamId, teamNames: teamNames)
+    }
+
+    /// 转成 PUT /me/profile 用的字典（manualShifts 的 key 是日期、value 是班次码 D/M/N/-）。
+    func asDict() -> [String: Any] {
+        ["modeId": modeId, "team": team, "baseDate": baseDate,
+         "teamNames": teamNames, "manualShifts": manualShifts]
+    }
+
+    /// 某班某天的基础班次。手动模式查 manualShifts（未填算休）；
+    /// 周期模式按方式循环表 + 基准日算；方式未知时回落到现有分休式。
+    func baseShift(team teamId: String, date: Date) -> String {
+        if isManual {
+            let key = DateUtil.string(from: date)
+            guard let code = manualShifts[key] else { return "休息" }
+            switch code {
+            case "D": return "日班"
+            case "M": return "中班"
+            case "N": return "早班"
+            default: return "休息"
+            }
+        }
+        guard let mode = mode else {
+            // 方式未知：回落到现有分休式（TeamInfo 各班基准日）。
+            return ScheduleCalculator.baseShift(team: teamId, date: date)
+        }
+        guard let base = DateUtil.date(from: baseDate) else { return "休息" }
+        guard let cycle = mode.cycles[teamId], !cycle.isEmpty else { return "休息" }
+        let startOfDay = DateUtil.calendar.startOfDay(for: date)
+        let baseDay = DateUtil.calendar.startOfDay(for: base)
+        let diff = DateUtil.calendar.dateComponents([.day], from: baseDay, to: startOfDay).day ?? 0
+        let idx = ((diff % mode.cycleDays) + mode.cycleDays) % mode.cycleDays
+        return cycle[idx]
+    }
+}
+
+// MARK: - 日历显示设置（1.2.7.001，第 23 条，图三）
+
+/// 日历显示设置：周一为每周首日（默认关）、显示法定节假日（默认开）、
+/// 显示农历（默认开）、当月显示上下月（默认开）。存本地（UserDefaults），
+/// 也写进 profile 的 displaySettings（换机同步；GET /me 回传）。
+struct CalendarDisplaySettings: Codable, Equatable {
+    var mondayFirst: Bool
+    var showHolidays: Bool
+    var showLunar: Bool
+    var showAdjacentMonths: Bool
+
+    init(mondayFirst: Bool = false, showHolidays: Bool = true,
+         showLunar: Bool = true, showAdjacentMonths: Bool = true) {
+        self.mondayFirst = mondayFirst
+        self.showHolidays = showHolidays
+        self.showLunar = showLunar
+        self.showAdjacentMonths = showAdjacentMonths
+    }
+
+    static let `default` = CalendarDisplaySettings()
+
+    private static let localKey = "paiban.calendarDisplay"
+
+    /// 从本地读（UserDefaults）；没有就用默认。
+    static func loadLocal() -> CalendarDisplaySettings {
+        guard let data = UserDefaults.standard.data(forKey: localKey),
+              let settings = try? JSONDecoder().decode(CalendarDisplaySettings.self, from: data) else {
+            return .default
+        }
+        return settings
+    }
+
+    /// 存到本地。
+    func saveLocal() {
+        if let data = try? JSONEncoder().encode(self) {
+            UserDefaults.standard.set(data, forKey: Self.localKey)
+        }
+    }
+
+    /// 转成 PUT /me/profile 用的字典。
+    func asDict() -> [String: Any] {
+        ["mondayFirst": mondayFirst, "showHolidays": showHolidays,
+         "showLunar": showLunar, "showAdjacentMonths": showAdjacentMonths]
+    }
+}
+
+// MARK: - 节假日（1.2.7.001，第 23 条）
+
+/// 节假日一天：kind = legal（法定节假日/三薪）/ rest（普通放假）/ workday（调休上班日）。
+/// 数据来自服务端 GET /api/v1/holidays（timor.tech 拉取、归一化）；API 挂了用内置表兜底。
+struct HolidayDay: Codable, Equatable, Identifiable {
+    var date: String
+    var name: String
+    var kind: String
+
+    var id: String { date }
+    var isLegal: Bool { kind == "legal" }
+    var isRest: Bool { kind == "rest" }
+    var isWorkday: Bool { kind == "workday" }
+}
+
+/// 服务端 GET /api/v1/holidays 回包。
+struct HolidaysResponse: Decodable {
+    var year: Int?
+    var updatedAt: String?
+    var days: [HolidayDay]?
+}
+
+/// 内置兜底表（2026 年，按官方通知 + timor 实测修正后的 3 处）：
+/// 春节 02-15~02-23（9 天）、调休上班日 02-28（不是 02-22）、04-26 不是调休上班日。
+/// 三薪集合（2026 年 13 天）是工资计算关键，单独放 PayCalc，不依赖 API。
+enum BuiltinHolidays {
+    static let days2026: [HolidayDay] = [
+        HolidayDay(date: "2026-01-01", name: "元旦", kind: "legal"),
+        HolidayDay(date: "2026-01-02", name: "元旦", kind: "rest"),
+        HolidayDay(date: "2026-01-03", name: "元旦", kind: "rest"),
+        HolidayDay(date: "2026-01-04", name: "元旦", kind: "workday"),
+        HolidayDay(date: "2026-02-14", name: "春节", kind: "workday"),
+        HolidayDay(date: "2026-02-15", name: "春节", kind: "rest"),
+        HolidayDay(date: "2026-02-16", name: "春节", kind: "legal"),
+        HolidayDay(date: "2026-02-17", name: "春节", kind: "legal"),
+        HolidayDay(date: "2026-02-18", name: "春节", kind: "legal"),
+        HolidayDay(date: "2026-02-19", name: "春节", kind: "legal"),
+        HolidayDay(date: "2026-02-20", name: "春节", kind: "rest"),
+        HolidayDay(date: "2026-02-21", name: "春节", kind: "rest"),
+        HolidayDay(date: "2026-02-22", name: "春节", kind: "rest"),
+        HolidayDay(date: "2026-02-23", name: "春节", kind: "rest"),
+        HolidayDay(date: "2026-02-28", name: "春节", kind: "workday"),
+        HolidayDay(date: "2026-04-04", name: "清明", kind: "rest"),
+        HolidayDay(date: "2026-04-05", name: "清明", kind: "legal"),
+        HolidayDay(date: "2026-04-06", name: "清明", kind: "rest"),
+        HolidayDay(date: "2026-05-01", name: "劳动节", kind: "legal"),
+        HolidayDay(date: "2026-05-02", name: "劳动节", kind: "legal"),
+        HolidayDay(date: "2026-05-03", name: "劳动节", kind: "rest"),
+        HolidayDay(date: "2026-05-04", name: "劳动节", kind: "rest"),
+        HolidayDay(date: "2026-05-05", name: "劳动节", kind: "rest"),
+        HolidayDay(date: "2026-05-09", name: "劳动节", kind: "workday"),
+        HolidayDay(date: "2026-06-19", name: "端午", kind: "legal"),
+        HolidayDay(date: "2026-06-20", name: "端午", kind: "rest"),
+        HolidayDay(date: "2026-06-21", name: "端午", kind: "rest"),
+        HolidayDay(date: "2026-09-25", name: "中秋", kind: "legal"),
+        HolidayDay(date: "2026-09-26", name: "中秋", kind: "rest"),
+        HolidayDay(date: "2026-09-27", name: "中秋", kind: "rest"),
+        HolidayDay(date: "2026-09-20", name: "国庆", kind: "workday"),
+        HolidayDay(date: "2026-10-01", name: "国庆", kind: "legal"),
+        HolidayDay(date: "2026-10-02", name: "国庆", kind: "legal"),
+        HolidayDay(date: "2026-10-03", name: "国庆", kind: "legal"),
+        HolidayDay(date: "2026-10-04", name: "国庆", kind: "rest"),
+        HolidayDay(date: "2026-10-05", name: "国庆", kind: "rest"),
+        HolidayDay(date: "2026-10-06", name: "国庆", kind: "rest"),
+        HolidayDay(date: "2026-10-07", name: "国庆", kind: "rest"),
+        HolidayDay(date: "2026-10-10", name: "国庆", kind: "workday"),
+    ]
+
+    static func days(for year: Int) -> [HolidayDay] {
+        year == 2026 ? days2026 : []
+    }
+}
+
+// MARK: - 共享班表（1.2.7.001，第 24 条）
+
+/// 共享班表记录：只含基础日历快照（倒班方式 id、班组、基准日、班组名），
+/// 不含调班/请假/加班，不含工资。对方改了基础轮次才需要更新快照。
+struct ScheduleShare: Codable, Equatable, Identifiable {
+    var id: String
+    var fromUserId: String?
+    var fromUsername: String?
+    var fromDisplayName: String?
+    var toUserId: String?
+    var toUsername: String?
+    var modeId: String?
+    var team: String?
+    var baseDate: String?
+    var teamNames: [String]?
+    var note: String?
+    var createdAt: String?
+    var updatedAt: String?
+
+    var fromName: String { fromDisplayName ?? fromUsername ?? "" }
+}
+
+/// GET /api/v1/me/shares 回包。
+struct SharesResponse: Decodable {
+    var sent: [ScheduleShare]?
+    var received: [ScheduleShare]?
+}
+
+/// 共享班表某月的一天（GET /api/v1/me/shares/:id?year=&month=）。
+struct ShareMonthDay: Codable, Equatable {
+    var date: String
+    var shift: String
 }
 
 /// 本地基础排班计算：只按班组 + 基准日算 8 天一轮（不含调班/请假），
 /// 用于即时显示与查看其他班组；最终以服务端 /me/month 为准。
+/// 1.2.7.001：支持倒班设置（rotation）——5 种四班三倒方式 + 手动模式；
+/// 没传 rotation 时按现有分休式（TeamInfo 各班基准日）算，与旧数据逐日一致。
 enum ScheduleCalculator {
-    static func baseShift(team: String, date: Date) -> String {
-        guard let cycle = TeamInfo.cycles[team],
-              let baseString = TeamInfo.baseDates[team],
-              let base = DateUtil.date(from: baseString) else { return "休息" }
-        let startOfDay = DateUtil.calendar.startOfDay(for: date)
-        let baseDay = DateUtil.calendar.startOfDay(for: base)
-        let diff = DateUtil.calendar.dateComponents([.day], from: baseDay, to: startOfDay).day ?? 0
-        let idx = ((diff % 8) + 8) % 8
-        return cycle[idx]
+    /// 倒班设置下的基础班次（rotation 为 nil 时用现有分休式）。
+    static func baseShift(team: String, date: Date, rotation: RotationSetting? = nil) -> String {
+        guard let rotation else {
+            guard let cycle = TeamInfo.cycles[team],
+                  let baseString = TeamInfo.baseDates[team],
+                  let base = DateUtil.date(from: baseString) else { return "休息" }
+            let startOfDay = DateUtil.calendar.startOfDay(for: date)
+            let baseDay = DateUtil.calendar.startOfDay(for: base)
+            let diff = DateUtil.calendar.dateComponents([.day], from: baseDay, to: startOfDay).day ?? 0
+            let idx = ((diff % 8) + 8) % 8
+            return cycle[idx]
+        }
+        return rotation.baseShift(team: team, date: date)
     }
 
     /// 按 teamHistory 取某天实际班组；没有 history 时用当前班组。
@@ -253,12 +618,13 @@ enum ScheduleCalculator {
     }
 
     /// 本地算某班组某月的基础排班（查看其他班组时用，无调班/请假）。
-    static func localMonth(team: String, year: Int, month: Int) -> MonthSchedule {
+    /// rotation 为 nil 时用现有分休式；传了 rotation 就按方式循环表 / 手动逐日算。
+    static func localMonth(team: String, year: Int, month: Int, rotation: RotationSetting? = nil) -> MonthSchedule {
         var days: [DaySchedule] = []
         let dim = DateUtil.daysInMonth(year: year, month: month)
         for d in 1...dim {
             guard let date = DateUtil.calendar.date(from: DateComponents(year: year, month: month, day: d)) else { continue }
-            let shift = baseShift(team: team, date: date)
+            let shift = baseShift(team: team, date: date, rotation: rotation)
             let parts = shift == "休息" ? [] : ShiftStyle.parts(of: shift)
             days.append(DaySchedule(
                 date: DateUtil.string(from: date),
@@ -382,6 +748,13 @@ struct UserProfile: Codable, Equatable {
     /// 1.2.8 内测渠道：服务端回的当前用户是不是内测人员（老爷默认 true）。
     /// App 靠这个决定设置页显不显示渠道切换（true 显示，false 不显示）。
     var isBetaTester: Bool?
+    /// 1.2.7.001 工资页权限：服务端回的当前用户有没有工资页（默认关；现有账号开）。
+    /// App 靠这个决定显不显示工资 Tab（false 藏掉）；没权限也不显示年休假、不设年休假。
+    var payAccess: Bool?
+    /// 1.2.7.001 倒班设置（方式 + 班组 + 基准日 + 班组名 + 手动逐日班次）。
+    var rotation: RotationSetting?
+    /// 1.2.7.001 日历显示设置（周一首日/法定节假日/农历/上下月）。
+    var displaySettings: CalendarDisplaySettings?
 
     var displayTeam: String { team ?? "B" }
     var isAdmin: Bool { role == "admin" }

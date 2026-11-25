@@ -31,6 +31,24 @@ struct PayView: View {
     private func yearMonth(from index: Int) -> (year: Int, month: Int) { (index / 12, index % 12 + 1) }
 
     var body: some View {
+        // 工资权限兜底（1.2.7.001，第 23 条）：没权限的人工资 Tab 本来就隐藏，
+        // 这里是万一从别处进了工资页的兜底——只显示提示，不崩、不拉数据。
+        if !store.payAccess {
+            VStack(spacing: 12) {
+                Image(systemName: "lock.fill")
+                    .font(.largeTitle)
+                    .foregroundColor(.secondary)
+                Text("没有工资权限")
+                    .font(.headline)
+                Text("你的账号没有查看工资的权限。如需开通，请联系管理员。")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(.systemGroupedBackground))
+        } else {
         VStack(spacing: 16) {
             headerCard
             monthStepper
@@ -80,6 +98,7 @@ struct PayView: View {
         }
         .onChange(of: store.payYearMonth.year) { _ in Task { await store.refreshPay() } }
         .onChange(of: store.payYearMonth.month) { _ in Task { await store.refreshPay() } }
+        } // else: 有工资权限时显示工资页
     }
 
     private var headerCard: some View {

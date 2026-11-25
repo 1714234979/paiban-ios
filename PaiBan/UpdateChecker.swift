@@ -18,6 +18,11 @@ struct VersionInfo: Codable, Equatable, Identifiable {
     var isBetaTester: Bool?
     var hasBeta: Bool?
     var channel: String?
+    /// 节假日数据（1.2.7.001）：服务端节假日缓存的更新时间与已覆盖年份。
+    /// App 启动时比对本地存的 holidaysUpdatedAt，变了就拉取新数据刷新日历。
+    /// holidaysYear 是数组（如 [2026]），因为服务端可能覆盖多年。
+    var holidaysUpdatedAt: String?
+    var holidaysYear: [Int]?
 
     var id: String { latestVersion }
 

@@ -32,6 +32,23 @@ struct CalendarView: View {
     }()
     private var pageRange: Range<Int> { windowStartIndex..<(windowStartIndex + 12) }
 
+    /// 周/月视图切换（1.2.7.001）：默认按设置「日历默认展开整月」；
+    /// 关 = 打开是当周紧凑视图（7 天一行，左右切周）；开 = 打开是整月。
+    @State private var showMonth: Bool = ShiftReminder.defaultExpandMonth
+    /// 当前周的第 1 天（周视图用；周一首日时从周一开始，否则从周日开始）。
+    @State private var weekStart: Date = CalendarView.currentWeekStart()
+    /// 共享班表页（1.2.7.001，第 24 条）。
+    @State private var showShareSchedule = false
+
+    /// 本周的第 1 天（按周一首日设置）。
+    static func currentWeekStart() -> Date {
+        let now = Date()
+        let weekday = DateUtil.calendar.component(.weekday, from: now) - 1 // 0=周日
+        let mondayFirst = CalendarDisplaySettings.loadLocal().mondayFirst
+        let offset = mondayFirst ? (weekday + 6) % 7 : weekday
+        return DateUtil.addingDays(now, -offset)
+    }
+
     static func monthIndex(year: Int, month: Int) -> Int { year * 12 + (month - 1) }
     private func yearMonth(from index: Int) -> (year: Int, month: Int) { (index / 12, index % 12 + 1) }
 
@@ -41,7 +58,18 @@ struct CalendarView: View {
                 headerCard
                 teamSwitcher
                 monthNavigator
-                monthPager
+                // 周/月切换（1.2.7.001）：默认按设置「日历默认展开整月」。
+                Picker("视图", selection: $showMonth) {
+                    Text("周").tag(false)
+                    Text("月").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 160)
+                if showMonth {
+                    monthPager
+                } else {
+                    weekView
+                }
                 summaryLine
                 recordsSection
             }
@@ -49,6 +77,19 @@ struct CalendarView: View {
             .padding(.bottom, 24)
         }
         .background(Color(.systemGroupedBackground))
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    showShareSchedule = true
+                } label: {
+                    Image(systemName: "square.and.arrow.up")
+                }
+                .accessibilityLabel("共享班表")
+            }
+        }
+        .navigationDestination(isPresented: $showShareSchedule) {
+            ShareScheduleView()
+        }
         .task {
             // 1.2.6 冷启动回当天：进页对齐到今天所在的月（不再跟 Store 恢复的月份走）。
             // .task 只在视图第一次创建时跑（冷启动、登录后进主界面），从后台切回来不重跑、
@@ -224,17 +265,23 @@ struct CalendarView: View {
     // MARK: 日历滑页（原生分页，跟着手指走）
 
     /// 周几行（固定在日历上方，不跟月份滑动）：日、六绿色，其余深色，与参考图一致。
+    /// 周一为每周首日时，顺序从周一开始（1.2.7.001）。
     private var weekdayHeader: some View {
         HStack(spacing: 4) {
             ForEach(Array(weekdayTitles.enumerated()), id: \.offset) { i, title in
                 Text(title)
                     .font(.caption)
-                    .foregroundColor(i == 0 || i == 6 ? .green : .primary)
+                    .foregroundColor(weekdayTitles[i] == "日" || weekdayTitles[i] == "六" ? .green : .primary)
                     .frame(maxWidth: .infinity)
             }
         }
     }
-    private let weekdayTitles = ["日", "一", "二", "三", "四", "五", "六"]
+    /// 周几标题：默认日开头；周一首日时从周一开始。
+    private var weekdayTitles: [String] {
+        store.calendarDisplay.mondayFirst
+            ? ["一", "二", "三", "四", "五", "六", "日"]
+            : ["日", "一", "二", "三", "四", "五", "六"]
+    }
 
     private var monthPager: some View {
         VStack(spacing: 4) {
@@ -280,6 +327,80 @@ struct CalendarView: View {
         .padding(12)
         .background(Color(.systemBackground))
         .cornerRadius(16)
+    }
+
+    /// 周视图（1.2.7.001）：当周紧凑视图，7 天一行，左右切周；点某天开详情。
+    /// 默认打开是当周（设置「日历默认展开整月」关时）；切到月视图再回来还停在当周。
+    private var weekView: some View {
+        VStack(spacing: 4) {
+            weekdayHeader
+            HStack(spacing: 4) {
+                ForEach(0..<7, id: \.self) { offset in
+                    let date = DateUtil.addingDays(weekStart, offset)
+                    let dateString = DateUtil.string(from: date)
+                    if let day = store.dayFor(dateString: dateString) {
+                        DayCell(day: day, isToday: dateString == DateUtil.string(from: Date()),
+                                isSelected: selectedDay?.date == dateString)
+                            .frame(maxWidth: .infinity)
+                            .onTapGesture {
+                                selectedDay = day
+                                showDayDetail = true
+                            }
+                    } else {
+                        Color.clear.frame(height: calendarCellHeight)
+                            .frame(maxWidth: .infinity)
+                    }
+                }
+            }
+            HStack {
+                Button {
+                    weekStart = DateUtil.addingDays(weekStart, -7)
+                } label: {
+                    Image(systemName: "chevron.left")
+                        .frame(width: 36, height: 36)
+                        .background(Color(.systemBackground))
+                        .clipShape(Circle())
+                }
+                Spacer()
+                Text(weekTitle)
+                    .font(.subheadline).bold()
+                Spacer()
+                Button {
+                    weekStart = DateUtil.addingDays(weekStart, 7)
+                } label: {
+                    Image(systemName: "chevron.right")
+                        .frame(width: 36, height: 36)
+                        .background(Color(.systemBackground))
+                        .clipShape(Circle())
+                }
+                Button("本周") {
+                    weekStart = Self.currentWeekStart()
+                }
+                .font(.subheadline)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(Color(.systemBackground))
+                .cornerRadius(14)
+            }
+            .padding(.top, 8)
+        }
+        .padding(12)
+        .background(Color(.systemBackground))
+        .cornerRadius(16)
+    }
+
+    /// 周视图标题：本周起止日期，如“11月24日 – 11月30日”。
+    private var weekTitle: String {
+        let start = weekStart
+        let end = DateUtil.addingDays(weekStart, 6)
+        let sm = DateUtil.calendar.component(.month, from: start)
+        let sd = DateUtil.calendar.component(.day, from: start)
+        let em = DateUtil.calendar.component(.month, from: end)
+        let ed = DateUtil.calendar.component(.day, from: end)
+        if sm == em {
+            return "\(sm)月\(sd)日 – \(ed)日"
+        }
+        return "\(sm)月\(sd)日 – \(em)月\(ed)日"
     }
 
     /// 汇总与记录看的月份：直接取当前页那份（缓存或本地算，秒出，不等网络）。
@@ -520,22 +641,28 @@ struct MonthPageView: View {
     }
 
     /// 一格：按身份给不同的点按行为（本月点开详情，上月/下月补的跳到对应月）。
+    /// 「当月显示上下月」关了：上月/下月补的格子留空（占位不变，布局不抖），点不了。
     /// maxWidth 让格子在 HStack 里均分 7 列（原来 LazyVGrid 的 .flexible() 就是这个作用）。
     @ViewBuilder
     private func gridCell(day: DaySchedule, kind: GridDayKind) -> some View {
-        switch kind {
-        case .leading:
-            DayCell(day: day, isToday: false, isSelected: false, isAdjacent: true)
+        if (kind == .leading || kind == .trailing) && !store.calendarDisplay.showAdjacentMonths {
+            Color.clear.frame(height: calendarCellHeight)
                 .frame(maxWidth: .infinity)
-                .onTapGesture { onSelectAdjacentMonth(prevYearMonth.year, prevYearMonth.month) }
-        case .current:
-            DayCell(day: day, isToday: day.date == DateUtil.string(from: Date()), isSelected: isSelected(day.date), isTriplePay: tripleDates.contains(day.date))
-                .frame(maxWidth: .infinity)
-                .onTapGesture { onSelectDay(day) }
-        case .trailing:
-            DayCell(day: day, isToday: false, isSelected: false, isAdjacent: true)
-                .frame(maxWidth: .infinity)
-                .onTapGesture { onSelectAdjacentMonth(nextYearMonth.year, nextYearMonth.month) }
+        } else {
+            switch kind {
+            case .leading:
+                DayCell(day: day, isToday: false, isSelected: false, isAdjacent: true)
+                    .frame(maxWidth: .infinity)
+                    .onTapGesture { onSelectAdjacentMonth(prevYearMonth.year, prevYearMonth.month) }
+            case .current:
+                DayCell(day: day, isToday: day.date == DateUtil.string(from: Date()), isSelected: isSelected(day.date), isTriplePay: tripleDates.contains(day.date))
+                    .frame(maxWidth: .infinity)
+                    .onTapGesture { onSelectDay(day) }
+            case .trailing:
+                DayCell(day: day, isToday: false, isSelected: false, isAdjacent: true)
+                    .frame(maxWidth: .infinity)
+                    .onTapGesture { onSelectAdjacentMonth(nextYearMonth.year, nextYearMonth.month) }
+            }
         }
     }
 
@@ -558,8 +685,10 @@ struct MonthPageView: View {
     }
 
     /// 每月第一周前面补上月末尾几天。
+    /// 周一为每周首日时，前导数按周一偏移（0=周日 → 周一首日 = (weekday+6)%7）。
     private var leadingDays: [DaySchedule] {
-        let count = DateUtil.firstWeekday(year: year, month: month)
+        let firstWeekday = DateUtil.firstWeekday(year: year, month: month)
+        let count = store.calendarDisplay.mondayFirst ? (firstWeekday + 6) % 7 : firstWeekday
         guard count > 0 else { return [] }
         let prev = store.monthFor(year: prevYearMonth.year, month: prevYearMonth.month)
         return Array((prev.days ?? []).suffix(count))
@@ -567,9 +696,10 @@ struct MonthPageView: View {
 
     /// 每月最后一周后面补下月开头几天，补满整周。
     private var trailingDays: [DaySchedule] {
-        let first = DateUtil.firstWeekday(year: year, month: month)
+        let firstWeekday = DateUtil.firstWeekday(year: year, month: month)
+        let leading = store.calendarDisplay.mondayFirst ? (firstWeekday + 6) % 7 : firstWeekday
         let days = DateUtil.daysInMonth(year: year, month: month)
-        let remainder = (first + days) % 7
+        let remainder = (leading + days) % 7
         let count = remainder == 0 ? 0 : 7 - remainder
         guard count > 0 else { return [] }
         let next = store.monthFor(year: nextYearMonth.year, month: nextYearMonth.month)
@@ -591,6 +721,8 @@ struct MonthPageView: View {
 /// 三薪日：同一个 28pt 色块里上下两行——上面班次名、下面半透明白字「三薪」，
 /// 和色块重叠、不另起一行；法定「假/班」保持原样，两套标法不混。
 struct DayCell: View {
+    @EnvironmentObject private var store: AppStore
+
     let day: DaySchedule
     let isToday: Bool
     let isSelected: Bool
@@ -600,6 +732,26 @@ struct DayCell: View {
     var isTriplePay: Bool = false
 
     private let pillHeight: CGFloat = 28
+
+    /// 日历显示设置（1.2.7.001）：法定节假日/农历显隐走这里。
+    private var display: CalendarDisplaySettings { store.calendarDisplay }
+
+    /// 当天的法定/调休标：服务端节假日数据优先（已按官方通知修正），
+    /// 没有服务端数据时用内置 ChineseCalendar 的标。
+    /// kind：legal → 假（放假），rest → 假（放假），workday → 班（调休上班）。
+    private var holidayMark: String? {
+        if let h = store.holiday(for: day.date) {
+            switch h.kind {
+            case "legal", "rest": return "假"
+            case "workday": return "班"
+            default: return nil
+            }
+        }
+        if let mark = extra.mark {
+            return mark == .holiday ? "假" : "班"
+        }
+        return nil
+    }
 
     /// 1.2.2：阳历数字字号按屏宽自适应——iPhone 15 标准版屏宽只有 393pt，
     /// 日期行里左 11pt 假/班列 + 右 8pt 阴历列是写死的，中间只剩约 24pt，
@@ -634,8 +786,9 @@ struct DayCell: View {
             // 1.2.2：左列 12→11、右列 9→8，给中间阳历数字多腾 2pt（窄屏两位数的号不再截成「…」）。
             HStack(alignment: .top, spacing: 1) {
                 VStack(alignment: .leading, spacing: 1) {
-                    if let mark = extra.mark, !isAdjacent {
-                        if mark == .holiday {
+                    // 法定假/班标（1.2.7.001）：显示开关关了就不显示；服务端节假日数据优先。
+                    if display.showHolidays, let mark = holidayMark, !isAdjacent {
+                        if mark == "假" {
                             // 1.1.5：放假的「假」用白色字体——白字得配绿底 pill 才看得见
                             //（原来是绿字无底；只改字色会白底白字看不见，所以底色跟着换成绿，
                             // 位置/大小/布局不动）。请假的「假」见下面，用红色字体。
@@ -671,11 +824,14 @@ struct DayCell: View {
                     .minimumScaleFactor(0.75)
                     .foregroundColor(isAdjacent ? .secondary : .primary)
                     .frame(maxWidth: .infinity, alignment: .center)
+                // 阴历/节气/节日小字（1.2.7.001）：显示农历关了就留空（占位不变，布局不抖）。
                 VStack(spacing: 0) {
-                    ForEach(Array(displayLunarText.enumerated()), id: \.offset) { _, ch in
-                        Text(String(ch))
-                            .font(.system(size: 9))
-                            .foregroundColor(extra.isRedText ? .red : .secondary)
+                    if display.showLunar {
+                        ForEach(Array(displayLunarText.enumerated()), id: \.offset) { _, ch in
+                            Text(String(ch))
+                                .font(.system(size: 9))
+                                .foregroundColor(extra.isRedText ? .red : .secondary)
+                        }
                     }
                 }
                 .frame(width: 8, alignment: .leading)

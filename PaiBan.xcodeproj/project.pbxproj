@@ -28,6 +28,10 @@
 		4F8C8FC85C251146F93D6DD6 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1F64D1EF38CA194CABA82C4 /* SettingsView.swift */; };
 		4E40A5F3BEB30BD8BD06BC61 /* Store.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE48ED7CB11C49CDE38DBC43 /* Store.swift */; };
 		0832B97529F1958263FCFDA2 /* TeamChangeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = ED9CCFE310BC5F5DEE554FD1 /* TeamChangeView.swift */; };
+		4D230A7E5C5344F888F9D667 /* RotationSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94D537F441744DC7B04AF3E7 /* RotationSettingsView.swift */; };
+		7E931F4329424BC6A2242095 /* CalendarDisplaySettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CB9462D345094F28B4290CBE /* CalendarDisplaySettingsView.swift */; };
+		4328AA711F384A3394256F05 /* ShareScheduleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9250B249344A4795A132BC78 /* ShareScheduleView.swift */; };
+		978B2936B77B49CD89985D81 /* ShiftReminder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41C777EE417C4872ADA11544 /* ShiftReminder.swift */; };
 		385075F4922623F648613F5E /* UpdateChecker.swift in Sources */ = {isa = PBXBuildFile; fileRef = FB520360AEB3A336C8749C5E /* UpdateChecker.swift */; };
 
 		79F162A81021FBC665F5A230 /* PaiBanWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 82499500979304680FB830D2 /* PaiBanWidget.swift */; };
@@ -69,6 +73,10 @@
 		D1F64D1EF38CA194CABA82C4 /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		CE48ED7CB11C49CDE38DBC43 /* Store.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Store.swift; sourceTree = "<group>"; };
 		ED9CCFE310BC5F5DEE554FD1 /* TeamChangeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamChangeView.swift; sourceTree = "<group>"; };
+		94D537F441744DC7B04AF3E7 /* RotationSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RotationSettingsView.swift; sourceTree = "<group>"; };
+		CB9462D345094F28B4290CBE /* CalendarDisplaySettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CalendarDisplaySettingsView.swift; sourceTree = "<group>"; };
+		9250B249344A4795A132BC78 /* ShareScheduleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShareScheduleView.swift; sourceTree = "<group>"; };
+		41C777EE417C4872ADA11544 /* ShiftReminder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ShiftReminder.swift; sourceTree = "<group>"; };
 		FB520360AEB3A336C8749C5E /* UpdateChecker.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UpdateChecker.swift; sourceTree = "<group>"; };
 
 		82499500979304680FB830D2 /* PaiBanWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PaiBanWidget.swift; sourceTree = "<group>"; };
@@ -180,6 +188,10 @@
 				D1F64D1EF38CA194CABA82C4 /* SettingsView.swift */,
 				CE48ED7CB11C49CDE38DBC43 /* Store.swift */,
 				ED9CCFE310BC5F5DEE554FD1 /* TeamChangeView.swift */,
+				94D537F441744DC7B04AF3E7 /* RotationSettingsView.swift */,
+				CB9462D345094F28B4290CBE /* CalendarDisplaySettingsView.swift */,
+				9250B249344A4795A132BC78 /* ShareScheduleView.swift */,
+				41C777EE417C4872ADA11544 /* ShiftReminder.swift */,
 				FB520360AEB3A336C8749C5E /* UpdateChecker.swift */,
             B7A1DAC372E4A65B4E59E2E0 /* WidgetSnapshot.swift */,
                         3215243FC9D19D67D035FAFE /* WidgetViews.swift */,
@@ -341,6 +353,10 @@ F181B69F0A58209D8BE07E36 /* WidgetPreviewGallery.swift */,
 				4F8C8FC85C251146F93D6DD6 /* SettingsView.swift in Sources */,
 				4E40A5F3BEB30BD8BD06BC61 /* Store.swift in Sources */,
 				0832B97529F1958263FCFDA2 /* TeamChangeView.swift in Sources */,
+				4D230A7E5C5344F888F9D667 /* RotationSettingsView.swift in Sources */,
+				7E931F4329424BC6A2242095 /* CalendarDisplaySettingsView.swift in Sources */,
+				4328AA711F384A3394256F05 /* ShareScheduleView.swift in Sources */,
+				978B2936B77B49CD89985D81 /* ShiftReminder.swift in Sources */,
 				385075F4922623F648613F5E /* UpdateChecker.swift in Sources */,
 				D18C106D78127960072B7592 /* WidgetSnapshot.swift in Sources */,
                         2FA6B94712D2509303CCBDA9 /* WidgetViews.swift in Sources */,
@@ -359,7 +375,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
                 CODE_SIGN_ENTITLEMENTS = PaiBan/PaiBan.entitlements;
 
                 CODE_SIGN_STYLE = Automatic;
-                CURRENT_PROJECT_VERSION = 14;
+                CURRENT_PROJECT_VERSION = 15;
                 GENERATE_INFOPLIST_FILE = NO;
                 INFOPLIST_FILE = PaiBan/Info.plist;
                 INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -368,7 +384,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
                     "$(inherited)",
                     "@executable_path/Frameworks",
                 );
-                MARKETING_VERSION = 1.2.7;
+                MARKETING_VERSION = 1.2.7.001;
                 PRODUCT_BUNDLE_IDENTIFIER = com.paiban.app;
                 PRODUCT_NAME = "$(TARGET_NAME)";
                 SWIFT_VERSION = 5.0;
@@ -384,7 +400,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
                 CODE_SIGN_ENTITLEMENTS = PaiBan/PaiBan.entitlements;
 
                 CODE_SIGN_STYLE = Automatic;
-                CURRENT_PROJECT_VERSION = 14;
+                CURRENT_PROJECT_VERSION = 15;
                 GENERATE_INFOPLIST_FILE = NO;
                 INFOPLIST_FILE = PaiBan/Info.plist;
                 INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -393,7 +409,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
                     "$(inherited)",
                     "@executable_path/Frameworks",
                 );
-                MARKETING_VERSION = 1.2.7;
+                MARKETING_VERSION = 1.2.7.001;
                 PRODUCT_BUNDLE_IDENTIFIER = com.paiban.app;
                 PRODUCT_NAME = "$(TARGET_NAME)";
                 SWIFT_VERSION = 5.0;
@@ -522,7 +538,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = PaiBanWidget/PaiBanWidget.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 14;
+				CURRENT_PROJECT_VERSION = 15;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PaiBanWidget/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -531,7 +547,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.2.7;
+				MARKETING_VERSION = 1.2.7.001;
 				PRODUCT_BUNDLE_IDENTIFIER = com.paiban.app.PaiBanWidget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
@@ -545,7 +561,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = PaiBanWidget/PaiBanWidget.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 14;
+				CURRENT_PROJECT_VERSION = 15;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PaiBanWidget/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -554,7 +570,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.2.7;
+				MARKETING_VERSION = 1.2.7.001;
 				PRODUCT_BUNDLE_IDENTIFIER = com.paiban.app.PaiBanWidget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;

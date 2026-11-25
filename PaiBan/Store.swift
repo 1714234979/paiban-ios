@@ -62,9 +62,31 @@ final class AppStore: ObservableObject {
 
     // 登录态
     @Published var isLoggedIn = false
-    @Published var user: UserProfile?
+    @Published var user: UserProfile? {
+        didSet {
+            // 服务端 profile 里的显示设置是跨设备同步的源：有就采用（本地也存一份）。
+            if let ds = user?.displaySettings, ds != calendarDisplay {
+                calendarDisplay = ds
+                ds.saveLocal()
+            }
+        }
+    }
     @Published var isStarting = true          // 启动中（正在选路 / 试登录）
     @Published var startupError: String?
+
+    // 1.2.7.001：倒班设置（方式 + 班组 + 基准日 + 班组名 + 手动逐日班次），来自 profile；
+    // 没拿到时按现有分休式（mode 4-3-b、基准日 2026-11-01）算，与旧数据逐日一致。
+    var rotation: RotationSetting { user?.rotation ?? .default }
+    /// 1.2.7.001：工资页权限（服务端回的；字段缺失时默认开，避免老服务端把老爷的工资页藏掉）。
+    var payAccess: Bool { user?.payAccess ?? true }
+    /// 1.2.7.001：日历显示设置（本地 UserDefaults + 服务端 profile 同步）。
+    @Published var calendarDisplay: CalendarDisplaySettings = CalendarDisplaySettings.loadLocal()
+    /// 1.2.7.001：节假日缓存（key 日期，value 节假日一天；服务端拉取，挂了用内置表）。
+    @Published var holidays: [String: HolidayDay] = [:]
+    @Published var holidaysUpdatedAt: String?
+    /// 1.2.7.001：共享班表（我分享的 + 同事分享给我的）。
+    @Published var sharesSent: [ScheduleShare] = []
+    @Published var sharesReceived: [ScheduleShare] = []
 
     // 服务器
     @Published var serverBaseURL: String?
@@ -143,7 +165,7 @@ final class AppStore: ObservableObject {
         if let day = month?.day(for: todayString) { return day }
         let year = DateUtil.yearMonth(of: Date()).year
         if let day = yearDaysCache[String(year)]?.first(where: { $0.date == todayString }) { return day }
-        let base = ScheduleCalculator.baseShift(team: myTeam, date: Date())
+        let base = ScheduleCalculator.baseShift(team: myTeam, date: Date(), rotation: rotation)
         return DaySchedule(date: todayString, team: myTeam, baseShift: base, shift: base,
                            start: nil, end: nil, timeLabel: ShiftStyle.timeRange(for: base),
                            totalHours: base == "休息" ? 0 : 8, isDouble: false,
@@ -479,6 +501,12 @@ final class AppStore: ObservableObject {
             if let pm = me.payMonths { userMonths = pm }
         }
         persistCache()
+        // 1.2.7.001：节假日同步（服务端更新时间变了就拉新数据，只刷新日历标注）。
+        await checkHolidaysUpdate()
+        // 1.2.7.001：排班变了，班次推送提醒重新排（未来 7 天）。
+        if ShiftReminder.isEnabled {
+            await ShiftReminder.reschedule(store: self)
+        }
         // 1.1.4：重装恢复——登录后把账号的完整数据从云端拉回来（后台静默，不拖登录）。
         restoreFullDataFromCloud()
     }
@@ -521,7 +549,7 @@ final class AppStore: ObservableObject {
             if viewTeam == myTeam { prefetchMonth(year: year, month: month) }
             return local
         }
-        let local = ScheduleCalculator.localMonth(team: viewTeam, year: year, month: month)
+        let local = ScheduleCalculator.localMonth(team: viewTeam, year: year, month: month, rotation: rotation)
         localMonthCache[key] = local
         if viewTeam == myTeam { prefetchMonth(year: year, month: month) }
         return local
@@ -866,9 +894,12 @@ final class AppStore: ObservableObject {
     /// 互换调班：替班日我休息、对方上我的班；paybackDate 为空 = 待还班。
     /// 与乐观更新的那几路不同，这里等服务端回话再报成功——连班禁令由服务端最终裁定，
     /// 失败要把服务端的中文错误原样显示出来，不能先报“已保存”再悄悄回滚。
-    func submitSwap(date: String, partner: String, partnerShift: String, note: String?,
+    /// 提交调班（1.2.7.001 第 25 条：只改自己的日历）。
+    /// myShift = 这天要改成的班；note 只是跟谁换的备注，不联动对方；
+    /// paybackDate 为空 = 待还班，给了就同时写还班日（我上 paybackMyShift）。
+    func submitSwap(date: String, myShift: String, note: String?,
                     paybackDate: String?, paybackMyShift: String?) async throws -> SwapSaveResult {
-        let result = try await api.postSwap(date: date, partner: partner, partnerShift: partnerShift,
+        let result = try await api.postSwap(date: date, myShift: myShift,
                                             note: note, paybackDate: paybackDate, paybackMyShift: paybackMyShift)
         // 先把替班日（+还班日）的服务端最新状态直接补进日历缓存，日历立刻变；
         // 整月刷新随后跑一遍，把统计和记录列表也对上。
@@ -1084,7 +1115,7 @@ final class AppStore: ObservableObject {
                 return WidgetSnapshot.Day(date: ds, shift: d.shift, onLeave: d.onLeave == true, leaveType: d.leaveType, isToday: ds == todayString)
             }
             let team = ScheduleCalculator.teamForDate(ds, history: history, fallbackTeam: myTeam)
-            let base = ScheduleCalculator.baseShift(team: team, date: date)
+            let base = ScheduleCalculator.baseShift(team: team, date: date, rotation: rotation)
             return WidgetSnapshot.Day(date: ds, shift: base, onLeave: false, leaveType: nil, isToday: ds == todayString)
         }
         // 本周（周日开头）。
@@ -1124,8 +1155,9 @@ final class AppStore: ObservableObject {
     /// 注意：PUT /me/profile 只回 profile 字段（team / teamHistory / paySettings / onboardingDone / displayName），
     /// 没有 username / id / role；直接整包替换会把账号名丢成 nil（设置页账号显示“—”就是这么来的）。
     /// 这里合并：保留原有身份字段，只更新 profile 字段。
-    func saveProfile(team: String? = nil, paySettings: [String: Any]? = nil, onboardingDone: Bool? = nil, displayName: String? = nil) async throws {
-        let updated = try await api.updateProfile(team: team, paySettings: paySettings, onboardingDone: onboardingDone, displayName: displayName)
+    /// 1.2.7.001：rotation 与 displaySettings 也走同一合并（服务端回了就更新，没回保留本地）。
+    func saveProfile(team: String? = nil, paySettings: [String: Any]? = nil, onboardingDone: Bool? = nil, displayName: String? = nil, rotation: RotationSetting? = nil, displaySettings: CalendarDisplaySettings? = nil) async throws {
+        let updated = try await api.updateProfile(team: team, paySettings: paySettings, onboardingDone: onboardingDone, displayName: displayName, rotation: rotation?.asDict(), displaySettings: displaySettings?.asDict())
         var merged = user ?? updated
         merged.team = updated.team ?? merged.team
         merged.teamHistory = updated.teamHistory ?? merged.teamHistory
@@ -1133,10 +1165,169 @@ final class AppStore: ObservableObject {
         merged.onboardingDone = updated.onboardingDone ?? merged.onboardingDone
         merged.displayName = updated.displayName ?? merged.displayName
         merged.payMonths = updated.payMonths ?? merged.payMonths
+        merged.payAccess = updated.payAccess ?? merged.payAccess
+        merged.rotation = updated.rotation ?? merged.rotation
+        merged.displaySettings = updated.displaySettings ?? merged.displaySettings
+        merged.isBetaTester = updated.isBetaTester ?? merged.isBetaTester
         user = merged
         if let pm = merged.payMonths { userMonths = pm }
+        if let ds = merged.displaySettings {
+            calendarDisplay = ds
+            ds.saveLocal()
+        }
         if let team { viewTeam = team }
         persistCache()
+    }
+
+    /// 保存倒班设置（方式 / 班次 / 基准日 / 班组名 / 手动逐日班次）。
+    /// 切方式时调用方先弹提示（切换后现有调班/请假记录按新循环重算，只重算基础轮次、不删记录）。
+    func saveRotation(_ newRotation: RotationSetting) async throws {
+        try await saveProfile(team: newRotation.team, rotation: newRotation)
+        // 基础轮次变了：本地月缓存失效，重新拉当月（服务端按新方式算）。
+        monthCache.removeAll()
+        await refreshMonth()
+    }
+
+    /// 保存日历显示设置（本地 + 服务端同步）。
+    func saveDisplaySettings(_ settings: CalendarDisplaySettings) async throws {
+        calendarDisplay = settings
+        settings.saveLocal()
+        do {
+            try await saveProfile(displaySettings: settings)
+        } catch {
+            // 服务端同步失败不报错：本地设置已生效，下次启动再同步。
+            AppLogger.shared.log("显示设置服务端同步失败：\(error.localizedDescription)", tag: "Store")
+        }
+    }
+
+    /// 手动模式：设某天的班次（shift = 日班/中班/早班/休息）。
+    func setManualShift(date: String, shift: String) async throws {
+        var r = rotation
+        let code: String
+        switch shift {
+        case "日班": code = "D"
+        case "中班": code = "M"
+        case "早班": code = "N"
+        default: code = "-"
+        }
+        r.manualShifts[date] = code
+        try await saveRotation(r)
+    }
+
+    /// 按日期取某天（周视图用）：先找月缓存（含调班/请假），没有就本地按轮次算一条。
+    func dayFor(dateString: String) -> DaySchedule? {
+        guard let date = DateUtil.date(from: dateString) else { return nil }
+        let ym = DateUtil.yearMonth(of: date)
+        let month = monthFor(year: ym.year, month: ym.month)
+        if let day = (month.days ?? []).first(where: { $0.date == dateString }) { return day }
+        // 本地算：基础轮次 + 当天日期。
+        let base = rotation.baseShift(team: viewTeam, date: date)
+        return DaySchedule(date: dateString, team: viewTeam, baseShift: base, shift: base,
+                           weekday: DateUtil.calendar.component(.weekday, from: date) - 1)
+    }
+
+    /// 某天的实际班次（基础轮次 + 调班/请假后的结果；双班返回第一个班次）。
+    /// 推送提醒用：只关心当天第一个班次几点开始。
+    func shiftForDate(_ dateString: String, team: String, rotation: RotationSetting) -> String {
+        guard let date = DateUtil.date(from: dateString) else { return "休息" }
+        let ym = DateUtil.yearMonth(of: date)
+        let month = monthFor(year: ym.year, month: ym.month)
+        if let day = (month.days ?? []).first(where: { $0.date == dateString }) {
+            let shift = day.shift
+            if shift == "早中班" { return "早班" }
+            if shift == "日中班" { return "日班" }
+            return shift
+        }
+        return rotation.baseShift(team: team, date: date)
+    }
+
+    // MARK: 节假日（1.2.7.001，第 23 条）
+
+    /// 拉取某年节假日（服务端缓存；失败时用内置表兜底，不报错）。
+    /// 返回该年的节假日字典（key 日期）。
+    func refreshHolidays(year: Int) async -> [String: HolidayDay] {
+        do {
+            let resp = try await api.fetchHolidays(year: year)
+            var map: [String: HolidayDay] = [:]
+            for d in resp.days ?? [] { map[d.date] = d }
+            if !map.isEmpty {
+                holidays.merge(map) { _, new in new }
+                if let updatedAt = resp.updatedAt { holidaysUpdatedAt = updatedAt }
+                return map
+            }
+        } catch {
+            AppLogger.shared.log("节假日拉取失败，用内置表：\(error.localizedDescription)", tag: "Store")
+        }
+        // 兜底：内置表（2026 年已按官方通知修正；其他年份暂无内置数据）。
+        var map: [String: HolidayDay] = [:]
+        for d in BuiltinHolidays.days(for: year) { map[d.date] = d }
+        holidays.merge(map) { _, new in new }
+        return map
+    }
+
+    /// 启动时检查节假日更新：服务端 version 回的 holidaysUpdatedAt 变了就拉取新数据并刷新日历。
+    /// 只刷新节假日标注，不动排班数据。失败静默（用内置表顶着）。
+    func checkHolidaysUpdate() async {
+        do {
+            let info = try await api.fetchVersion(channel: UpdateChecker.channel)
+            if let serverUpdatedAt = info.holidaysUpdatedAt,
+               serverUpdatedAt != holidaysUpdatedAt {
+                holidaysUpdatedAt = serverUpdatedAt
+                let year = info.holidaysYear?.first ?? DateUtil.yearMonth(of: Date()).year
+                _ = await refreshHolidays(year: year)
+                return
+            }
+            // 服务端没给时间戳（老版本）或没变：只保证当年数据在本地。
+            let year = DateUtil.yearMonth(of: Date()).year
+            if holidays[DateUtil.string(from: Date())] == nil {
+                _ = await refreshHolidays(year: year)
+            }
+        } catch { return }
+        // 12 月进入 1 月时自动拉下一年。
+        if DateUtil.yearMonth(of: Date()).month == 12 {
+            _ = await refreshHolidays(year: DateUtil.yearMonth(of: Date()).year + 1)
+        }
+    }
+
+    /// 某天的节假日（服务端数据优先，没有用内置表）。
+    func holiday(for dateString: String) -> HolidayDay? {
+        if let h = holidays[dateString] { return h }
+        if let year = Int(dateString.prefix(4)) {
+            return BuiltinHolidays.days(for: year).first { $0.date == dateString }
+        }
+        return nil
+    }
+
+    // MARK: 共享班表（1.2.7.001，第 24 条）
+
+    /// 拉取共享列表（我分享的 + 同事分享给我的）。
+    func fetchShares() async {
+        do {
+            let resp = try await api.fetchShares()
+            sharesSent = resp.sent ?? []
+            sharesReceived = resp.received ?? []
+        } catch {
+            AppLogger.shared.log("共享列表拉取失败：\(error.localizedDescription)", tag: "Store")
+        }
+    }
+
+    /// 分享我的基础日历给同事（对方账号名/手机号 + 可选备注）。
+    func shareSchedule(toUsername: String, note: String? = nil) async throws -> ScheduleShare {
+        let share = try await api.shareSchedule(toUsername: toUsername, note: note)
+        await fetchShares()
+        return share
+    }
+
+    /// 撤销我发出的分享（或拒收发给我的）。
+    func deleteShare(id: String) async throws {
+        try await api.deleteShare(id: id)
+        await fetchShares()
+    }
+
+    /// 分享人基础轮次变了，更新快照。
+    func refreshShare(id: String) async throws {
+        _ = try await api.refreshShare(id: id)
+        await fetchShares()
     }
 
     /// 设置页显示的名字：优先显示名（displayName，自己改的），没有显示名显示账号名；
