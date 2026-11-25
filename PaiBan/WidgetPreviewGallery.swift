@@ -50,8 +50,11 @@ struct WidgetPreviewGallery: View {
                 .frame(width: 152, height: 68)
                 .background(Color.black)
                 .cornerRadius(16)
-        default: // "today" — 临时改成开屏 v4 预览（1.2.7.010 验开屏用，验完改回 TodayWidgetView）
-            SplashView()
+        default: // "today"
+            TodayWidgetView(entry: entry, snapshot: snapshot)
+                .frame(width: 184, height: 184)
+                .background(Color(.systemBackground))
+                .cornerRadius(22)
         }
     }
 
