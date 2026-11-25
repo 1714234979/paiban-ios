@@ -19,6 +19,7 @@
 		C0F2D98AA36475FAF8B00B02 /* LoginView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 67277E5E8698EBDC85AB18EE /* LoginView.swift */; };
 		235BCEDEA970EB15AE73517C /* MainTabView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 805B111C41F0170E440FDF6A /* MainTabView.swift */; };
 		6C93CA9A4B573BD0B0553AC3 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B83D5E372F06A2F0C59E32A /* Models.swift */; };
+		49D6C35AA8DA6ECFAA7F8F87 /* ManualScheduleView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D44CF05092E072DADD543A54 /* ManualScheduleView.swift */; };
 		6D1032CA382E7837CC13DB0F /* OnboardingView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D5A28CEED4F5BC2141D939C /* OnboardingView.swift */; };
 		C4CCD80650FF49319C794FFA /* PayCalc.swift in Sources */ = {isa = PBXBuildFile; fileRef = 835B8CA20F8F4A969A2ABE96 /* PayCalc.swift */; };
 		522E7C624BF34A00895C3B18 /* AppLogger.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22056AF6FDF54CB79CD8EA82 /* AppLogger.swift */; };
@@ -64,6 +65,7 @@
 		67277E5E8698EBDC85AB18EE /* LoginView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LoginView.swift; sourceTree = "<group>"; };
 		805B111C41F0170E440FDF6A /* MainTabView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainTabView.swift; sourceTree = "<group>"; };
 		6B83D5E372F06A2F0C59E32A /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		D44CF05092E072DADD543A54 /* ManualScheduleView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ManualScheduleView.swift; sourceTree = "<group>"; };
 		2D5A28CEED4F5BC2141D939C /* OnboardingView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OnboardingView.swift; sourceTree = "<group>"; };
 		835B8CA20F8F4A969A2ABE96 /* PayCalc.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PayCalc.swift; sourceTree = "<group>"; };
 		22056AF6FDF54CB79CD8EA82 /* AppLogger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppLogger.swift; sourceTree = "<group>"; };
@@ -179,6 +181,7 @@
 				67277E5E8698EBDC85AB18EE /* LoginView.swift */,
 				805B111C41F0170E440FDF6A /* MainTabView.swift */,
 				6B83D5E372F06A2F0C59E32A /* Models.swift */,
+				D44CF05092E072DADD543A54 /* ManualScheduleView.swift */,
 				2D5A28CEED4F5BC2141D939C /* OnboardingView.swift */,
 				835B8CA20F8F4A969A2ABE96 /* PayCalc.swift */,
 				22056AF6FDF54CB79CD8EA82 /* AppLogger.swift */,
@@ -344,6 +347,7 @@ F181B69F0A58209D8BE07E36 /* WidgetPreviewGallery.swift */,
 				C0F2D98AA36475FAF8B00B02 /* LoginView.swift in Sources */,
 				235BCEDEA970EB15AE73517C /* MainTabView.swift in Sources */,
 				6C93CA9A4B573BD0B0553AC3 /* Models.swift in Sources */,
+				49D6C35AA8DA6ECFAA7F8F87 /* ManualScheduleView.swift in Sources */,
 				6D1032CA382E7837CC13DB0F /* OnboardingView.swift in Sources */,
 				C4CCD80650FF49319C794FFA /* PayCalc.swift in Sources */,
 				522E7C624BF34A00895C3B18 /* AppLogger.swift in Sources */,
