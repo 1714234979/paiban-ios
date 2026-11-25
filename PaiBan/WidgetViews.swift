@@ -39,64 +39,85 @@ struct LockPlaceholderView: View {
 }
 
 /// 小：今日班次。
-/// 上：日期 + 班组；中：班次大字（班次色）+ 时间段；下：倒计时（系统 timer 文本、实时走）+ 已挣/预估。
+/// 1.2.7.008 重排：顶行日期一行不换行 + 班组小 pill，左右对齐；
+/// 三段（顶行 / 班次大字 / 底行）上下撑满，不再全挤上半截、下面留 40% 空白；
+/// 休息/请假日底行补明日班次（时间段一起给），上班日底行还是倒计时 + 钱。
 struct TodayWidgetView: View {
     let entry: Entry
     let snapshot: WidgetSnapshot
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(dateLine)
                     .font(.caption)
                     .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                 Spacer()
                 Text("\(snapshot.team)班")
-                    .font(.caption)
+                    .font(.caption2).bold()
                     .foregroundColor(.secondary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(Color.secondary.opacity(0.12))
+                    .cornerRadius(6)
             }
+            Spacer()
             if let today = snapshot.today {
                 if today.onLeave {
                     Text("请假")
-                        .font(.title2).bold()
+                        .font(.title).bold()
                         .foregroundColor(.secondary)
                     Text(today.leaveType ?? "请假")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                        .padding(.top, 2)
                 } else if today.shift == "休息" {
                     Text("休息")
-                        .font(.title2).bold()
+                        .font(.title).bold()
                         .foregroundColor(ShiftStyle.color(for: "休息"))
                     Text("今日休息")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                        .padding(.top, 2)
                 } else {
                     Text(today.shift)
-                        .font(.title2).bold()
+                        .font(.title).bold()
                         .foregroundColor(shiftPillColor(today.shift))
                     Text(ShiftStyle.timeRange(for: today.shift))
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
-                    // 倒计时（系统 timer 文本，iOS 自己实时走；小组件不让每秒刷新，工资数靠时间线 15 分钟一跳）。
-                    if let range = countdownRange {
-                        Text(timerInterval: range, countsDown: true)
-                            .font(.headline)
-                            .monospacedDigit()
-                    }
-                    if let money = moneyLine {
-                        Text(money)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                            .lineLimit(1)
-                            .minimumScaleFactor(0.7)
-                    }
+                        .padding(.top, 2)
                 }
             }
-            Spacer(minLength: 0)
+            Spacer()
+            if let today = snapshot.today, !today.onLeave, today.shift != "休息" {
+                // 上班日：倒计时（系统 timer 文本，iOS 自己实时走；小组件不让每秒刷新，工资数靠时间线 15 分钟一跳）。
+                if let range = countdownRange {
+                    Text(timerInterval: range, countsDown: true)
+                        .font(.headline)
+                        .monospacedDigit()
+                }
+                if let money = moneyLine {
+                    Text(money)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                        .padding(.top, 2)
+                }
+            } else if let tomorrow = tomorrowSummary {
+                Text(tomorrow)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
         }
-        .padding(12)
+        .padding(14)
         .widgetURL(URL(string: "paiban://schedule"))
     }
 
@@ -105,6 +126,24 @@ struct TodayWidgetView: View {
         let ym = DateUtil.yearMonth(of: entry.date)
         let day = DateUtil.calendar.component(.day, from: entry.date)
         return "\(ym.month)月\(day)日 \(DateUtil.weekdayCN(of: entry.date))"
+    }
+
+    /// 明日一句话（月历里找，找不到就本周里找）：「明日日班 08:00–16:00」/
+    /// 「明日休息」/「明日请假（年假）」，找不到明天就 nil。
+    private var tomorrowSummary: String? {
+        guard let t = tomorrowDay else { return nil }
+        if t.onLeave { return "明日请假" + (t.leaveType.map { "（\($0)）" } ?? "") }
+        if t.shift == "休息" { return "明日休息" }
+        return "明日\(t.shift) \(ShiftStyle.timeRange(for: t.shift))"
+    }
+
+    /// 明天那天（月历里找，找不到就本周里找；周六的明天不在本周里）。
+    private var tomorrowDay: WidgetSnapshot.Day? {
+        let cal = DateUtil.calendar
+        guard let tomorrow = cal.date(byAdding: .day, value: 1, to: entry.date) else { return nil }
+        let ds = DateUtil.string(from: tomorrow)
+        if let d = snapshot.monthDays.first(where: { $0.date == ds }) { return d }
+        return snapshot.week.first(where: { $0.date == ds })
     }
 
     /// 倒计时区间：上班前 → 到上班；上班中 → 到下班；两班之间 → 到下一班；下班后/休息 → 没有。
@@ -131,7 +170,9 @@ struct TodayWidgetView: View {
     }
 }
 
-/// 中①：本周排班——七天班次色块，当天高亮，底下一行今天的班次与时间。
+/// 中①：本周排班——七天班次色块，当天高亮，底下一行今天的班次与时间，再一行本周统计。
+/// 1.2.7.008：日期下加农历小字（和 App 日历一个算法），今天那列加深高亮；
+/// 底下两行（今天·明日 + 本周统计）把中号底部那截空白顶起来，不再留一大截白。
 struct WeekWidgetView: View {
     let entry: Entry
     let snapshot: WidgetSnapshot
@@ -148,13 +189,16 @@ struct WeekWidgetView: View {
             }
             HStack(spacing: 2) {
                 ForEach(snapshot.week, id: \.date) { day in
-                    VStack(spacing: 3) {
+                    VStack(spacing: 2) {
                         Text(weekdayShort(day.date))
                             .font(.caption2)
                             .foregroundColor(day.isToday ? .primary : .secondary)
                         Text(dayNumber(day.date))
                             .font(.subheadline)
                             .bold(day.isToday)
+                        Text(lunarText(day.date))
+                            .font(.system(size: 8))
+                            .foregroundColor(lunarIsRed(day.date) ? .red : .secondary)
                         Text(shiftPillText(day.shift))
                             .font(.caption2).bold()
                             .foregroundColor(day.shift == "休息" ? ShiftStyle.color(for: "休息") : .white)
@@ -164,10 +208,11 @@ struct WeekWidgetView: View {
                             .cornerRadius(5)
                     }
                     .padding(.vertical, 2)
-                    .background(day.isToday ? Color.primary.opacity(0.06) : Color.clear)
+                    .background(day.isToday ? Color.primary.opacity(0.10) : Color.clear)
                     .cornerRadius(6)
                 }
             }
+            Spacer(minLength: 0)
             if let today = snapshot.today {
                 Text(todayLine(today))
                     .font(.caption)
@@ -175,7 +220,11 @@ struct WeekWidgetView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
-            Spacer(minLength: 0)
+            Text(weekSummaryLine)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
         .padding(12)
         .widgetURL(URL(string: "paiban://schedule"))
@@ -188,15 +237,38 @@ struct WeekWidgetView: View {
         return "\(ym.month)月\(day)日 \(DateUtil.weekdayCN(of: entry.date))"
     }
 
-    /// 「今天 · 日班 08:00–16:00」/「今天 · 休息」/「今天 · 请假（年假）」。
+    /// 「今天 · 日班 08:00–16:00」/「今天 · 休息 · 明日日班 08:00–16:00」/「今天 · 请假（年假）」。
     private func todayLine(_ today: WidgetSnapshot.Day) -> String {
         if today.onLeave {
             return "今天 · 请假" + (today.leaveType.map { "（\($0)）" } ?? "")
         }
         if today.shift == "休息" {
+            if let t = tomorrowSummary { return "今天 · 休息 · \(t)" }
             return "今天 · 休息"
         }
         return "今天 · \(today.shift) \(ShiftStyle.timeRange(for: today.shift))"
+    }
+
+    /// 本周班次统计：「本周：休息 2 · 早班 2 · 日班 2 · 中班 1」（按首次出现顺序）。
+    private var weekSummaryLine: String {
+        "本周：" + shiftSummary(days: snapshot.week)
+    }
+
+    /// 明日一句话：「明日日班 08:00–16:00」/「明日休息」/「明日请假（年假）」，找不到明天就 nil。
+    private var tomorrowSummary: String? {
+        guard let t = tomorrowDay else { return nil }
+        if t.onLeave { return "明日请假" + (t.leaveType.map { "（\($0)）" } ?? "") }
+        if t.shift == "休息" { return "明日休息" }
+        return "明日\(t.shift) \(ShiftStyle.timeRange(for: t.shift))"
+    }
+
+    /// 明天那天（月历里找，找不到就本周里找；周六的明天不在本周里）。
+    private var tomorrowDay: WidgetSnapshot.Day? {
+        let cal = DateUtil.calendar
+        guard let tomorrow = cal.date(byAdding: .day, value: 1, to: entry.date) else { return nil }
+        let ds = DateUtil.string(from: tomorrow)
+        if let d = snapshot.monthDays.first(where: { $0.date == ds }) { return d }
+        return snapshot.week.first(where: { $0.date == ds })
     }
 }
 
@@ -257,7 +329,9 @@ struct PayWidgetView: View {
     }
 }
 
-/// 大：本月日历——整月网格 + 班次色块 + 当天高亮，底下一行今天的班次。
+/// 大：本月日历——整月网格 + 班次色块 + 当天高亮，底下一行今天的班次，再一行本月统计。
+/// 1.2.7.008：日期旁加农历小字（和 App 日历一个算法），今天那格加深高亮；
+/// 底下加本月统计一行，月份看着更满、层次更多。
 struct MonthWidgetView: View {
     let entry: Entry
     let snapshot: WidgetSnapshot
@@ -287,8 +361,14 @@ struct MonthWidgetView: View {
                 ForEach(cells, id: \.id) { cell in
                     if let day = cell.day {
                         VStack(spacing: 1) {
-                            Text(dayNumber(day.date))
-                                .font(.system(size: 12))
+                            HStack(alignment: .firstTextBaseline, spacing: 2) {
+                                Text(dayNumber(day.date))
+                                    .font(.system(size: 12))
+                                    .bold(day.isToday)
+                                Text(lunarText(day.date))
+                                    .font(.system(size: 8))
+                                    .foregroundColor(lunarIsRed(day.date) ? .red : .secondary)
+                            }
                             Text(shiftPillText(day.shift))
                                 .font(.system(size: 9)).bold()
                                 .foregroundColor(day.shift == "休息" ? ShiftStyle.color(for: "休息") : .white)
@@ -298,7 +378,7 @@ struct MonthWidgetView: View {
                                 .cornerRadius(4)
                         }
                         .padding(2)
-                        .background(day.isToday ? Color.green.opacity(0.12) : Color.clear)
+                        .background(day.isToday ? Color.green.opacity(0.18) : Color.clear)
                         .cornerRadius(6)
                         .overlay(
                             RoundedRectangle(cornerRadius: 6)
@@ -317,6 +397,11 @@ struct MonthWidgetView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
+            Text(monthSummaryLine)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
         .padding(12)
         .widgetURL(URL(string: "paiban://schedule"))
@@ -327,6 +412,11 @@ struct MonthWidgetView: View {
         let ym = DateUtil.yearMonth(of: entry.date)
         let day = DateUtil.calendar.component(.day, from: entry.date)
         return "\(ym.month)月\(day)日 \(DateUtil.weekdayCN(of: entry.date))"
+    }
+
+    /// 本月班次统计：「本月：日班 8 · 早班 8 · 中班 7 · 休息 7」（按首次出现顺序）。
+    private var monthSummaryLine: String {
+        "本月：" + shiftSummary(days: snapshot.monthDays)
     }
 
     /// 网格格子：月初空白 + 本月每天，不足 5 行补到 35 格、不足 6 行补到 42 格（行数固定，不跳）。
@@ -506,4 +596,29 @@ private func weekdayShort(_ dateString: String) -> String {
 private func dayNumber(_ dateString: String) -> String {
     guard let date = DateUtil.date(from: dateString) else { return "" }
     return String(DateUtil.calendar.component(.day, from: date))
+}
+
+/// 农历小字（和 App 日历一个算法）：节气/节日名、月初一月份名，其余阴历日（初二、廿九）。
+/// 1.2.7.008：周/月小组件日期旁的小字就用它。
+private func lunarText(_ dateString: String) -> String {
+    ChineseCalendar.info(for: dateString).lunarText
+}
+
+/// 农历小字是不是红字（节气或节日）。
+private func lunarIsRed(_ dateString: String) -> Bool {
+    ChineseCalendar.info(for: dateString).isRedText
+}
+
+/// 一组天的班次统计：「休息 2 · 早班 2 · 日班 2 · 中班 1」（按首次出现顺序）。
+/// 1.2.7.008：周/月小组件底下的统计行就用它。
+private func shiftSummary(days: [WidgetSnapshot.Day]) -> String {
+    var counts: [(name: String, count: Int)] = []
+    for day in days {
+        if let i = counts.firstIndex(where: { $0.name == day.shift }) {
+            counts[i].count += 1
+        } else {
+            counts.append((day.shift, 1))
+        }
+    }
+    return counts.map { "\($0.name) \($0.count)" }.joined(separator: " · ")
 }

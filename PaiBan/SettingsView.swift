@@ -1004,6 +1004,11 @@ struct ChangelogView: View {
     var body: some View {
         Form {
             Section {
+                changelog(version: "1.2.7.008（内测）", items: [
+                    "小组件 UI 优化：小号重新排版（日期一行不换行、班组改小 pill，三段上下撑满，休息日底行补明日班次）；本周加农历小字、今天加深高亮，底下加今天·明日和本周统计；本月日期旁加农历小字、今天加深高亮，底下加本月统计；设置页小组件删「怎么添加」「数据状态」两节，空位放真实小组件截图的介绍图（今日/本周/双周/月），「取数实测」留着",
+                ])
+            }
+            Section {
                 changelog(version: "1.2.7.007（内测）", items: [
                     "修设置页切版本渠道点不动：List 行里并排两个 plain 按钮会被行手势吞掉点击，改 borderless 才点得动；确认框不等拉网，点下立刻弹，目标渠道版本号到了再补进文案",
                 ])
@@ -1501,10 +1506,6 @@ struct WidgetsView: View {
     @State private var syncMessage: String?
     @State private var syncOK = false
 
-    /// App Group 容器拿得到吗（重签描述文件带 group.com.paiban.app 才行）。
-    private var appGroupOK: Bool { WidgetSnapshotStore.containerURL() != nil }
-    /// App 写进共享区的快照（有它，小组件直接读，不用联网）。
-    private var snapshot: WidgetSnapshot? { WidgetSnapshotStore.load() }
     /// 本机设备号（App 登录时登记到用户名下，小组件凭它拉数据）。
     private var deviceId: String? { UIDevice.current.identifierForVendor?.uuidString }
 
@@ -1513,17 +1514,6 @@ struct WidgetsView: View {
         f.dateFormat = "M月d日 HH:mm"
         return f
     }()
-
-    /// 数据状态一行话：通没通、快照写没写、写的是几点。
-    private var statusText: String {
-        if !appGroupOK {
-            return "App Group 不通（重签的描述文件里没有 group.com.paiban.app），快照写不进——小组件走设备直连：打开 App 登录一次就自动登记本机，不用填密钥。App Group 的权限留着，以后上架商店正规签名时用它。"
-        }
-        if let snap = snapshot {
-            return "快照已写（\(Self.timeFormatter.string(from: snap.savedAt))），小组件直接读快照。"
-        }
-        return "App Group 通，但快照还没写：回排班页同步一次数据就自动写。"
-    }
 
     var body: some View {
         Form {
@@ -1535,32 +1525,15 @@ struct WidgetsView: View {
                 widgetRow(name: "今日已挣", size: "锁屏", desc: "锁屏上看今天已挣多少钱、还剩多久下班")
             }
 
-            Section("怎么添加") {
-                Text("主屏：长按桌面 → 点左上角 ＋ → 添加小组件 → 搜「排班空间」→ 选尺寸添加。")
-                Text("锁屏：长按锁屏 → 自定 → 锁屏 → 添加小组件 → 搜「排班空间」→ 选「今日已挣」。")
-                Text("不用填密钥：打开 App 登录一次，本机就自动登记好了，小组件直接显示数据。")
-            }
-
-            Section("数据状态") {
-                Text(statusText)
-                HStack {
-                    Text("App Group")
-                    Spacer()
-                    Text(appGroupOK ? "通" : "不通")
-                        .foregroundColor(appGroupOK ? .green : .red)
-                }
-                HStack {
-                    Text("快照")
-                    Spacer()
-                    Text(snapshot == nil ? "没写" : "已写")
-                        .foregroundColor(snapshot == nil ? .secondary : .green)
-                }
-                HStack {
-                    Text("本机设备")
-                    Spacer()
-                    Text(deviceId == nil ? "拿不到设备号" : "已登记")
-                        .foregroundColor(deviceId == nil ? .red : .green)
-                }
+            // 小组件介绍（1.2.7.008）：「怎么添加」「数据状态」两节按老爷说的删了，
+            // 空出来的位置放介绍图。标题和说明用 SwiftUI 文字写，不 baked 进图。
+            // 图是老爷手机上真实小组件的截图裁出来的（老爷定的：一定要和真实小组件一样），
+            // 四角已磨成圆角透明底，直接用；AI 生成那 4 张不用（数据对不上），没放进 App。
+            Section("小组件介绍") {
+                introCard(image: "WidgetIntroToday", title: "今日排班", desc: "小号：今天的班次、倒计时与今日预估工资", imageWidth: 200)
+                introCard(image: "WidgetIntroWeek", title: "本周排班", desc: "中号：本周七天班次，当天高亮")
+                introCard(image: "WidgetIntroTwoWeeks", title: "双周排班", desc: "中号：两周 14 天的班次一眼看完，当天高亮")
+                introCard(image: "WidgetIntroMonth", title: "本月日历", desc: "大号：整月网格与班次色块，当天高亮")
             }
 
             Section("取数实测") {
@@ -1580,6 +1553,27 @@ struct WidgetsView: View {
         }
         .navigationTitle("小组件")
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    /// 介绍图卡片：图 + SwiftUI 标题/说明。方图（今日）居中限宽 200，宽图（双周）通栏。
+    private func introCard(image: String, title: String, desc: String, imageWidth: CGFloat? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Spacer(minLength: 0)
+                Image(image)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(maxWidth: imageWidth ?? .infinity)
+                    .cornerRadius(12)
+                Spacer(minLength: 0)
+            }
+            Text(title)
+                .font(.headline)
+            Text(desc)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .padding(.vertical, 4)
     }
 
     private func widgetRow(name: String, size: String, desc: String) -> some View {
