@@ -438,11 +438,17 @@ struct SettingsView: View {
     /// 1.2.7.003：拉取时被点的按钮转圈 + 变灰，让人知道已经点上了。
     /// 1.2.7.007：.plain 改 .borderless——List 行里并排两个 plain 按钮，
     /// 行手势把点击吞掉，两个都点不动；borderless 才各自接得到点击。
+    /// 1.2.7.009：选中态和 guard 按装的版本定，不按存的更新偏好定。
+    /// 存的偏好只在确认切换时才写，从不跟装的版本同步；一旦脱节，「正式版」
+    /// 会被误标成已选中，点它 guard 直接 return，看着就是点不动——003/007
+    /// 修的点按 mechanics 本来就没坏，真正拦住点击的是这个 guard。
+    /// 装着内测版（四段号）时内测版是已选中、正式版一定点得动；装着正式版时反过来。
     private func channelButton(title: String, channel: String) -> some View {
-        let selected = UpdateChecker.channel == channel
+        let installedChannel = UpdateChecker.installedChannel
+        let selected = installedChannel == channel
         let fetching = isFetchingChannelVersion && !selected
         return Button {
-            guard channel != UpdateChecker.channel, !isFetchingChannelVersion else { return }
+            guard channel != installedChannel, !isFetchingChannelVersion else { return }
             Task { await askChannelSwitch(to: channel) }
         } label: {
             HStack(spacing: 6) {
@@ -1003,6 +1009,11 @@ struct UsageGuideView: View {
 struct ChangelogView: View {
     var body: some View {
         Form {
+            Section {
+                changelog(version: "1.2.7.009（内测）", items: [
+                    "修设置页切版本渠道点不动（真根因）：选中态和点按判断之前按存的更新偏好定，偏好和装的版本一脱节，「正式版」就被误标成已选中，点它直接被拦掉；现在按装的版本号定，装着内测版点「正式版」一定进确认框，确认后按正式版查更新、正式版 1.2.7 会推出来让装",
+                ])
+            }
             Section {
                 changelog(version: "1.2.7.008（内测）", items: [
                     "小组件 UI 优化：小号重新排版（日期一行不换行、班组改小 pill，三段上下撑满，休息日底行补明日班次）；本周加农历小字、今天加深高亮，底下加今天·明日和本周统计；本月日期旁加农历小字、今天加深高亮，底下加本月统计；设置页小组件删「怎么添加」「数据状态」两节，空位放真实小组件截图的介绍图（今日/本周/双周/月），「取数实测」留着",

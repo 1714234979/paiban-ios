@@ -91,6 +91,15 @@ enum UpdateChecker {
         set { UserDefaults.standard.set(newValue, forKey: channelKey) }
     }
 
+    /// 当前装的版本属于哪个渠道（按版本号定）：四段号或带 beta 后缀是内测版，三段号是正式版。
+    /// 和存的更新偏好（channel）是两回事——偏好只决定查更新走哪条线；装的版本才是现在用的那条线。
+    /// 1.2.7.009 根因：偏好只在确认切换时才写，从不跟装的版本同步；一旦脱节（重装、手动装包），
+    /// 设置页就把错的那个标成已选中，点它时 guard 直接 return，看着就是点不动。
+    /// 选中态和 guard 必须按装的版本定，偏好是什么都不影响点不点得动。
+    static var installedChannel: String {
+        channelLabel(for: currentVersion) == "内测版" ? "beta" : "stable"
+    }
+
     /// "1.2.3" → [1, 2, 3]；每段只取开头的数字（"1.0-beta" 的段算 0 号后缀、按 1 算）。
     /// 内测版号带后缀（"1.2.8-beta.1"）：基础段 [1,2,8] + 预发布后缀 "beta.1" 分开比，
     /// 这样 1.2.8-beta.1 不会比同号正式版 1.2.8 更新（beta.1 < beta.2 同号内比后缀数字）。
