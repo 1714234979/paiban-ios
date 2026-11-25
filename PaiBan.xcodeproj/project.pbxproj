@@ -47,6 +47,7 @@
 		FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = F181B69F0A58209D8BE07E36 /* WidgetPreviewGallery.swift */; };
 		06272431BA5C904F147E23BF /* Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C48BCB889F6644C77FA3C9E /* Config.swift */; };
 		EA71640AB84E2509596F332E /* WidgetServerClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68CB61D5FAB155944D08BB4D /* WidgetServerClient.swift */; };
+		90534913C43648B59ADE6EAB /* WidgetServerClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68CB61D5FAB155944D08BB4D /* WidgetServerClient.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -360,6 +361,7 @@ F181B69F0A58209D8BE07E36 /* WidgetPreviewGallery.swift */,
 				385075F4922623F648613F5E /* UpdateChecker.swift in Sources */,
 				D18C106D78127960072B7592 /* WidgetSnapshot.swift in Sources */,
                         2FA6B94712D2509303CCBDA9 /* WidgetViews.swift in Sources */,
+				90534913C43648B59ADE6EAB /* WidgetServerClient.swift in Sources */,
 FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
 );
             runOnlyForDeploymentPostprocessing = 0;
