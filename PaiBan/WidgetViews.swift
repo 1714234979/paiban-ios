@@ -42,6 +42,8 @@ struct LockPlaceholderView: View {
 /// 1.2.7.008 重排：顶行日期一行不换行 + 班组小 pill，左右对齐；
 /// 三段（顶行 / 班次大字 / 底行）上下撑满，不再全挤上半截、下面留 40% 空白；
 /// 休息/请假日底行补明日班次（时间段一起给），上班日底行还是倒计时 + 钱。
+/// 1.2.7.010：小号宽度有限，顶行日期和底行明日班次在 008 里都被 … 截断——
+/// 两行字号都收到 caption2、外边距 14 → 12、pill 收紧，日期和明日班次完整显示，不截断。
 struct TodayWidgetView: View {
     let entry: Entry
     let snapshot: WidgetSnapshot
@@ -50,16 +52,16 @@ struct TodayWidgetView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
                 Text(dateLine)
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    .minimumScaleFactor(0.7)
                 Spacer()
                 Text("\(snapshot.team)班")
                     .font(.caption2).bold()
                     .foregroundColor(.secondary)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 2)
                     .background(Color.secondary.opacity(0.12))
                     .cornerRadius(6)
             }
@@ -111,13 +113,13 @@ struct TodayWidgetView: View {
                 }
             } else if let tomorrow = tomorrowSummary {
                 Text(tomorrow)
-                    .font(.caption)
+                    .font(.caption2)
                     .foregroundColor(.secondary)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.8)
+                    .minimumScaleFactor(0.7)
             }
         }
-        .padding(14)
+        .padding(12)
         .widgetURL(URL(string: "paiban://schedule"))
     }
 
