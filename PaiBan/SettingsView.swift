@@ -294,7 +294,8 @@ struct SettingsView: View {
             }
             Button(pendingChannel == "beta" ? "切换到内测版" : "切换到正式版") {
                 if let channel = pendingChannel {
-                    Task {
+                    // 1.2.7.003 修：Task 标 @MainActor，确认后改 @State 才会在主线程刷新。
+                    Task { @MainActor in
                         isCheckingUpdate = true
                         defer { isCheckingUpdate = false }
                         await store.checkForUpdateAfterChannelSwitch(channel: channel)
@@ -433,25 +434,39 @@ struct SettingsView: View {
     // MARK: 检查更新
 
     /// 渠道按钮（1.2.7.002）：当前渠道高亮；点另一个渠道先拉目标渠道最新版、再弹确认。
+    /// 1.2.7.003：拉取时被点的按钮转圈 + 变灰，让人知道已经点上了。
     private func channelButton(title: String, channel: String) -> some View {
         let selected = UpdateChecker.channel == channel
+        let fetching = isFetchingChannelVersion && !selected
         return Button {
             guard channel != UpdateChecker.channel, !isFetchingChannelVersion else { return }
             Task { await askChannelSwitch(to: channel) }
         } label: {
-            Text(title)
-                .font(.subheadline)
-                .bold(selected)
-                .foregroundColor(selected ? .primary : .secondary)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 8)
-                .background(selected ? Color(.systemBackground) : Color.clear)
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+            HStack(spacing: 6) {
+                if fetching {
+                    ProgressView()
+                        .controlSize(.small)
+                }
+                Text(title)
+                    .font(.subheadline)
+                    .bold(selected)
+                    .foregroundColor(selected ? .primary : .secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 8)
+            .background(selected ? Color(.systemBackground) : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.plain)
+        .disabled(isFetchingChannelVersion)
+        .opacity(fetching ? 0.7 : 1.0)
     }
 
     /// 点另一个渠道：先拉目标渠道最新版，再弹确认框。
+    /// @MainActor（1.2.7.003 修）：拉网回来后改 @State（pendingChannel、确认框）
+    /// 必须在主线程。之前这个函数不是 @MainActor，Task 在后台线程续跑，
+    /// @State 改了界面也不刷新，确认框永远弹不出来，看起来就是「点不动」。
+    @MainActor
     private func askChannelSwitch(to channel: String) async {
         isFetchingChannelVersion = true
         defer { isFetchingChannelVersion = false }
@@ -471,6 +486,9 @@ struct SettingsView: View {
         return "当前版本：\(currentLabel) \(current)\n目标渠道最新版：\(targetLabel) \(targetVersion)\n\n切过去后，App 按\(targetLabel)查更新；\(targetLabel)有新版就推给你装，不装也可以继续用现在的版本。"
     }
 
+    /// 手动查更新（1.2.7.003 修：同 askChannelSwitch，@MainActor，
+    /// 否则 isCheckingUpdate 的转圈在后台线程改了也不显示）。
+    @MainActor
     private func manualUpdateCheck() async {
         isCheckingUpdate = true
         defer { isCheckingUpdate = false }
@@ -971,6 +989,11 @@ struct UsageGuideView: View {
 struct ChangelogView: View {
     var body: some View {
         Form {
+            Section {
+                changelog(version: "1.2.7.003（内测）", items: [
+                    "修设置页切版本渠道点不动：点「正式版」/「内测版」没反应的问题修好了，现在点另一个渠道会先弹确认框；点完按钮会转圈，不会再让人以为没点上",
+                ])
+            }
             Section {
                 changelog(version: "1.2.7.002（内测）", items: [
                     "倒班方式全部推出：五班三倒、四班两倒（12 小时）、三班二倒（12 小时）、两班倒、巴拿马 2-2-3、杜邦、三班三倒（带替休）、五班四倒、四班 6 小时工作制；选了方式 + 班次，日历和工资班次统计跟着算",
