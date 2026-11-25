@@ -5,14 +5,15 @@ import WidgetKit
 
 // MARK: - 入口
 
-/// 小组件时间线（1.2.7.004）：数据来源按顺序——
+/// 小组件时间线（1.2.7.005）：数据来源按顺序——
 /// ① App Group 快照（App 写、小组件读；通的机器上最快、离线也能看；
 ///    权限与代码原样保留，后期上架商店正规签名时用它）；
-/// ② 设备直连（App 登录时登记过 identifierForVendor，小组件带
-///    X-Device-Id 拉；不用填密钥）；
-/// ③ 密钥直拉（手动后备：小组件配置里填了 API 密钥才拉）；
-/// ④ 缓存的服务端数据（离线时显示上次的数，不回占位）；
-/// ⑤ 都没有 → 占位「打开 App 登录后显示」。
+/// ② 新鲜缓存（15 分钟内，立刻出数，不等网络）；
+/// ③ 设备直连（App 登录时登记过 identifierForVendor，小组件带
+///    X-Device-Id 拉；不用填密钥；直连云，失败再试 NAS 隧道，10 秒封顶）；
+/// ④ 密钥直拉（手动后备：小组件配置里填了 API 密钥才拉）；
+/// ⑤ 旧缓存的服务端数据（离线时显示上次的数，不回占位）；
+/// ⑥ 都没有 → 占位「打开 App 登录后显示」。
 /// 今日实时状态（倒计时/已挣）按 entry 时刻现算；工资是拉回/快照里算好的数。
 struct Provider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> Entry {
@@ -37,10 +38,14 @@ struct Provider: AppIntentTimelineProvider {
         return Timeline(entries: entries, policy: .atEnd)
     }
 
-    /// 当前快照：App Group 优先；没有就设备直连（不用密钥）；再没有就
-    /// 密钥直拉（手动后备）；拉不到用缓存。
+    /// 当前快照：App Group 优先；新鲜缓存（15 分钟内）其次，立刻出数不等网络；
+    /// 缓存过期才拉网（设备直连，不用密钥）；再没有就密钥直拉（手动后备）；拉不到用旧缓存。
+    /// 1.2.7.005：原来拉网在关键路径上可拖几十秒（探活 20 秒 + 五条请求），WidgetKit
+    /// 预算一到就杀扩展、改显示系统占位（灰条 + 色块），五个组件全是同一条链路、
+    /// 一起中招。现在新鲜缓存先出数，拉网只在缓存过期时才走、且 10 秒封顶。
     private func currentSnapshot(apiKey: String?) async -> WidgetSnapshot? {
         if let snap = WidgetSnapshotStore.load() { return snap }
+        if let fresh = WidgetServerClient.loadFreshCached() { return fresh }
         if let deviceId = UIDevice.current.identifierForVendor?.uuidString,
            let fetched = await WidgetServerClient.fetchSnapshot(deviceId: deviceId) {
             return fetched

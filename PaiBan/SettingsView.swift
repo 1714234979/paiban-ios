@@ -990,6 +990,11 @@ struct ChangelogView: View {
     var body: some View {
         Form {
             Section {
+                changelog(version: "1.2.7.005（内测）", items: [
+                    "修小组件只显示颜色、不显示文字：时间线拉数那步太慢、系统直接给了占位，现在 15 分钟内的缓存先出数，拉网只在缓存过期时才走、10 秒封顶，五个小组件都跟着好",
+                ])
+            }
+            Section {
                 changelog(version: "1.2.7.004（内测）", items: [
                     "小组件不用填密钥了：打开 App 登录一次，本机就自动登记好，小组件直接从服务器拉数据；App Group 的权限留着，以后上架商店正规签名时用它",
                 ])

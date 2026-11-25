@@ -39,28 +39,72 @@ enum WidgetServerClient {
         await fetchSnapshot(authHeader: ("X-Device-Id", deviceId), now: now)
     }
 
+    /// 新鲜缓存（15 分钟内）：时间线关键路径上先用它立刻出数，不等网络；
+    /// 缓存过期时才拉网，拉回后刷新缓存供下一次用。班次一天内不变，
+    /// 15 分钟的旧数对小组件足够新鲜。
+    static func loadFreshCached(maxAge: TimeInterval = 900) -> WidgetSnapshot? {
+        guard let data = UserDefaults.standard.data(forKey: cachedSnapshotKey),
+              let at = UserDefaults.standard.object(forKey: cachedAtKey) as? Date,
+              Date().timeIntervalSince(at) < maxAge,
+              let snap = try? JSONDecoder().decode(WidgetSnapshot.self, from: data) else { return nil }
+        return snap
+    }
+
     /// 本月 + 本周 + 本月工资，一次拉齐，拼成 WidgetSnapshot。
     /// 失败返回 nil（调用方回落缓存/占位）。
+    /// 1.2.7.005：不走 ServerConfig.resolve() 的 /health 探活——探活在小组件时间线
+    /// 关键路径上最慢可拖 20 秒（云 10 秒 + 隧道 10 秒），WidgetKit 预算一到就杀
+    /// 扩展、改显示系统占位（灰条 + 色块）。改成直连云拉数，失败再试 NAS 隧道；
+    /// 单个地址 10 秒封顶，超时即回落缓存。
     private static func fetchSnapshot(authHeader: (name: String, value: String), now: Date) async -> WidgetSnapshot? {
-        // resolve() 回的是 (baseURL, kind) 元组；小组件只要地址，云优先、云不通走 NAS 隧道。
-        guard let resolved = await ServerConfig.resolve() else { return nil }
-        let base = resolved.baseURL
-        let cal = DateUtil.calendar
-        let ym = DateUtil.yearMonth(of: now)
-        let weekday = cal.component(.weekday, from: now) // 1=周日
-        let weekStart = DateUtil.addingDays(cal.startOfDay(for: now), -(weekday - 1))
-        let weekStartStr = DateUtil.string(from: weekStart)
-        do {
-            async let me = get(path: "/api/v1/me", base: base, authHeader: authHeader, as: UserProfile.self)
-            async let range = get(path: "/api/v1/me/range", base: base, authHeader: authHeader, query: ["start": weekStartStr, "days": "7"], as: RangeResponse.self)
-            async let month = get(path: "/api/v1/me/month", base: base, authHeader: authHeader, query: ["year": "\(ym.year)", "month": "\(ym.month)"], as: MonthSchedule.self)
-            async let pay = get(path: "/api/v1/me/pay", base: base, authHeader: authHeader, query: ["year": "\(ym.year)", "month": "\(ym.month)"], as: PayMonth.self)
-            async let config = getConfig(base: base, authHeader: authHeader)
-            let (profile, rangeResp, monthResp, payResp, rates) = try await (me, range, month, pay, config)
-            guard let snap = buildSnapshot(profile: profile, range: rangeResp, month: monthResp, pay: payResp, rates: rates, now: now) else { return nil }
-            saveCached(snap)
-            return snap
-        } catch {
+        var bases = [ServerConfig.cloudBaseURL]
+        if let tunnel = ServerConfig.nasTunnelBaseURL, !tunnel.isEmpty {
+            bases.append(tunnel)
+        }
+        for base in bases {
+            if let snap = await fetchFrom(base: base, authHeader: authHeader, now: now) {
+                return snap
+            }
+        }
+        return nil
+    }
+
+    /// 单个地址拉一次，10 秒封顶（超时即 nil，调用方回落缓存）。
+    private static func fetchFrom(base: String, authHeader: (name: String, value: String), now: Date) async -> WidgetSnapshot? {
+        await withTimeout(seconds: 10) {
+            let cal = DateUtil.calendar
+            let ym = DateUtil.yearMonth(of: now)
+            let weekday = cal.component(.weekday, from: now) // 1=周日
+            let weekStart = DateUtil.addingDays(cal.startOfDay(for: now), -(weekday - 1))
+            let weekStartStr = DateUtil.string(from: weekStart)
+            do {
+                async let me = get(path: "/api/v1/me", base: base, authHeader: authHeader, as: UserProfile.self)
+                async let range = get(path: "/api/v1/me/range", base: base, authHeader: authHeader, query: ["start": weekStartStr, "days": "7"], as: RangeResponse.self)
+                async let month = get(path: "/api/v1/me/month", base: base, authHeader: authHeader, query: ["year": "\(ym.year)", "month": "\(ym.month)"], as: MonthSchedule.self)
+                async let pay = get(path: "/api/v1/me/pay", base: base, authHeader: authHeader, query: ["year": "\(ym.year)", "month": "\(ym.month)"], as: PayMonth.self)
+                async let config = getConfig(base: base, authHeader: authHeader)
+                let (profile, rangeResp, monthResp, payResp, rates) = try await (me, range, month, pay, config)
+                guard let snap = buildSnapshot(profile: profile, range: rangeResp, month: monthResp, pay: payResp, rates: rates, now: now) else { return nil }
+                saveCached(snap)
+                return snap
+            } catch {
+                return nil
+            }
+        }
+    }
+
+    /// 给一次异步活加时限：活先完成就取它的结果，时限先到就回 nil 并取消活。
+    private static func withTimeout<T>(seconds: TimeInterval, _ work: @escaping () async -> T?) async -> T? {
+        await withTaskGroup(of: T?.self) { group in
+            group.addTask { await work() }
+            group.addTask {
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                return nil
+            }
+            for await result in group {
+                group.cancelAll()
+                return result
+            }
             return nil
         }
     }
