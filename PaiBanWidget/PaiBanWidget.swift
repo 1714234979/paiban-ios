@@ -1,57 +1,61 @@
-import AppIntents
 import SwiftUI
 import UIKit
 import WidgetKit
 
 // MARK: - 入口
 
-/// 小组件时间线（1.2.7.005）：数据来源按顺序——
+/// 小组件时间线（1.2.7.006 重写）：密钥彻底拿掉，不再有任何配置项，
+/// 小组件不再向用户要密钥。数据来源按顺序——
 /// ① App Group 快照（App 写、小组件读；通的机器上最快、离线也能看；
 ///    权限与代码原样保留，后期上架商店正规签名时用它）；
 /// ② 新鲜缓存（15 分钟内，立刻出数，不等网络）；
 /// ③ 设备直连（App 登录时登记过 identifierForVendor，小组件带
-///    X-Device-Id 拉；不用填密钥；直连云，失败再试 NAS 隧道，10 秒封顶）；
-/// ④ 密钥直拉（手动后备：小组件配置里填了 API 密钥才拉）；
-/// ⑤ 旧缓存的服务端数据（离线时显示上次的数，不回占位）；
-/// ⑥ 都没有 → 占位「打开 App 登录后显示」。
+///    X-Device-Id 拉；云和 NAS 隧道并行抢答、先到先得，总共 8 秒封顶；
+///    班次是核心必须拿到，工资和配置拉不到也不拖垮整个快照）；
+/// ④ 旧缓存的服务端数据（离线时显示上次的数，不回占位）；
+/// ⑤ 都没有 → 占位「打开 App 登录后显示」。
 /// 今日实时状态（倒计时/已挣）按 entry 时刻现算；工资是拉回/快照里算好的数。
-struct Provider: AppIntentTimelineProvider {
+///
+/// 之前为什么坏（1.2.7.004/005 的教训，别再犯）：
+/// 设备拉取串行云 10 秒 + 隧道 10 秒，失败后密钥再拉 20 秒，两段加起来
+/// 40 秒，WidgetKit 预算一到就杀扩展、显示占位——密钥本身没错，是根本
+/// 轮不到它跑完，所以「填了密钥也不能用」。这次云和隧道并行抢答，
+/// 单次取数 8 秒封顶，密钥那条路整个删掉，不再让用户填。
+struct Provider: TimelineProvider {
     func placeholder(in context: Context) -> Entry {
         Entry(date: Date(), snapshot: .preview, live: .rest)
     }
 
-    func snapshot(for configuration: WidgetAPIKeyIntent, in context: Context) async -> Entry {
-        makeEntry(date: Date(), snapshot: await currentSnapshot(apiKey: configuration.apiKey))
+    func getSnapshot(in context: Context, completion: @escaping (Entry) -> Void) {
+        Task {
+            completion(makeEntry(date: Date(), snapshot: await currentSnapshot()))
+        }
     }
 
-    func timeline(for configuration: WidgetAPIKeyIntent, in context: Context) async -> Timeline<Entry> {
-        let now = Date()
-        let snapshot = await currentSnapshot(apiKey: configuration.apiKey)
-        var dates: [Date] = [now]
-        if let today = snapshot?.today {
-            // 班中每 15 分钟 + 上下班边界各一次（工资数靠这些点刷新；倒计时是系统 timer 文本、实时走）。
-            dates += PayCalc.todayRefreshDates(shift: today.shift, day: DateUtil.calendar.startOfDay(for: now), now: now)
+    func getTimeline(in context: Context, completion: @escaping (Timeline<Entry>) -> Void) {
+        Task {
+            let now = Date()
+            let snapshot = await currentSnapshot()
+            var dates: [Date] = [now]
+            if let today = snapshot?.today {
+                // 班中每 15 分钟 + 上下班边界各一次（工资数靠这些点刷新；倒计时是系统 timer 文本、实时走）。
+                dates += PayCalc.todayRefreshDates(shift: today.shift, day: DateUtil.calendar.startOfDay(for: now), now: now)
+            }
+            // 明天 00:00 再来一条（跨天换班次）。
+            dates.append(DateUtil.calendar.startOfDay(for: DateUtil.addingDays(now, 1)))
+            let entries = dates.map { makeEntry(date: $0, snapshot: snapshot) }
+            completion(Timeline(entries: entries, policy: .atEnd))
         }
-        // 明天 00:00 再来一条（跨天换班次）。
-        dates.append(DateUtil.calendar.startOfDay(for: DateUtil.addingDays(now, 1)))
-        let entries = dates.map { makeEntry(date: $0, snapshot: snapshot) }
-        return Timeline(entries: entries, policy: .atEnd)
     }
 
     /// 当前快照：App Group 优先；新鲜缓存（15 分钟内）其次，立刻出数不等网络；
-    /// 缓存过期才拉网（设备直连，不用密钥）；再没有就密钥直拉（手动后备）；拉不到用旧缓存。
-    /// 1.2.7.005：原来拉网在关键路径上可拖几十秒（探活 20 秒 + 五条请求），WidgetKit
-    /// 预算一到就杀扩展、改显示系统占位（灰条 + 色块），五个组件全是同一条链路、
-    /// 一起中招。现在新鲜缓存先出数，拉网只在缓存过期时才走、且 10 秒封顶。
-    private func currentSnapshot(apiKey: String?) async -> WidgetSnapshot? {
+    /// 缓存过期才拉网（设备直连，不用密钥，云和隧道并行抢答 8 秒封顶）；
+    /// 拉不到用旧缓存。
+    private func currentSnapshot() async -> WidgetSnapshot? {
         if let snap = WidgetSnapshotStore.load() { return snap }
         if let fresh = WidgetServerClient.loadFreshCached() { return fresh }
         if let deviceId = UIDevice.current.identifierForVendor?.uuidString,
            let fetched = await WidgetServerClient.fetchSnapshot(deviceId: deviceId) {
-            return fetched
-        }
-        let key = (apiKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        if !key.isEmpty, let fetched = await WidgetServerClient.fetchSnapshot(apiKey: key) {
             return fetched
         }
         return WidgetServerClient.loadCached()
@@ -86,7 +90,7 @@ struct PaiBanWidgetBundle: WidgetBundle {
 /// 小：今日班次 + 倒计时 + 今日预估工资。点进排班页。
 struct TodayWidget: Widget {
     var body: some WidgetConfiguration {
-        AppIntentConfiguration(kind: "TodayWidget", intent: WidgetAPIKeyIntent.self, provider: Provider()) { entry in
+        StaticConfiguration(kind: "TodayWidget", provider: Provider()) { entry in
             if let snap = entry.snapshot {
                 TodayWidgetView(entry: entry, snapshot: snap)
             } else {
@@ -102,7 +106,7 @@ struct TodayWidget: Widget {
 /// 中①：本周排班。点进排班页。
 struct WeekWidget: Widget {
     var body: some WidgetConfiguration {
-        AppIntentConfiguration(kind: "WeekWidget", intent: WidgetAPIKeyIntent.self, provider: Provider()) { entry in
+        StaticConfiguration(kind: "WeekWidget", provider: Provider()) { entry in
             if let snap = entry.snapshot {
                 WeekWidgetView(entry: entry, snapshot: snap)
             } else {
@@ -118,7 +122,7 @@ struct WeekWidget: Widget {
 /// 中②：本月工资。点进工资页。
 struct PayWidget: Widget {
     var body: some WidgetConfiguration {
-        AppIntentConfiguration(kind: "PayWidget", intent: WidgetAPIKeyIntent.self, provider: Provider()) { entry in
+        StaticConfiguration(kind: "PayWidget", provider: Provider()) { entry in
             if let snap = entry.snapshot {
                 PayWidgetView(entry: entry, snapshot: snap)
             } else {
@@ -134,7 +138,7 @@ struct PayWidget: Widget {
 /// 大：本月日历。点进排班页。
 struct MonthWidget: Widget {
     var body: some WidgetConfiguration {
-        AppIntentConfiguration(kind: "MonthWidget", intent: WidgetAPIKeyIntent.self, provider: Provider()) { entry in
+        StaticConfiguration(kind: "MonthWidget", provider: Provider()) { entry in
             if let snap = entry.snapshot {
                 MonthWidgetView(entry: entry, snapshot: snap)
             } else {
@@ -150,7 +154,7 @@ struct MonthWidget: Widget {
 /// 锁屏：圆形 + 矩形。点进排班页。
 struct LockWidget: Widget {
     var body: some WidgetConfiguration {
-        AppIntentConfiguration(kind: "LockWidget", intent: WidgetAPIKeyIntent.self, provider: Provider()) { entry in
+        StaticConfiguration(kind: "LockWidget", provider: Provider()) { entry in
             if let snap = entry.snapshot {
                 LockWidgetView(entry: entry, snapshot: snap)
             } else {

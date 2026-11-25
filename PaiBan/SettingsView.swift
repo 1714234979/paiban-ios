@@ -1,6 +1,7 @@
 import SwiftUI
 import UIKit
 import StoreKit
+import WidgetKit
 
 /// 设置页（1.1.3：二级菜单）：主界面只留入口行——账号与安全、工资设置、关于
 /// 各开一个二级页面改细项；换班、管理后台、服务器、更新、反馈留在主界面。
@@ -62,7 +63,7 @@ struct SettingsView: View {
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("桌面&锁屏小组件")
-                        Text("五个小组件 · 怎么添加 · 数据状态 · 小组件密钥")
+                        Text("五个小组件 · 怎么添加 · 数据状态 · 取数实测")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -990,6 +991,11 @@ struct ChangelogView: View {
     var body: some View {
         Form {
             Section {
+                changelog(version: "1.2.7.006（内测）", items: [
+                    "小组件重写：密钥彻底拿掉，不用再填；取数只走设备直连，云和隧道并行抢答、8 秒封顶，工资拉不到也不拖垮班次；装好打开 App 就刷新，不用删掉重加；设置页小组件里加了「立即同步」，当场测取数通不通",
+                ])
+            }
+            Section {
                 changelog(version: "1.2.7.005（内测）", items: [
                     "修小组件只显示颜色、不显示文字：时间线拉数那步太慢、系统直接给了占位，现在 15 分钟内的缓存先出数，拉网只在缓存过期时才走、10 秒封顶，五个小组件都跟着好",
                 ])
@@ -1467,23 +1473,22 @@ struct ChangePasswordSheet: View {
     }
 }
 
-/// 小组件页（1.2.7.004）：五个小组件、怎么添加、数据状态、小组件密钥。
-/// 老爷反馈：App 里没地方看小组件、也没地方管——这个页就是答案。
-/// 数据状态一眼能看到问题在哪：App Group 不通（重签描述文件没带
-/// group.com.paiban.app）时，快照写不进，小组件走设备直连（打开 App
-/// 登录一次自动登记本机，不用填密钥）；密钥只是备用。
+/// 小组件页（1.2.7.006 重写）：五个小组件、怎么添加、真实取数状态。
+/// 密钥彻底拿掉：不再生成、不再显示、不再让用户填。小组件只走设备直连。
+/// 数据状态是实测的：点「立即同步小组件」就当场跑一次设备直连拉数，
+/// 成功失败、当场显示，不再只让老爷去桌面看。
 struct WidgetsView: View {
     @EnvironmentObject private var store: AppStore
-    @State private var apiKey: String?
-    @State private var generating = false
-    @State private var copied = false
-    @State private var message: String?
-    @State private var isError = false
+    @State private var syncing = false
+    @State private var syncMessage: String?
+    @State private var syncOK = false
 
     /// App Group 容器拿得到吗（重签描述文件带 group.com.paiban.app 才行）。
     private var appGroupOK: Bool { WidgetSnapshotStore.containerURL() != nil }
     /// App 写进共享区的快照（有它，小组件直接读，不用联网）。
     private var snapshot: WidgetSnapshot? { WidgetSnapshotStore.load() }
+    /// 本机设备号（App 登录时登记到用户名下，小组件凭它拉数据）。
+    private var deviceId: String? { UIDevice.current.identifierForVendor?.uuidString }
 
     private static let timeFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -1494,7 +1499,7 @@ struct WidgetsView: View {
     /// 数据状态一行话：通没通、快照写没写、写的是几点。
     private var statusText: String {
         if !appGroupOK {
-            return "App Group 不通（重签的描述文件里没有 group.com.paiban.app），快照写不进——小组件已走设备直连：打开 App 登录一次就自动登记本机，不用填密钥。App Group 的权限留着，以后上架商店正规签名时用它。"
+            return "App Group 不通（重签的描述文件里没有 group.com.paiban.app），快照写不进——小组件走设备直连：打开 App 登录一次就自动登记本机，不用填密钥。App Group 的权限留着，以后上架商店正规签名时用它。"
         }
         if let snap = snapshot {
             return "快照已写（\(Self.timeFormatter.string(from: snap.savedAt))），小组件直接读快照。"
@@ -1532,30 +1537,26 @@ struct WidgetsView: View {
                     Text(snapshot == nil ? "没写" : "已写")
                         .foregroundColor(snapshot == nil ? .secondary : .green)
                 }
+                HStack {
+                    Text("本机设备")
+                    Spacer()
+                    Text(deviceId == nil ? "拿不到设备号" : "已登记")
+                        .foregroundColor(deviceId == nil ? .red : .green)
+                }
             }
 
-            Section("小组件密钥（备用）") {
-                Text("平时不用填：小组件走设备直连，打开 App 登录一次就自动登记本机。这个密钥只是备用——设备直连万一拉不到数据时，填进小组件配置也能显示。密钥只显示这一次；重生成后旧密钥立即失效，小组件要重填。")
+            Section("取数实测") {
+                Text("点一下当场跑一次小组件用的那条取数（设备直连拉今天、本周、本月和工资），成功失败当场显示；成功了还会顺手写一份快照、通知小组件刷新，不用去桌面删掉重加。")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                if let key = apiKey {
-                    Text(key)
-                        .font(.caption)
-                        .textSelection(.enabled)
-                    Button(copied ? "已复制" : "复制密钥") {
-                        UIPasteboard.general.string = key
-                        copied = true
-                    }
-                } else {
-                    Button(generating ? "生成中…" : "生成小组件密钥") {
-                        Task { await generate() }
-                    }
-                    .disabled(generating)
+                Button(syncing ? "同步中…" : "立即同步小组件") {
+                    Task { await syncNow() }
                 }
-                if let message {
-                    Text(message)
+                .disabled(syncing)
+                if let syncMessage {
+                    Text(syncMessage)
                         .font(.caption)
-                        .foregroundColor(isError ? .red : .secondary)
+                        .foregroundColor(syncOK ? .green : .red)
                 }
             }
         }
@@ -1578,19 +1579,24 @@ struct WidgetsView: View {
         }
     }
 
-    private func generate() async {
-        message = nil
-        isError = false
-        copied = false
-        generating = true
-        defer { generating = false }
-        do {
-            let resp = try await store.api.regenerateApiKey()
-            apiKey = resp.apiKey
-            message = "密钥已生成，只显示这一次，复制后填进小组件配置。"
-        } catch {
-            message = (error as? APIError)?.message ?? error.localizedDescription
-            isError = true
+    /// 立即同步：当场跑一次小组件用的设备直连拉数，成功就写一份快照到
+    /// App Group（通的机器上小组件直接读）、通知小组件刷新；失败就直说原因。
+    private func syncNow() async {
+        syncMessage = nil
+        syncOK = false
+        syncing = true
+        defer { syncing = false }
+        guard let deviceId else {
+            syncMessage = "拿不到本机设备号，取数没法跑。"
+            return
+        }
+        if let snap = await WidgetServerClient.fetchSnapshot(deviceId: deviceId) {
+            WidgetSnapshotStore.save(snap)
+            WidgetCenter.shared.reloadAllTimelines()
+            syncOK = true
+            syncMessage = "取数成功（\(Self.timeFormatter.string(from: Date()))），小组件已刷新，去桌面看。"
+        } else {
+            syncMessage = "取数失败：云和隧道都没拉到数，检查网络后重试；还不行就把这页截给我。"
         }
     }
 }

@@ -1,16 +1,15 @@
 import Foundation
 
-/// 小组件服务端直拉（1.2.8）：App Group 不通时的后备路。
-/// 根因：重签（全能签）用的描述文件常不带 group.com.paiban.app，
-/// App 写不进快照（WidgetSnapshotStore.save 静默返回）、小组件也读不到，
-/// 只显示「打开 App 登录后显示」占位——登录了也没用，锁屏那个也一样。
-/// 改走服务端：小组件直接从服务器拉数据，不管怎么重签都能通。
-/// 两条认领路（1.2.7.004）：① 设备直连（默认）——App 登录时把
-/// identifierForVendor 登记到用户名下，小组件带 X-Device-Id 拉，不用填密钥；
-/// ② 密钥直拉（手动后备）——小组件配置里填一次 API 密钥（App 设置页「小组件」里复制）。
-/// 拉回的数据缓存到小组件自己的 UserDefaults，离线时显示上次的数，不回占位。
+/// 小组件服务端直拉（1.2.7.006 重写）：只走设备直连，密钥那条路整个删掉。
+/// 链路：App Group 快照 → 15 分钟内新鲜缓存 → 设备直连（X-Device-Id）→ 旧缓存。
 /// App Group 还通的机器上，优先用快照（快、离线也能看），这条路只是兜底；
 /// App Group 代码与权限原样保留，后期上架商店（正规签名）时再用它。
+///
+/// 之前为什么坏（别再犯）：设备拉取串行云 10 秒 + 隧道 10 秒，失败后密钥
+/// 再拉 20 秒，两段加起来 40 秒，WidgetKit 预算一到就杀扩展、显示占位。
+/// 这次云和隧道并行抢答、先到先得，总共 8 秒封顶；班次是核心必须拿到，
+/// 工资和配置拉不到也不拖垮整个快照（班次照常显示）。
+/// 拉回的数据缓存到小组件自己的 UserDefaults，离线时显示上次的数，不回占位。
 enum WidgetServerClient {
     private static let cachedSnapshotKey = "paiban.widgetServerSnapshot"
     private static let cachedAtKey = "paiban.widgetServerSnapshotAt"
@@ -28,17 +27,6 @@ enum WidgetServerClient {
         }
     }
 
-    /// 密钥直拉（原有）：小组件配置里填了 API 密钥。
-    static func fetchSnapshot(apiKey: String, now: Date = Date()) async -> WidgetSnapshot? {
-        await fetchSnapshot(authHeader: ("X-API-Key", apiKey), now: now)
-    }
-
-    /// 设备直拉（1.2.7.004）：App 登录时登记过 identifierForVendor，
-    /// 小组件带 X-Device-Id 拉数据，不用填密钥。
-    static func fetchSnapshot(deviceId: String, now: Date = Date()) async -> WidgetSnapshot? {
-        await fetchSnapshot(authHeader: ("X-Device-Id", deviceId), now: now)
-    }
-
     /// 新鲜缓存（15 分钟内）：时间线关键路径上先用它立刻出数，不等网络；
     /// 缓存过期时才拉网，拉回后刷新缓存供下一次用。班次一天内不变，
     /// 15 分钟的旧数对小组件足够新鲜。
@@ -50,47 +38,50 @@ enum WidgetServerClient {
         return snap
     }
 
-    /// 本月 + 本周 + 本月工资，一次拉齐，拼成 WidgetSnapshot。
-    /// 失败返回 nil（调用方回落缓存/占位）。
-    /// 1.2.7.005：不走 ServerConfig.resolve() 的 /health 探活——探活在小组件时间线
-    /// 关键路径上最慢可拖 20 秒（云 10 秒 + 隧道 10 秒），WidgetKit 预算一到就杀
-    /// 扩展、改显示系统占位（灰条 + 色块）。改成直连云拉数，失败再试 NAS 隧道；
-    /// 单个地址 10 秒封顶，超时即回落缓存。
-    private static func fetchSnapshot(authHeader: (name: String, value: String), now: Date) async -> WidgetSnapshot? {
-        var bases = [ServerConfig.cloudBaseURL]
-        if let tunnel = ServerConfig.nasTunnelBaseURL, !tunnel.isEmpty {
-            bases.append(tunnel)
-        }
-        for base in bases {
-            if let snap = await fetchFrom(base: base, authHeader: authHeader, now: now) {
-                return snap
-            }
-        }
-        return nil
-    }
-
-    /// 单个地址拉一次，10 秒封顶（超时即 nil，调用方回落缓存）。
-    private static func fetchFrom(base: String, authHeader: (name: String, value: String), now: Date) async -> WidgetSnapshot? {
-        await withTimeout(seconds: 10) {
-            let cal = DateUtil.calendar
-            let ym = DateUtil.yearMonth(of: now)
-            let weekday = cal.component(.weekday, from: now) // 1=周日
-            let weekStart = DateUtil.addingDays(cal.startOfDay(for: now), -(weekday - 1))
-            let weekStartStr = DateUtil.string(from: weekStart)
-            do {
-                async let me = get(path: "/api/v1/me", base: base, authHeader: authHeader, as: UserProfile.self)
-                async let range = get(path: "/api/v1/me/range", base: base, authHeader: authHeader, query: ["start": weekStartStr, "days": "7"], as: RangeResponse.self)
-                async let month = get(path: "/api/v1/me/month", base: base, authHeader: authHeader, query: ["year": "\(ym.year)", "month": "\(ym.month)"], as: MonthSchedule.self)
-                async let pay = get(path: "/api/v1/me/pay", base: base, authHeader: authHeader, query: ["year": "\(ym.year)", "month": "\(ym.month)"], as: PayMonth.self)
-                async let config = getConfig(base: base, authHeader: authHeader)
-                let (profile, rangeResp, monthResp, payResp, rates) = try await (me, range, month, pay, config)
-                guard let snap = buildSnapshot(profile: profile, range: rangeResp, month: monthResp, pay: payResp, rates: rates, now: now) else { return nil }
-                saveCached(snap)
-                return snap
-            } catch {
+    /// 设备直拉（唯一取数路）：云和 NAS 隧道并行抢答，先到先得，8 秒封顶。
+    /// 以前串行云 10 秒 + 隧道 10 秒，再叠密钥 20 秒，WidgetKit 预算耗光才占位。
+    static func fetchSnapshot(deviceId: String, now: Date = Date()) async -> WidgetSnapshot? {
+        await withTimeout(seconds: 8) {
+            await withTaskGroup(of: WidgetSnapshot?.self) { group in
+                group.addTask { await fetchFrom(base: ServerConfig.cloudBaseURL, deviceId: deviceId, now: now) }
+                if let tunnel = ServerConfig.nasTunnelBaseURL, !tunnel.isEmpty {
+                    group.addTask { await fetchFrom(base: tunnel, deviceId: deviceId, now: now) }
+                }
+                for await snap in group {
+                    if let snap {
+                        group.cancelAll()
+                        return snap
+                    }
+                }
                 return nil
             }
         }
+    }
+
+    /// 单个地址拉一次：班次（range + month）是核心，必须拿到一个才有今天；
+    /// me、工资、配置是添头，单个拉不到就用缓存里的值或默认值，不拖垮整个快照。
+    /// 以前五个接口 async let 一票否决，任何一个失败整个小组件就空白。
+    private static func fetchFrom(base: String, deviceId: String, now: Date) async -> WidgetSnapshot? {
+        let cal = DateUtil.calendar
+        let ym = DateUtil.yearMonth(of: now)
+        let weekday = cal.component(.weekday, from: now) // 1=周日
+        let weekStart = DateUtil.addingDays(cal.startOfDay(for: now), -(weekday - 1))
+        let weekStartStr = DateUtil.string(from: weekStart)
+        let header = ("X-Device-Id", deviceId)
+        async let rangeTask = get(path: "/api/v1/me/range", base: base, authHeader: header, query: ["start": weekStartStr, "days": "7"], as: RangeResponse.self)
+        async let monthTask = get(path: "/api/v1/me/month", base: base, authHeader: header, query: ["year": "\(ym.year)", "month": "\(ym.month)"], as: MonthSchedule.self)
+        async let meTask = get(path: "/api/v1/me", base: base, authHeader: header, as: UserProfile.self)
+        async let payTask = get(path: "/api/v1/me/pay", base: base, authHeader: header, query: ["year": "\(ym.year)", "month": "\(ym.month)"], as: PayMonth.self)
+        async let configTask = getConfig(base: base, authHeader: header)
+        // 逐个 try?，一个失败不连累其他（async let 并行，互不取消）。
+        let range = try? await rangeTask
+        let month = try? await monthTask
+        let profile = try? await meTask
+        let pay = try? await payTask
+        let rates = await configTask
+        guard let snap = buildSnapshot(profile: profile, range: range, month: month, pay: pay, rates: rates, now: now) else { return nil }
+        saveCached(snap)
+        return snap
     }
 
     /// 给一次异步活加时限：活先完成就取它的结果，时限先到就回 nil 并取消活。
@@ -110,33 +101,41 @@ enum WidgetServerClient {
     }
 
     /// 拼快照：DaySchedule → WidgetSnapshot.Day；PayMonth → WidgetSnapshot.Pay。
-    private static func buildSnapshot(profile: UserProfile, range: RangeResponse, month: MonthSchedule, pay: PayMonth, rates: PayGlobalSettings, now: Date) -> WidgetSnapshot? {
+    /// range/month 至少要有一个拿到今天，否则拼不出今天、回 nil；
+    /// me 拿不到就用上次缓存里的班组/名字；工资拿不到就空着（工资组件显示
+    /// 「打开 App 同步一下」，班次组件不受影响）。
+    private static func buildSnapshot(profile: UserProfile?, range: RangeResponse?, month: MonthSchedule?, pay: PayMonth?, rates: PayGlobalSettings, now: Date) -> WidgetSnapshot? {
         let todayStr = DateUtil.string(from: now)
         func toDay(_ d: DaySchedule) -> WidgetSnapshot.Day {
             WidgetSnapshot.Day(date: d.date, shift: d.shift, onLeave: d.onLeave ?? false, leaveType: d.leaveType, isToday: d.date == todayStr)
         }
-        let week = (range.days ?? []).map(toDay)
-        let monthDays = (month.days ?? []).map(toDay)
+        let week = (range?.days ?? []).map(toDay)
+        let monthDays = (month?.days ?? []).map(toDay)
         guard let today = monthDays.first(where: { $0.date == todayStr }) ?? week.first(where: { $0.date == todayStr }) else { return nil }
         let ym = DateUtil.yearMonth(of: now)
-        let paySnap = WidgetSnapshot.Pay(
-            year: ym.year, month: ym.month,
-            salarySubtotal: pay.salarySubtotal, salaryNet: pay.salaryNet,
-            bonusAfterTax: pay.bonusAfterTax, grandTotal: pay.grandTotal,
-            bonusTotal: pay.bonusTotal, incomeTax: pay.incomeTax,
-            attendance: pay.attendance, tripleDays: pay.tripleDays, overtimeDays: pay.overtimeDays)
+        let cached = loadCached()
+        let team = profile?.displayTeam ?? cached?.team ?? ""
+        let teamHistory = profile?.teamHistory ?? cached?.teamHistory ?? [TeamHistoryEntry(team: team, effectiveFrom: "\(ym.year)-\(String(format: "%02d", ym.month))-01")]
+        let paySnap: WidgetSnapshot.Pay? = pay.map { p in
+            WidgetSnapshot.Pay(
+                year: ym.year, month: ym.month,
+                salarySubtotal: p.salarySubtotal, salaryNet: p.salaryNet,
+                bonusAfterTax: p.bonusAfterTax, grandTotal: p.grandTotal,
+                bonusTotal: p.bonusTotal, incomeTax: p.incomeTax,
+                attendance: p.attendance, tripleDays: p.tripleDays, overtimeDays: p.overtimeDays)
+        }
         return WidgetSnapshot(
             savedAt: Date(),
-            displayName: profile.displayName,
-            team: profile.displayTeam,
-            teamHistory: profile.teamHistory ?? [TeamHistoryEntry(team: profile.displayTeam, effectiveFrom: "\(ym.year)-\(String(format: "%02d", ym.month))-01")],
+            displayName: profile?.displayName ?? cached?.displayName,
+            team: team,
+            teamHistory: teamHistory,
             today: today,
             week: week,
             monthDays: monthDays,
             monthYear: ym.year,
             month: ym.month,
             pay: paySnap,
-            baseSalary: pay.baseSalary ?? profile.paySettings?.baseSalary ?? 2420,
+            baseSalary: pay?.baseSalary ?? profile?.paySettings?.baseSalary ?? cached?.baseSalary ?? 2420,
             earlyRate: rates.earlyRate ?? 70,
             midRate: rates.midRate ?? 30,
             mealRate: rates.mealRate ?? 10)
@@ -150,7 +149,7 @@ enum WidgetServerClient {
         return PayGlobalSettings()
     }
 
-    // MARK: - 最小 HTTP 客户端（只走一条认证头：X-API-Key 或 X-Device-Id；信封 {ok, data}）
+    // MARK: - 最小 HTTP 客户端（只走一条认证头 X-Device-Id；信封 {ok, data}）
 
     private struct Envelope<T: Decodable>: Decodable {
         var ok: Bool
@@ -166,7 +165,7 @@ enum WidgetServerClient {
         guard let url = comps?.url else { throw URLError(.badURL) }
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
-        req.timeoutInterval = 15
+        req.timeoutInterval = 8
         req.setValue(authHeader.value, forHTTPHeaderField: authHeader.name)
         let (data, response) = try await URLSession.shared.data(for: req)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }

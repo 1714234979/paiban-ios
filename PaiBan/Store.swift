@@ -201,6 +201,7 @@ final class AppStore: ObservableObject {
     func startup() async {
         isStarting = true
         startupError = nil
+        reloadWidgetsOnVersionChange()
         if let lastId = UserDefaults.standard.string(forKey: lastUserIdKey),
            KeychainHelper.load() != nil,
            let cache = CacheStore.load(userId: lastId), cache.user != nil {
@@ -257,6 +258,7 @@ final class AppStore: ObservableObject {
     /// 进去之后后台静默同步：选路 → 验 session → 刷新数据 → 查更新。
     /// 联不上就离线用着，不打扰；只有 session 明确失效（不是网络问题）才回登录页。
     private func backgroundSyncAfterLaunch() async {
+        reloadWidgetsOnVersionChange()
         let reachable = await api.resolveServer()
         serverReachable = reachable
         serverBaseURL = api.baseURL
@@ -287,10 +289,24 @@ final class AppStore: ObservableObject {
 
     /// 设备直连登记（1.2.7.004）：登录成功后、启动同步成功后，把本机
     /// identifierForVendor 登记到用户名下；小组件凭设备号拉数据，不用填密钥。
-    /// 后台静默做，失败不打扰用户（小组件仍可走密钥/缓存）。
+    /// 后台静默做，失败不打扰用户（小组件走缓存）。
     /// 重装后设备号会变，启动时重登记能自己接上。
     private func registerThisDevice() {
         Task { await api.registerDevice() }
+    }
+
+    /// 版本变了就强制刷新小组件时间线（1.2.7.006）：App 更新后小组件扩展也换了
+    /// 新代码，但快照内容没变时 publishWidgetSnapshot 不会触发刷新，小组件会
+    /// 一直跑旧扩展、看着像「只改了版号」。每个版本只刷一次，不浪费系统预算；
+    /// 装好打开 App 就生效，不用删掉重加。离线也刷（刷的是扩展代码，不用联网）。
+    private func reloadWidgetsOnVersionChange() {
+        let key = "paiban.widgetReloadedVersion"
+        let current = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+        guard !current.isEmpty else { return }
+        if UserDefaults.standard.string(forKey: key) != current {
+            UserDefaults.standard.set(current, forKey: key)
+            WidgetCenter.shared.reloadAllTimelines()
+        }
     }
 
     // MARK: 登录 / 注册 / 退出

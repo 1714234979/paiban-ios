@@ -473,17 +473,10 @@ final class APIClient {
         try await request(path: "/api/v1/me")
     }
 
-    /// POST /api/v1/me/api-key —— 小组件密钥自助重生成（1.2.8）。
-    /// 只认 session（账号密码登录）；返回的密钥只显示这一次，旧密钥立即失效。
-    /// 小组件配置里填了它，就直接从服务器拉数据，不依赖 App Group。
-    func regenerateApiKey() async throws -> ApiKeyResponse {
-        try await request(path: "/api/v1/me/api-key", method: "POST")
-    }
-
     /// POST /api/v1/me/device —— 设备直连登记（1.2.7.004）。
     /// App 登录后把 identifierForVendor 登记到用户名下；小组件此后带
     /// X-Device-Id 就能拉数据，不用填密钥。只认 session 登录。
-    /// 静默失败（不抛）：登记不上时小组件仍可走密钥/缓存，不打扰用户。
+    /// 静默失败（不抛）：登记不上时小组件走缓存，不打扰用户。
     func registerDevice() async {
         guard let deviceId = UIDevice.current.identifierForVendor?.uuidString else { return }
         let _: DeviceRegisterResponse? = try? await request(path: "/api/v1/me/device", method: "POST",

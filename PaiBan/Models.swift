@@ -1079,12 +1079,6 @@ struct UserProfile: Codable, Equatable {
     var isAdmin: Bool { role == "admin" }
 }
 
-/// POST /api/v1/me/api-key 返回：{apiKey, apiKeyHint}（1.2.8，小组件密钥）。
-struct ApiKeyResponse: Decodable {
-    var apiKey: String
-    var apiKeyHint: String?
-}
-
 /// POST /api/v1/me/device 返回：{deviceId, platform}（1.2.7.004，设备直连登记）。
 struct DeviceRegisterResponse: Decodable {
     var deviceId: String?
