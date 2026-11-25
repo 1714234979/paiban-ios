@@ -39,6 +39,9 @@ struct MainTabView: View {
             }
             .tag(2)
         }
+        .tint(Color.accentColor)
+        // 1.2.8.002：Tab 选中态走自适应强调色（浅色深 navy、深色亮蓝），
+        // 别让系统默认去猜；未选中态在 PaiBanApp.init 里用 UITabBar 外观定。
         // 没登录时点小组件进来的深链：登录后进主界面再跳（store.handleDeepLink 先记下来）。
         .task {
             if let tab = store.pendingDeepLinkTab {

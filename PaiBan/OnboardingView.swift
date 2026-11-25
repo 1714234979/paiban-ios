@@ -25,7 +25,9 @@ struct OnboardingView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 ProgressView(value: Double(step + 1), total: Double(totalSteps))
-                    .tint(AppStyle.navyAdaptive)
+                    // 1.2.8.002：进度条填色走自适应强调色（之前是 navyAdaptive，
+                    // 深色 0.18/0.23/0.34 在黑底上太暗，几乎看不见进度）。
+                    .tint(.accentColor)
                     .padding(.horizontal, AppStyle.pagePadding)
                     .padding(.top, 12)
 

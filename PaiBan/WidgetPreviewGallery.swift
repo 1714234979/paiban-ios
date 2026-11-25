@@ -124,13 +124,34 @@ private struct AppPagePreview: View {
     }
 
     var body: some View {
-        MainTabView()
-            .environmentObject(store)
-            .preferredColorScheme(isDark ? .dark : .light)
-            .onAppear {
-                store.selectedTab = tabIndex
-                store.appearance = isDark ? .dark : .light
+        Group {
+            if kind.contains("-daydetail-") {
+                // 当天详情（1.2.8.002）：2026-11-24 早班那天的详情页直接渲染，
+                // 验深色下调班/请假入口、提示文字、选中描边清不清楚。
+                NavigationStack {
+                    DayDetailView(day: Self.demoDay())
+                }
+                .environmentObject(store)
+                .onAppear { store.selectedTab = tabIndex }
+            } else {
+                MainTabView()
+                    .environmentObject(store)
+                    .onAppear { store.selectedTab = tabIndex }
             }
+        }
+        .preferredColorScheme(isDark ? .dark : .light)
+        .onAppear {
+            store.appearance = isDark ? .dark : .light
+        }
+    }
+
+    /// 演示那天（2026-11-24 周二、B 班早班 00:00–08:00）：按真 8 天轮本地算。
+    static func demoDay() -> DaySchedule {
+        let days = ScheduleCalculator.localMonth(team: "B", year: 2026, month: 11).days ?? []
+        if let d = days.first(where: { $0.date == "2026-11-24" }) { return d }
+        return DaySchedule(date: "2026-11-24", team: "B", baseShift: "早班", shift: "早班",
+                           start: "00:00", end: "08:00", timeLabel: "00:00–08:00",
+                           totalHours: 8, isDouble: false, isWork: true)
     }
 
     @MainActor

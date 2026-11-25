@@ -1,8 +1,20 @@
 import SwiftUI
+import UIKit // Tab 栏未选中态用动态 UIColor（1.2.8.002）
 
 @main
 struct PaiBanApp: App {
     @StateObject private var store = AppStore()
+
+    init() {
+        // 1.2.8.002：Tab 栏深色下未选中态也要认得出来。选中态走 AccentColor 资产
+        //（深色已提亮成亮蓝）；未选中默认灰在黑底上太暗，深色改 0.65 白，浅色沿用系统灰。
+        // 动态 UIColor 跟着 trait 走，设置页切外观（跟随系统/浅色/深色）时跟着变。
+        UITabBar.appearance().unselectedItemTintColor = UIColor { t in
+            t.userInterfaceStyle == .dark
+                ? UIColor(white: 0.65, alpha: 1)
+                : UIColor.systemGray
+        }
+    }
 
     var body: some Scene {
         WindowGroup {
