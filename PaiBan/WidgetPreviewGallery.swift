@@ -39,15 +39,13 @@ struct WidgetPreviewGallery: View {
                 .background(Color(.systemBackground))
                 .cornerRadius(22)
         case "lock-circular":
-            LockWidgetView(entry: entry, snapshot: snapshot)
-                .environment(\.widgetFamily, .accessoryCircular)
+            LockWidgetView(entry: entry, snapshot: snapshot, overrideFamily: .accessoryCircular)
                 .environment(\.colorScheme, .dark)
                 .frame(width: 76, height: 76)
                 .background(Color.black)
                 .clipShape(Circle())
         case "lock-rectangular":
-            LockWidgetView(entry: entry, snapshot: snapshot)
-                .environment(\.widgetFamily, .accessoryRectangular)
+            LockWidgetView(entry: entry, snapshot: snapshot, overrideFamily: .accessoryRectangular)
                 .environment(\.colorScheme, .dark)
                 .frame(width: 152, height: 68)
                 .background(Color.black)

@@ -473,6 +473,13 @@ final class APIClient {
         try await request(path: "/api/v1/me")
     }
 
+    /// POST /api/v1/me/api-key —— 小组件密钥自助重生成（1.2.8）。
+    /// 只认 session（账号密码登录）；返回的密钥只显示这一次，旧密钥立即失效。
+    /// 小组件配置里填了它，就直接从服务器拉数据，不依赖 App Group。
+    func regenerateApiKey() async throws -> ApiKeyResponse {
+        try await request(path: "/api/v1/me/api-key", method: "POST")
+    }
+
     /// PUT /api/v1/me/profile — 只传给定的字段（合并更新）。
     /// displayName：改显示名（≤32 字，空串清回用户名）；登录用的 username 不动。
     func updateProfile(team: String? = nil, paySettings: [String: Any]? = nil, onboardingDone: Bool? = nil, displayName: String? = nil) async throws -> UserProfile {

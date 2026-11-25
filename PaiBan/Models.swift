@@ -384,6 +384,12 @@ struct UserProfile: Codable, Equatable {
     var isAdmin: Bool { role == "admin" }
 }
 
+/// POST /api/v1/me/api-key 返回：{apiKey, apiKeyHint}（1.2.8，小组件密钥）。
+struct ApiKeyResponse: Decodable {
+    var apiKey: String
+    var apiKeyHint: String?
+}
+
 /// 用户工资设置（缺失字段回落到服务端全局设置）。
 struct PaySettings: Codable, Equatable {
     var baseSalary: Double?

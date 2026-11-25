@@ -373,9 +373,11 @@ struct LockWidgetView: View {
     @Environment(\.widgetFamily) var family
     let entry: Entry
     let snapshot: WidgetSnapshot
+    /// 画廊/预览显式指定圆形或矩形（\.widgetFamily 是只读 KeyPath，不能用 .environment 注入）。
+    var overrideFamily: WidgetFamily? = nil
 
     var body: some View {
-        switch family {
+        switch overrideFamily ?? family {
         case .accessoryCircular:
             circularView
         case .accessoryRectangular:

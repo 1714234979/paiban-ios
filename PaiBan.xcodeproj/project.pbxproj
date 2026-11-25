@@ -40,6 +40,9 @@
 		2FA6B94712D2509303CCBDA9 /* WidgetViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3215243FC9D19D67D035FAFE /* WidgetViews.swift */; };
 		811181B98DD57F6033013526 /* WidgetViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3215243FC9D19D67D035FAFE /* WidgetViews.swift */; };
 		FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = F181B69F0A58209D8BE07E36 /* WidgetPreviewGallery.swift */; };
+		06272431BA5C904F147E23BF /* Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C48BCB889F6644C77FA3C9E /* Config.swift */; };
+		EA71640AB84E2509596F332E /* WidgetServerClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68CB61D5FAB155944D08BB4D /* WidgetServerClient.swift */; };
+		071068953018BFEF7A1E607E /* WidgetAPIKeyIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 802259B35B8DFF361FD31FDA /* WidgetAPIKeyIntent.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -76,6 +79,8 @@
 		9E4E81336F078B0AF8075E97 /* PaiBanWidget.appex */ = {isa = PBXFileReference; explicitFileType = wrapper.app-extension; includeInIndex = 0; path = PaiBanWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		3215243FC9D19D67D035FAFE /* WidgetViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetViews.swift; sourceTree = "<group>"; };
 		F181B69F0A58209D8BE07E36 /* WidgetPreviewGallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetPreviewGallery.swift; sourceTree = "<group>"; };
+		68CB61D5FAB155944D08BB4D /* WidgetServerClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetServerClient.swift; sourceTree = "<group>"; };
+		802259B35B8DFF361FD31FDA /* WidgetAPIKeyIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetAPIKeyIntent.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 
@@ -179,6 +184,7 @@
             B7A1DAC372E4A65B4E59E2E0 /* WidgetSnapshot.swift */,
                         3215243FC9D19D67D035FAFE /* WidgetViews.swift */,
 F181B69F0A58209D8BE07E36 /* WidgetPreviewGallery.swift */,
+68CB61D5FAB155944D08BB4D /* WidgetServerClient.swift */,
 9ECE1EC6686D20864C7D3338 /* PaiBan.entitlements */,
             );
             path = PaiBan;
@@ -191,6 +197,7 @@ F181B69F0A58209D8BE07E36 /* WidgetPreviewGallery.swift */,
 				82499500979304680FB830D2 /* PaiBanWidget.swift */,
 				A6BB5B4BBE7E9595772D0FAA /* Info.plist */,
 				1B2A6BDBC5FE1078D25D142D /* PaiBanWidget.entitlements */,
+				802259B35B8DFF361FD31FDA /* WidgetAPIKeyIntent.swift */,
 			);
 			path = PaiBanWidget;
 			sourceTree = "<group>";
@@ -301,6 +308,9 @@ F181B69F0A58209D8BE07E36 /* WidgetPreviewGallery.swift */,
 				134A6DEC1F4C6F4609E3193A /* DesignSystem.swift in Sources */,
 				E5AD046FCC4C132B77037778 /* PayCalc.swift in Sources */,
 				52A6C8A5045AEF9151BB6650 /* WidgetSnapshot.swift in Sources */,2FA6B94712D2509303CCBDA9 /* WidgetViews.swift in Sources */,
+				06272431BA5C904F147E23BF /* Config.swift in Sources */,
+				EA71640AB84E2509596F332E /* WidgetServerClient.swift in Sources */,
+				071068953018BFEF7A1E607E /* WidgetAPIKeyIntent.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

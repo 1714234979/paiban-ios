@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// 设置页（1.1.3：二级菜单）：主界面只留入口行——账号与安全、工资设置、关于
 /// 各开一个二级页面改细项；换班、管理后台、服务器、更新、反馈留在主界面。
@@ -86,6 +87,21 @@ struct SettingsView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("工资设置")
                         Text(paySubtitle)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            // 小组件（1.2.8）：五个小组件怎么加、数据通没通、密钥在哪复制。
+            // 老爷反馈：App 里没地方看小组件、也没地方管小组件——这个入口就是答案。
+            Section("小组件") {
+                NavigationLink {
+                    WidgetsView()
+                } label: {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("小组件")
+                        Text("五个小组件 · 怎么添加 · 数据状态 · 小组件密钥")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -1134,6 +1150,133 @@ struct ChangePasswordSheet: View {
                                            code: code.trimmingCharacters(in: .whitespaces),
                                            newPassword: newPassword)
             dismiss()
+        } catch {
+            message = (error as? APIError)?.message ?? error.localizedDescription
+            isError = true
+        }
+    }
+}
+
+/// 小组件页（1.2.8）：五个小组件、怎么添加、数据状态、小组件密钥。
+/// 老爷反馈：App 里没地方看小组件、也没地方管——这个页就是答案。
+/// 数据状态一眼能看到问题在哪：App Group 不通（重签描述文件没带
+/// group.com.paiban.app）时，快照写不进，小组件走服务端直拉（填密钥）。
+struct WidgetsView: View {
+    @EnvironmentObject private var store: AppStore
+    @State private var apiKey: String?
+    @State private var generating = false
+    @State private var copied = false
+    @State private var message: String?
+    @State private var isError = false
+
+    /// App Group 容器拿得到吗（重签描述文件带 group.com.paiban.app 才行）。
+    private var appGroupOK: Bool { WidgetSnapshotStore.containerURL() != nil }
+    /// App 写进共享区的快照（有它，小组件直接读，不用联网）。
+    private var snapshot: WidgetSnapshot? { WidgetSnapshotStore.load() }
+
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "M月d日 HH:mm"
+        return f
+    }()
+
+    /// 数据状态一行话：通没通、快照写没写、写的是几点。
+    private var statusText: String {
+        if !appGroupOK {
+            return "App Group 不通（重签的描述文件里没有 group.com.paiban.app），快照写不进——小组件走服务端直拉，下面填了密钥就能显示。"
+        }
+        if let snap = snapshot {
+            return "快照已写（\(Self.timeFormatter.string(from: snap.savedAt))），小组件直接读快照。"
+        }
+        return "App Group 通，但快照还没写：回排班页同步一次数据就自动写。"
+    }
+
+    var body: some View {
+        Form {
+            Section("五个小组件") {
+                widgetRow(name: "今日排班", size: "小", desc: "今天的班次、倒计时与今日预估工资")
+                widgetRow(name: "本周排班", size: "中", desc: "本周七天班次，当天高亮")
+                widgetRow(name: "本月工资", size: "中", desc: "本月应发、实发工资与实发奖金")
+                widgetRow(name: "本月日历", size: "大", desc: "整月网格与班次色块，当天高亮")
+                widgetRow(name: "今日已挣", size: "锁屏", desc: "锁屏上看今天已挣多少钱、还剩多久下班")
+            }
+
+            Section("怎么添加") {
+                Text("主屏：长按桌面 → 点左上角 ＋ → 添加小组件 → 搜「排班空间」→ 选尺寸添加。")
+                Text("锁屏：长按锁屏 → 自定 → 锁屏 → 添加小组件 → 搜「排班空间」→ 选「今日已挣」。")
+                Text("填密钥：长按已添加的小组件 → 编辑小组件 → 把下面复制的密钥粘贴到「小组件密钥」里。")
+            }
+
+            Section("数据状态") {
+                Text(statusText)
+                HStack {
+                    Text("App Group")
+                    Spacer()
+                    Text(appGroupOK ? "通" : "不通")
+                        .foregroundColor(appGroupOK ? .green : .red)
+                }
+                HStack {
+                    Text("快照")
+                    Spacer()
+                    Text(snapshot == nil ? "没写" : "已写")
+                        .foregroundColor(snapshot == nil ? .secondary : .green)
+                }
+            }
+
+            Section("小组件密钥") {
+                Text("小组件不走 App Group 时，靠这个密钥直接从服务器拉数据。密钥只显示这一次，复制后填进小组件配置；重生成后旧密钥立即失效，小组件要重填。")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                if let key = apiKey {
+                    Text(key)
+                        .font(.caption)
+                        .textSelection(.enabled)
+                    Button(copied ? "已复制" : "复制密钥") {
+                        UIPasteboard.general.string = key
+                        copied = true
+                    }
+                } else {
+                    Button(generating ? "生成中…" : "生成小组件密钥") {
+                        Task { await generate() }
+                    }
+                    .disabled(generating)
+                }
+                if let message {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundColor(isError ? .red : .secondary)
+                }
+            }
+        }
+        .navigationTitle("小组件")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private func widgetRow(name: String, size: String, desc: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text(name)
+                Spacer()
+                Text(size)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            Text(desc)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    private func generate() async {
+        message = nil
+        isError = false
+        copied = false
+        generating = true
+        defer { generating = false }
+        do {
+            let resp = try await store.api.regenerateApiKey()
+            apiKey = resp.apiKey
+            message = "密钥已生成，只显示这一次，复制后填进小组件配置。"
         } catch {
             message = (error as? APIError)?.message ?? error.localizedDescription
             isError = true
