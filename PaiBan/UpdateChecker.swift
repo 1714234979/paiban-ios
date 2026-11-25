@@ -13,6 +13,11 @@ struct VersionInfo: Codable, Equatable, Identifiable {
     var releaseNotes: String?
     var downloadUrl: String?
     var extractionCode: String?
+    /// 内测渠道（1.2.8）：服务端回的当前用户是不是内测人员、该平台有没有内测版、
+    /// 这次回的是哪个渠道（beta/stable）。老版本服务端没有这三个字段，解码时按 nil 处理。
+    var isBetaTester: Bool?
+    var hasBeta: Bool?
+    var channel: String?
 
     var id: String { latestVersion }
 
@@ -45,24 +50,57 @@ enum UpdateChecker {
 
     /// 语义化版本比较：分段比数字，1.0.0 < 1.1.0；缺的段按 0 算。
     /// latest 高于 current 时返回 true。
+    /// 基础号相同：正式版比同号预发布版新（1.2.8 > 1.2.8-beta.1），
+    /// 两个预发布版比后缀里的数字（beta.1 < beta.2）。
     static func isNewer(latest: String, than current: String) -> Bool {
-        let latestParts = versionParts(latest)
-        let currentParts = versionParts(current)
-        let count = max(latestParts.count, currentParts.count)
+        let l = splitVersion(latest)
+        let c = splitVersion(current)
+        let count = max(l.parts.count, c.parts.count)
         for i in 0..<count {
-            let l = i < latestParts.count ? latestParts[i] : 0
-            let c = i < currentParts.count ? currentParts[i] : 0
-            if l != c { return l > c }
+            let lv = i < l.parts.count ? l.parts[i] : 0
+            let cv = i < c.parts.count ? c.parts[i] : 0
+            if lv != cv { return lv > cv }
         }
-        return false
+        switch (l.pre, c.pre) {
+        case (nil, nil): return false
+        case (nil, _): return true
+        case (_, nil): return false
+        case (let lp?, let cp?):
+            let ln = lp.split(separator: ".").compactMap { Int($0.prefix(while: { $0.isNumber })) }
+            let cn = cp.split(separator: ".").compactMap { Int($0.prefix(while: { $0.isNumber })) }
+            let n = max(ln.count, cn.count)
+            for i in 0..<n {
+                let a = i < ln.count ? ln[i] : 0
+                let b = i < cn.count ? cn[i] : 0
+                if a != b { return a > b }
+            }
+            return lp > cp
+        }
+    }
+
+    /// 内测渠道偏好（1.2.8）：内测人员在设置页切内测 / 正式，存在本地；默认正式。
+    /// 非内测人员切了也没用——服务端只给内测人员回内测版，其他人永远回正式版。
+    private static let channelKey = "paiban.updateChannel"
+    static var channel: String {
+        get { UserDefaults.standard.string(forKey: channelKey) ?? "stable" }
+        set { UserDefaults.standard.set(newValue, forKey: channelKey) }
     }
 
     /// "1.2.3" → [1, 2, 3]；每段只取开头的数字（"1.0-beta" 的段算 0 号后缀、按 1 算）。
+    /// 内测版号带后缀（"1.2.8-beta.1"）：基础段 [1,2,8] + 预发布后缀 "beta.1" 分开比，
+    /// 这样 1.2.8-beta.1 不会比同号正式版 1.2.8 更新（beta.1 < beta.2 同号内比后缀数字）。
     private static func versionParts(_ version: String) -> [Int] {
-        version.split(separator: ".").map { part in
+        splitVersion(version).parts
+    }
+
+    /// "1.2.8-beta.1" → (parts: [1,2,8], pre: "beta.1")；"1.2.8" → (parts: [1,2,8], pre: nil)。
+    private static func splitVersion(_ version: String) -> (parts: [Int], pre: String?) {
+        let comps = version.split(separator: "-", maxSplits: 1)
+        let parts = comps[0].split(separator: ".").map { part in
             let digits = part.prefix(while: { $0.isNumber })
             return Int(digits) ?? 0
         }
+        return (parts, comps.count > 1 ? String(comps[1]) : nil)
     }
 
     /// 今天是不是已经点过「稍后」。
@@ -82,7 +120,7 @@ enum UpdateChecker {
     static func checkAfterLaunch(api: APIClient) async -> VersionInfo? {
         guard !dismissedToday else { return nil }
         do {
-            let info = try await api.fetchVersion()
+            let info = try await api.fetchVersion(channel: channel)
             guard info.hasDownloadURL else { return nil }
             guard isNewer(latest: info.latestVersion, than: currentVersion) else { return nil }
             return info
@@ -102,7 +140,7 @@ enum UpdateChecker {
     /// 约定（canonical）：downloadUrl 为空表示没有更新，即使版本号有差异也按无更新处理。
     static func checkManually(api: APIClient) async -> ManualResult {
         do {
-            let info = try await api.fetchVersion()
+            let info = try await api.fetchVersion(channel: channel)
             guard info.hasDownloadURL else {
                 return .upToDate
             }

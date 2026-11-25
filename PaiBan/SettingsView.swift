@@ -145,6 +145,19 @@ struct SettingsView: View {
                         }
                     }
                 }
+                // 内测渠道（1.2.8）：只有内测人员看得到这一行。
+                // 服务端 profile 里 isBetaTester=true 时显示；权限是老爷在管理端按人开的，
+                // 一开这边自动出现，不用那人自己再去哪开。切了立即按新渠道查一次。
+                if store.user?.isBetaTester == true {
+                    Picker("版本渠道", selection: channelBinding) {
+                        Text("正式版").tag("stable")
+                        Text("内测版").tag("beta")
+                    }
+                    .pickerStyle(.segmented)
+                    Text("内测版只推给内测人员；切到内测后，下次打开 App 也按内测查。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
 
             Section("反馈") {
@@ -217,6 +230,18 @@ struct SettingsView: View {
     }
 
     // MARK: 检查更新
+
+    /// 内测渠道偏好（1.2.8）：读 / 写 UpdateChecker.channel（本地存，默认正式）。
+    /// 切了立即按新渠道查一次，有新版就弹更新提示。
+    private var channelBinding: Binding<String> {
+        Binding(
+            get: { UpdateChecker.channel },
+            set: { newValue in
+                UpdateChecker.channel = newValue
+                Task { await manualUpdateCheck() }
+            }
+        )
+    }
 
     private func manualUpdateCheck() async {
         isCheckingUpdate = true

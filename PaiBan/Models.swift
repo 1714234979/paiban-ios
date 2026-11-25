@@ -379,6 +379,9 @@ struct UserProfile: Codable, Equatable {
     /// 1.2.7：自己账号的单月录入（各改各的；GET /me 回传，服务端存 user.payMonths）。
     var payMonths: [String: PayMonthRecord]?
     var onboardingDone: Bool?
+    /// 1.2.8 内测渠道：服务端回的当前用户是不是内测人员（老爷默认 true）。
+    /// App 靠这个决定设置页显不显示渠道切换（true 显示，false 不显示）。
+    var isBetaTester: Bool?
 
     var displayTeam: String { team ?? "B" }
     var isAdmin: Bool { role == "admin" }

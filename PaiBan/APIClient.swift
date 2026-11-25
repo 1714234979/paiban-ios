@@ -334,7 +334,7 @@ final class APIClient {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: ["phone": phone, "code": code])
+        req.httpBody = try JSONSerialization.data(withJSONObject: ["phone": phone, "code": code, "platform": "ios"])
         let (data, response): (Data, URLResponse)
         do {
             (data, response) = try await session.data(for: req)
@@ -379,7 +379,7 @@ final class APIClient {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        req.httpBody = try JSONSerialization.data(withJSONObject: ["username": username, "password": password])
+        req.httpBody = try JSONSerialization.data(withJSONObject: ["username": username, "password": password, "platform": "ios"])
         let (data, response): (Data, URLResponse)
         do {
             (data, response) = try await session.data(for: req)
@@ -705,7 +705,12 @@ final class APIClient {
 
     /// GET <baseURL>/api/v1/version → {ok, data: {latestVersion, releaseNotes, downloadUrl, extractionCode}}。
     /// 清单地址跟 baseURL 走（见 ServerConfig.versionPath），downloadUrl 与 extractionCode 由服务端配。
-    func fetchVersion() async throws -> VersionInfo {
-        try await request(path: ServerConfig.versionPath)
+    /// 1.2.8 内测渠道：每次带 platform=ios；channel 传内测偏好（beta/stable，默认 stable）。
+    /// 已登录时请求带 session cookie（401 时 Basic 兜底），服务端据此回 isBetaTester；
+    /// 没登录或不是内测人员，服务端永远回正式版。回包的 data 里可能带 isBetaTester/hasBeta/channel。
+    func fetchVersion(channel: String? = nil) async throws -> VersionInfo {
+        var query: [String: String] = ["platform": "ios"]
+        if let channel, !channel.isEmpty { query["channel"] = channel }
+        return try await request(path: ServerConfig.versionPath, query: query)
     }
 }
