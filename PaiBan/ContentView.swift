@@ -1,6 +1,28 @@
 import SwiftUI
 import UIKit
 
+/// 开屏（1.2.7.010）：启动时全屏品牌闪屏，盖住加载/过渡。
+/// 中间大 logo + 下方「排班空间」；最少 0.5 秒，主界面准备好（isStarting=false）才揭开，
+/// 不提前消失留白屏。只在冷启动出现一次（showSplash 是 ContentView 的 @State，
+/// 回前台不重建 ContentView，不会再弹）。
+struct SplashView: View {
+    var body: some View {
+        ZStack {
+            Color(.systemBackground).ignoresSafeArea()
+            VStack(spacing: 18) {
+                Image("SplashLogo")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: 120, height: 120)
+                    .cornerRadius(28)
+                Text("排班空间")
+                    .font(.title2).bold()
+                    .foregroundColor(.primary)
+            }
+        }
+    }
+}
+
 /// 根视图（原 WKWebView 壳已整体删掉，全部原生）：
 /// 未登录 → 登录页；登录后没走完引导 → 引导页；没绑手机号 → 强制绑定门；
 /// 否则 → 四个 Tab 的主界面。
@@ -16,6 +38,11 @@ struct ContentView: View {
     /// 换账号登录时重置，免得另一个没绑手机号的账号也被放行）。
     @State private var bindGateDismissedForSession = false
 
+    /// 1.2.7.010 开屏：冷启动先盖住加载/过渡。最少 0.5 秒，且主界面准备好
+    /// （isStarting=false）才揭开；启动慢就一直盖着，不提前消失留白屏。
+    @State private var showSplash = true
+    @State private var splashMinTimePassed = false
+
     /// 1.1.3 强制绑手机号：已登录、引导已过、还没绑手机号、本次还没放行过。
     private var needsForcedBind: Bool {
         guard store.isLoggedIn, store.user?.onboardingDone == true else { return false }
@@ -24,55 +51,78 @@ struct ContentView: View {
     }
 
     var body: some View {
-        Group {
-            if store.isStarting {
-                ProgressView("正在连接服务器…")
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if store.isLoggedIn {
-                if store.user?.onboardingDone == false {
-                    OnboardingView()
-                } else if needsForcedBind {
-                    // 1.1.3 强制绑手机号：老账号首次打开必须绑完才能进主界面，没有跳过。
-                    // 短信服务没开通时只提示、可先进入（见 ForcedBindGateView），
-                    // 一旦开通，下次打开自动变严格——不用等 App 更新。
-                    ForcedBindGateView(onEnterAnyway: { bindGateDismissedForSession = true })
+        ZStack {
+            Group {
+                if store.isStarting {
+                    ProgressView("正在连接服务器…")
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else if store.isLoggedIn {
+                    if store.user?.onboardingDone == false {
+                        OnboardingView()
+                    } else if needsForcedBind {
+                        // 1.1.3 强制绑手机号：老账号首次打开必须绑完才能进主界面，没有跳过。
+                        // 短信服务没开通时只提示、可先进入（见 ForcedBindGateView），
+                        // 一旦开通，下次打开自动变严格——不用等 App 更新。
+                        ForcedBindGateView(onEnterAnyway: { bindGateDismissedForSession = true })
+                    } else {
+                        MainTabView()
+                    }
+                } else if let startupError = store.startupError {
+                    OfflineView(message: startupError) {
+                        Task { await store.startup() }
+                    }
                 } else {
-                    MainTabView()
+                    LoginView()
                 }
-            } else if let startupError = store.startupError {
-                OfflineView(message: startupError) {
-                    Task { await store.startup() }
+            }
+            .task {
+                await store.startup()
+            }
+            .task {
+                // 开屏最少 0.5 秒。
+                try? await Task.sleep(nanoseconds: 500_000_000)
+                splashMinTimePassed = true
+                maybeDismissSplash()
+            }
+            .onChange(of: store.isLoggedIn) { _ in bindGateDismissedForSession = false }
+            .onChange(of: store.isStarting) { _ in maybeDismissSplash() }
+            .onChange(of: scenePhase) { newPhase in
+                if newPhase == .active {
+                    Task { await store.checkForUpdateAfterLaunch() }
                 }
-            } else {
-                LoginView()
+            }
+            .alert("发现新版本", isPresented: updateAlertBinding) {
+                if let info = store.pendingUpdate, info.hasDownloadURL {
+                    Button("更新") {
+                        openDownloadURL(info)
+                    }
+                    Button("稍后", role: .cancel) {
+                        store.dismissUpdateForToday()
+                    }
+                } else {
+                    Button("知道了", role: .cancel) {
+                        store.dismissUpdateForToday()
+                    }
+                }
+            } message: {
+                if let info = store.pendingUpdate {
+                    Text(updateMessage(for: info))
+                }
+            }
+            if showSplash {
+                SplashView()
+                    .transition(.opacity)
+                    .zIndex(1)
             }
         }
-        .task {
-            await store.startup()
-        }
-        .onChange(of: store.isLoggedIn) { _ in bindGateDismissedForSession = false }
-        .onChange(of: scenePhase) { newPhase in
-            if newPhase == .active {
-                Task { await store.checkForUpdateAfterLaunch() }
-            }
-        }
-        .alert("发现新版本", isPresented: updateAlertBinding) {
-            if let info = store.pendingUpdate, info.hasDownloadURL {
-                Button("更新") {
-                    openDownloadURL(info)
-                }
-                Button("稍后", role: .cancel) {
-                    store.dismissUpdateForToday()
-                }
-            } else {
-                Button("知道了", role: .cancel) {
-                    store.dismissUpdateForToday()
-                }
-            }
-        } message: {
-            if let info = store.pendingUpdate {
-                Text(updateMessage(for: info))
-            }
+    }
+
+    /// 开屏揭开条件：0.5 秒到了，且启动完成（isStarting=false，主界面已定好是
+    /// 登录/引导/主界面/离线页哪一个）。两个都满足才淡出，缺一个就继续盖着。
+    private func maybeDismissSplash() {
+        guard showSplash, splashMinTimePassed, !store.isStarting else { return }
+        withAnimation(.easeOut(duration: 0.35)) {
+            showSplash = false
         }
     }
 
