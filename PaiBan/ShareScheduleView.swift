@@ -241,58 +241,9 @@ private struct SharedMonthView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("\(senderName) · \(modeName)")
-                    .font(.headline)
-                Spacer()
-                Button {
-                    yearMonth = DateUtil.yearMonth(of: Date())
-                    Task { await load() }
-                } label: { Text("今天") }
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-
-            HStack {
-                Button { shiftMonth(-1) } label: { Image(systemName: "chevron.left") }
-                Spacer()
-                Text("\(yearMonth.year)年\(yearMonth.month)月")
-                    .font(.headline)
-                Spacer()
-                Button { shiftMonth(1) } label: { Image(systemName: "chevron.right") }
-            }
-            .padding(.horizontal)
-
-            if isLoading {
-                ProgressView().padding()
-            } else if let errorText {
-                Text(errorText).foregroundColor(.red).padding()
-            } else {
-                ScrollView {
-                    LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 7), spacing: 2) {
-                        ForEach(["日", "一", "二", "三", "四", "五", "六"], id: \.self) { w in
-                            Text(w).font(.caption).foregroundColor(.secondary)
-                        }
-                        ForEach(days) { day in
-                            VStack(spacing: 2) {
-                                Text("\(day.day)")
-                                    .font(.system(size: 15))
-                                    .foregroundColor(day.shift == "休息" ? .secondary : .primary)
-                                Text(TeamInfo.shortName(day.shift))
-                                    .font(.caption2)
-                                    .foregroundColor(.white)
-                                    .frame(width: 26, height: 18)
-                                    .background(ShiftStyle.color(for: day.shift))
-                                    .clipShape(Capsule())
-                            }
-                            .frame(maxWidth: .infinity, minHeight: 48)
-                            .background(Color(.systemGray6))
-                            .clipShape(RoundedRectangle(cornerRadius: 6))
-                        }
-                    }
-                    .padding(.horizontal)
-                }
-            }
+            headerView
+            monthNavView
+            contentView
             Text("只看基础轮次，不含对方的调班/请假。调班回自己日历上改。")
                 .font(.caption)
                 .foregroundColor(.secondary)
@@ -301,6 +252,75 @@ private struct SharedMonthView: View {
         .navigationTitle("\(senderName)的班表")
         .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
+    }
+
+    private var headerView: some View {
+        HStack {
+            Text("\(senderName) · \(modeName)")
+                .font(.headline)
+            Spacer()
+            Button {
+                yearMonth = DateUtil.yearMonth(of: Date())
+                Task { await load() }
+            } label: { Text("今天") }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+    }
+
+    private var monthNavView: some View {
+        HStack {
+            Button { shiftMonth(-1) } label: { Image(systemName: "chevron.left") }
+            Spacer()
+            Text("\(yearMonth.year)年\(yearMonth.month)月")
+                .font(.headline)
+            Spacer()
+            Button { shiftMonth(1) } label: { Image(systemName: "chevron.right") }
+        }
+        .padding(.horizontal)
+    }
+
+    private var contentView: some View {
+        Group {
+            if isLoading {
+                ProgressView().padding()
+            } else if let errorText {
+                Text(errorText).foregroundColor(.red).padding()
+            } else {
+                monthGridView
+            }
+        }
+    }
+
+    private var monthGridView: some View {
+        ScrollView {
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 2), count: 7), spacing: 2) {
+                ForEach(["日", "一", "二", "三", "四", "五", "六"], id: \.self) { w in
+                    Text(w).font(.caption).foregroundColor(.secondary)
+                }
+                ForEach(days) { day in
+                    monthDayCell(day)
+                }
+            }
+            .padding(.horizontal)
+        }
+    }
+
+    private func monthDayCell(_ day: ShareMonthDay) -> some View {
+        VStack(spacing: 2) {
+            Text("\(day.day)")
+                .font(.system(size: 15))
+                .foregroundColor(day.shift == "休息" ? .secondary : .primary)
+            Text(TeamInfo.shortName(day.shift))
+                .font(.caption2)
+                .foregroundColor(.white)
+                .frame(width: 26, height: 18)
+                .background(ShiftStyle.color(for: day.shift))
+                .clipShape(Capsule())
+        }
+        .frame(maxWidth: .infinity, minHeight: 48)
+        .background(Color(.systemGray6))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
     private func shiftMonth(_ delta: Int) {
