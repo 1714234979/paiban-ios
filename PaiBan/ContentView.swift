@@ -1,23 +1,98 @@
 import SwiftUI
 import UIKit
 
-/// 开屏（1.2.7.010）：启动时全屏品牌闪屏，盖住加载/过渡。
-/// 中间大 logo + 下方「排班空间」；最少 0.5 秒，主界面准备好（isStarting=false）才揭开，
-/// 不提前消失留白屏。只在冷启动出现一次（showSplash 是 ContentView 的 @State，
-/// 回前台不重建 ContentView，不会再弹）。
+/// 开屏（1.2.7.010，按老爷定稿的 v4 图做，不改样子）：
+/// 背景白到极浅的柔和渐变；屏幕正中间是我们自己的 App 图标，周围飘着班次色的
+/// 小 pill/小圆点（日班绿、夜班紫、中班粉、休息青，半透明，像粒子一样）；
+/// 没有「排班空间」四个大字（图标里已有「排」字）；最底下一行小灰字
+/// 「倒班排班 · 一目了然」，字号小、放最底下。
 struct SplashView: View {
+    /// 飘着的班次色粒子：相对中心偏移、宽、高、颜色、透明度、是不是圆点。
+    private struct Particle: Identifiable {
+        let id = UUID()
+        let x: CGFloat
+        let y: CGFloat
+        let w: CGFloat
+        let h: CGFloat
+        let color: Color
+        let opacity: Double
+        let isDot: Bool
+    }
+
+    private let dayGreen = Color(red: 0.16, green: 0.65, blue: 0.32)     // 日班绿
+    private let nightPurple = Color(red: 0.55, green: 0.40, blue: 0.85) // 夜班紫
+    private let midPink = Color(red: 0.92, green: 0.35, blue: 0.45)     // 中班粉
+    private let restTeal = Color(red: 0.10, green: 0.65, blue: 0.65)    // 休息青
+
+    private var particles: [Particle] {
+        [
+            // 上方
+            Particle(x: -55, y: -115, w: 26, h: 8, color: dayGreen, opacity: 0.6, isDot: false),
+            Particle(x: 15, y: -130, w: 10, h: 10, color: nightPurple, opacity: 0.65, isDot: true),
+            Particle(x: 70, y: -120, w: 22, h: 8, color: midPink, opacity: 0.6, isDot: false),
+            Particle(x: 35, y: -100, w: 30, h: 8, color: restTeal, opacity: 0.6, isDot: false),
+            Particle(x: -15, y: -105, w: 9, h: 9, color: dayGreen, opacity: 0.65, isDot: true),
+            Particle(x: 95, y: -95, w: 8, h: 8, color: restTeal, opacity: 0.65, isDot: true),
+            Particle(x: -85, y: -90, w: 24, h: 8, color: midPink, opacity: 0.6, isDot: false),
+            // 左边
+            Particle(x: -125, y: -45, w: 28, h: 8, color: restTeal, opacity: 0.6, isDot: false),
+            Particle(x: -145, y: 5, w: 10, h: 10, color: nightPurple, opacity: 0.65, isDot: true),
+            Particle(x: -115, y: 55, w: 26, h: 8, color: dayGreen, opacity: 0.6, isDot: false),
+            Particle(x: -135, y: -85, w: 20, h: 8, color: midPink, opacity: 0.6, isDot: false),
+            Particle(x: -100, y: -25, w: 8, h: 8, color: dayGreen, opacity: 0.65, isDot: true),
+            // 右边
+            Particle(x: 125, y: -35, w: 30, h: 8, color: restTeal, opacity: 0.6, isDot: false),
+            Particle(x: 145, y: 15, w: 9, h: 9, color: nightPurple, opacity: 0.65, isDot: true),
+            Particle(x: 120, y: 65, w: 26, h: 8, color: midPink, opacity: 0.6, isDot: false),
+            Particle(x: 140, y: -75, w: 8, h: 8, color: dayGreen, opacity: 0.65, isDot: true),
+            Particle(x: 105, y: 0, w: 24, h: 8, color: nightPurple, opacity: 0.6, isDot: false),
+            // 下方
+            Particle(x: -55, y: 115, w: 28, h: 8, color: midPink, opacity: 0.6, isDot: false),
+            Particle(x: 20, y: 130, w: 10, h: 10, color: nightPurple, opacity: 0.65, isDot: true),
+            Particle(x: 75, y: 120, w: 26, h: 8, color: dayGreen, opacity: 0.6, isDot: false),
+            Particle(x: -15, y: 145, w: 30, h: 8, color: restTeal, opacity: 0.6, isDot: false),
+            Particle(x: 55, y: 150, w: 9, h: 9, color: restTeal, opacity: 0.65, isDot: true),
+            Particle(x: -85, y: 100, w: 8, h: 8, color: midPink, opacity: 0.65, isDot: true),
+            Particle(x: 100, y: 100, w: 22, h: 8, color: nightPurple, opacity: 0.6, isDot: false),
+        ]
+    }
+
     var body: some View {
         ZStack {
-            Color(.systemBackground).ignoresSafeArea()
-            VStack(spacing: 18) {
+            // 背景：白到极浅的柔和渐变。
+            LinearGradient(
+                gradient: Gradient(colors: [.white, Color(red: 0.95, green: 0.96, blue: 0.98)]),
+                startPoint: .top,
+                endPoint: .bottom
+            )
+            .ignoresSafeArea()
+            // 正中间：图标 + 飘着的班次色粒子。
+            ZStack {
+                ForEach(particles) { p in
+                    Group {
+                        if p.isDot {
+                            Circle().fill(p.color)
+                        } else {
+                            Capsule().fill(p.color)
+                        }
+                    }
+                    .frame(width: p.w, height: p.h)
+                    .opacity(p.opacity)
+                    .offset(x: p.x, y: p.y)
+                }
                 Image("SplashLogo")
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(width: 120, height: 120)
                     .cornerRadius(28)
-                Text("排班空间")
-                    .font(.title2).bold()
-                    .foregroundColor(.primary)
+            }
+            // 最底下：小灰字。
+            VStack {
+                Spacer()
+                Text("倒班排班 · 一目了然")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+                    .padding(.bottom, 48)
             }
         }
     }
