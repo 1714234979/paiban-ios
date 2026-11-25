@@ -12,11 +12,16 @@ struct WidgetPreviewGallery: View {
     let kind: String
 
     var body: some View {
-        let snap = Self.demoSnapshot()
-        let entry = Self.demoEntry(snapshot: snap)
-        ZStack {
-            Color(.systemGroupedBackground).ignoresSafeArea()
-            widgetView(entry: entry, snapshot: snap)
+        if kind.hasPrefix("app-") {
+            // App 页面截图（1.2.8.001）：排班 / 工资 / 设置三页 × 深 / 浅，渲染真页面。
+            AppPagePreview(kind: kind)
+        } else {
+            let snap = Self.demoSnapshot()
+            let entry = Self.demoEntry(snapshot: snap)
+            ZStack {
+                Color(.systemGroupedBackground).ignoresSafeArea()
+                widgetView(entry: entry, snapshot: snap)
+            }
         }
     }
 
@@ -100,6 +105,84 @@ struct WidgetPreviewGallery: View {
         let dayStart = cal.startOfDay(for: now)
         let live = PayCalc.todayLiveState(shift: "早班", onLeave: false, day: dayStart, now: now, baseSalary: 2420, dateString: "2026-11-24", earlyRate: 70, midRate: 30, mealRate: 10)
         return Entry(date: now, snapshot: snapshot, live: live)
+    }
+}
+
+/// App 页面截图（1.2.8.001）：排班 / 工资 / 设置三页 × 深 / 浅，用演示数据渲染真页面。
+/// 演示账号：张晓文（B 班，内测人员，有工资权限）；演示时间 2026-11-24（画廊时钟）。
+/// 日历走本地 8 天轮算（不用联网）；工资用预览那份 11 月工资；设置页直接读演示账号。
+/// 只在 DEBUG 包里编进（Release 包没有）。
+private struct AppPagePreview: View {
+    let kind: String // app-calendar-dark / app-pay-dark / app-settings-dark / …-light
+    @StateObject private var store: AppStore = AppPagePreview.makeDemoStore()
+
+    private var isDark: Bool { kind.hasSuffix("-dark") }
+    private var tabIndex: Int {
+        if kind.contains("-pay-") { return 1 }
+        if kind.contains("-settings-") { return 2 }
+        return 0
+    }
+
+    var body: some View {
+        MainTabView()
+            .environmentObject(store)
+            .preferredColorScheme(isDark ? .dark : .light)
+            .onAppear {
+                store.selectedTab = tabIndex
+                store.appearance = isDark ? .dark : .light
+            }
+    }
+
+    @MainActor
+    static func makeDemoStore() -> AppStore {
+        let store = AppStore()
+        store.user = UserProfile(
+            id: "demo-zhangxiaowen", username: "18765766628", role: "admin",
+            enabled: true, canWrite: true, phone: "18765766628", displayName: "张晓文",
+            lastPhoneChangeAt: nil, passwordViewable: nil, team: "B",
+            teamHistory: [TeamHistoryEntry(team: "B", effectiveFrom: "2026-11-02")],
+            paySettings: PaySettings(
+                baseSalary: 2420, bonusCoef: 1, contributionBase: 5938, position: nil,
+                utilities: 60, hireYear: 2018, hireMonth: 10, deptPerfDefault: nil,
+                deptPerf: nil, perfCoefDefault: nil, annualLeaveTotal: 5,
+                annualLeaveRemaining: 0, education: "其他", shortageSubsidy: nil
+            ),
+            payMonths: nil, onboardingDone: true, isBetaTester: true, payAccess: true,
+            rotation: nil, displaySettings: nil
+        )
+        store.isLoggedIn = true
+        store.isStarting = false
+        store.serverBaseURL = "http://47.97.168.14:3003"
+        store.serverKind = .cloud
+        store.pay = AppPagePreview.demoPay()
+        return store
+    }
+
+    /// 演示工资（2026 年 11 月）：全年天数按 B 班 8 天轮本地算，
+    /// 11-02、11-03 按真记录记年休假，PayCalc 现算（和 App 本地算同一条链）。
+    static func demoPay() -> PayMonth? {
+        var yearDays: [DaySchedule] = []
+        for m in 1...12 {
+            yearDays += ScheduleCalculator.localMonth(team: "B", year: 2026, month: m).days ?? []
+        }
+        yearDays = yearDays.map { d in
+            var d = d
+            if d.date == "2026-11-02" || d.date == "2026-11-03" {
+                d.onLeave = true
+                d.leaveType = "年休假"
+            }
+            return d
+        }
+        let settings = PaySettings(
+            baseSalary: 2420, bonusCoef: 1, contributionBase: 5938, position: nil,
+            utilities: 60, hireYear: 2018, hireMonth: 10, deptPerfDefault: nil,
+            deptPerf: nil, perfCoefDefault: nil, annualLeaveTotal: 5,
+            annualLeaveRemaining: 0, education: "其他", shortageSubsidy: nil
+        )
+        return PayCalc.computePay(
+            yearDays: yearDays, global: PayGlobalSettings(), userSettings: settings,
+            recordedMonths: [:], effective: [:], annualLeaveOffset: 0, year: 2026, month: 11
+        )
     }
 }
 

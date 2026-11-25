@@ -25,7 +25,7 @@ struct OnboardingView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 ProgressView(value: Double(step + 1), total: Double(totalSteps))
-                    .tint(AppStyle.navy)
+                    .tint(AppStyle.navyAdaptive)
                     .padding(.horizontal, AppStyle.pagePadding)
                     .padding(.top, 12)
 
@@ -98,7 +98,7 @@ struct OnboardingView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("手动排班").font(.headline).foregroundColor(.white)
                     Text("班次无周期规律\n灵活性强但需逐日点击")
-                        .font(.subheadline).foregroundColor(.white.opacity(0.9))
+                        .font(.subheadline).foregroundColor(AppStyle.whiteText(opacity: 0.9))
                 }
                 .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
                 .padding(16)
@@ -116,7 +116,7 @@ struct OnboardingView: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("周期排班").font(.headline).foregroundColor(.white)
                     Text("班次周期固定\n一次生成多月日历")
-                        .font(.subheadline).foregroundColor(.white.opacity(0.9))
+                        .font(.subheadline).foregroundColor(AppStyle.whiteText(opacity: 0.9))
                 }
                 .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
                 .padding(16)

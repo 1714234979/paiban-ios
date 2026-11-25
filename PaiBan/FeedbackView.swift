@@ -121,7 +121,7 @@ struct FeedbackView: View {
                         .font(.headline)
                         .frame(maxWidth: .infinity)
                         .frame(height: AppStyle.buttonHeight)
-                        .background(AppStyle.navy)
+                        .background(AppStyle.navyAdaptive)
                         .foregroundColor(.white)
                         .cornerRadius(AppStyle.buttonRadius)
                 }
@@ -301,7 +301,7 @@ struct FeedbackView: View {
                     HStack {
                         Text(replySpeaker(reply))
                             .font(.caption).bold()
-                            .foregroundColor(reply.from == "admin" ? AppStyle.navy : .primary)
+                            .foregroundColor(reply.from == "admin" ? AppStyle.navyText : .primary)
                         Text(Self.displayTime(reply.at))
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -336,7 +336,7 @@ struct FeedbackView: View {
                         .font(.subheadline).bold()
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
-                        .background(AppStyle.navy)
+                        .background(AppStyle.navyAdaptive)
                         .foregroundColor(.white)
                         .cornerRadius(8)
                 }

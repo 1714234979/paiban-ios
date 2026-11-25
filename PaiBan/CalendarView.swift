@@ -148,7 +148,7 @@ struct CalendarView: View {
                 .foregroundColor(.white)
             Text(todayShiftLine)
                 .font(.subheadline)
-                .foregroundColor(.white.opacity(0.75))
+                .foregroundColor(AppStyle.whiteText(opacity: 0.75))
             if let day = store.todaySchedule {
                 let inputs = store.todayPayInputs
                 TodayLiveRow(day: day, baseSalary: inputs.baseSalary, earlyRate: inputs.earlyRate, midRate: inputs.midRate, mealRate: inputs.mealRate)
@@ -156,7 +156,7 @@ struct CalendarView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(AppStyle.navy)
+        .background(AppStyle.navyAdaptive)
         .cornerRadius(16)
     }
 
@@ -193,7 +193,7 @@ struct CalendarView: View {
                         .bold(store.viewTeam == team)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
-                        .background(store.viewTeam == team ? AppStyle.navy : Color(.systemBackground))
+                        .background(store.viewTeam == team ? AppStyle.navyAdaptive : Color(.systemBackground))
                         .foregroundColor(store.viewTeam == team ? .white : .primary)
                         .cornerRadius(20)
                 }
@@ -634,6 +634,8 @@ struct MonthPageView: View {
 /// 和色块重叠、不另起一行；法定「假/班」保持原样，两套标法不混。
 struct DayCell: View {
     @EnvironmentObject private var store: AppStore
+    /// 1.2.8.001：上下月补的日期在深色下 0.5 透明太暗、看着发虚，深色放宽到 0.65。
+    @Environment(\.colorScheme) private var colorScheme
 
     let day: DaySchedule
     let isToday: Bool
@@ -742,7 +744,7 @@ struct DayCell: View {
                         ForEach(Array(displayLunarText.enumerated()), id: \.offset) { _, ch in
                             Text(String(ch))
                                 .font(.system(size: 9))
-                                .foregroundColor(extra.isRedText ? .red : .secondary)
+                                .foregroundColor(extra.isRedText ? .red : AppStyle.tinySecondary)
                         }
                     }
                 }
@@ -771,10 +773,10 @@ struct DayCell: View {
                             }
                             Text("三薪")
                                 .font(.system(size: 9, weight: .bold))
-                                .foregroundColor(.white.opacity(0.9))
+                                .foregroundColor(AppStyle.whiteText(opacity: 0.9))
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 13)
-                                .background(Color.black.opacity(0.22))
+                                .background(AppStyle.tripleScrim)
                         }
                         .frame(height: pillHeight)
                         .clipShape(RoundedRectangle(cornerRadius: 7))
@@ -801,7 +803,7 @@ struct DayCell: View {
                             .frame(height: 15)
                         Text("三薪")
                             .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(.white.opacity(0.85))
+                            .foregroundColor(AppStyle.whiteText(opacity: 0.85))
                             .frame(maxWidth: .infinity)
                             .frame(height: 13)
                     }
@@ -819,7 +821,7 @@ struct DayCell: View {
                         .cornerRadius(7)
                 }
             }
-            .opacity(isAdjacent ? 0.5 : 1.0)
+            .opacity(isAdjacent ? (colorScheme == .dark ? 0.65 : 0.5) : 1.0)
         }
         .padding(2)
         .frame(height: calendarCellHeight)
@@ -859,7 +861,7 @@ private struct TodayLiveRow: View {
                 if let money = moneyText(state: state, triple: triple) {
                     Text(money)
                         .font(.subheadline)
-                        .foregroundColor(.white.opacity(0.75))
+                        .foregroundColor(AppStyle.whiteText(opacity: 0.75))
                 }
             }
         }

@@ -66,7 +66,7 @@ struct LoginView: View {
         VStack(spacing: 8) {
             ZStack {
                 RoundedRectangle(cornerRadius: 20)
-                    .fill(AppStyle.navy)
+                    .fill(AppStyle.navyAdaptive)
                     .frame(width: 84, height: 84)
                 Text("班")
                     .font(.system(size: 44, weight: .bold))
@@ -178,7 +178,7 @@ struct LoginView: View {
             }
             .frame(maxWidth: .infinity)
             .frame(height: AppStyle.buttonHeight)
-            .background(AppStyle.navy)
+            .background(AppStyle.navyAdaptive)
             .foregroundColor(.white)
             .cornerRadius(AppStyle.buttonHeight / 2)
         }
@@ -231,7 +231,7 @@ struct LoginView: View {
             VStack(spacing: 6) {
                 ZStack {
                     Circle()
-                        .fill(isActive ? AppStyle.navy : Color(.systemBackground))
+                        .fill(isActive ? AppStyle.navyAdaptive : Color(.systemBackground))
                         .frame(width: 56, height: 56)
                         .overlay(
                             Circle()

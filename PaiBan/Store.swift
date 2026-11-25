@@ -81,6 +81,10 @@ final class AppStore: ObservableObject {
     var payAccess: Bool { user?.payAccess ?? true }
     /// 1.2.7.001：日历显示设置（本地 UserDefaults + 服务端 profile 同步）。
     @Published var calendarDisplay: CalendarDisplaySettings = CalendarDisplaySettings.loadLocal()
+    /// 1.2.8.001：外观（跟随系统/浅色/深色，本地 UserDefaults；改完立刻生效，不用重启）。
+    @Published var appearance: AppearanceMode = AppearanceMode.loadLocal() {
+        didSet { appearance.saveLocal() }
+    }
     /// 1.2.7.001：节假日缓存（key 日期，value 节假日一天；服务端拉取，挂了用内置表）。
     @Published var holidays: [String: HolidayDay] = [:]
     @Published var holidaysUpdatedAt: String?

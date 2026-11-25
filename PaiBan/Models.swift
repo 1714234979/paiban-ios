@@ -795,6 +795,48 @@ struct CalendarDisplaySettings: Codable, Equatable {
     }
 }
 
+// MARK: - 外观 / 深色模式（1.2.8.001）
+
+/// 外观：跟随系统（默认）/ 浅色 / 深色。存本地（UserDefaults），只本机生效、
+/// 不进 profile（换机不同步，各人手机自己选）。
+/// 设置页改完立刻生效（PaiBanApp 里 preferredColorScheme 跟着 store.appearance 走），不用重启 App。
+enum AppearanceMode: String, Codable, CaseIterable {
+    case system
+    case light
+    case dark
+
+    var title: String {
+        switch self {
+        case .system: return "跟随系统"
+        case .light: return "浅色"
+        case .dark: return "深色"
+        }
+    }
+
+    /// 传给 preferredColorScheme：跟随系统传 nil（系统定），浅色/深色强制对应外观。
+    var colorScheme: ColorScheme? {
+        switch self {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
+        }
+    }
+
+    private static let localKey = "paiban.appearanceMode"
+
+    static func loadLocal() -> AppearanceMode {
+        guard let raw = UserDefaults.standard.string(forKey: localKey),
+              let mode = AppearanceMode(rawValue: raw) else {
+            return .system
+        }
+        return mode
+    }
+
+    func saveLocal() {
+        UserDefaults.standard.set(rawValue, forKey: Self.localKey)
+    }
+}
+
 // MARK: - 节假日（1.2.7.001，第 23 条）
 
 /// 节假日一天：kind = legal（法定节假日/三薪）/ rest（普通放假）/ workday（调休上班日）。

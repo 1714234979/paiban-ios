@@ -379,10 +379,10 @@ struct DayDetailView: View {
         Text(banHintText)
             .font(.subheadline)
             .lineSpacing(4)
-            .foregroundColor(Color(red: 0.45, green: 0.33, blue: 0.05))
+            .foregroundColor(AppStyle.banHintText)
             .padding(AppStyle.cardPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(red: 1.0, green: 0.95, blue: 0.80))
+            .background(AppStyle.banHintBackground)
             .cornerRadius(AppStyle.cardRadius)
     }
 

@@ -108,11 +108,11 @@ struct PayView: View {
                 .foregroundColor(.white)
             Text("本地计算，仅供参考")
                 .font(.subheadline)
-                .foregroundColor(.white.opacity(0.75))
+                .foregroundColor(AppStyle.whiteText(opacity: 0.75))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(AppStyle.navy)
+        .background(AppStyle.navyAdaptive)
         .cornerRadius(16)
         .padding(.horizontal, 16)
         .padding(.top, 8)

@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 /// 开屏（1.2.7.010，按老爷定稿的 v4 图做，不改样子）：
-/// 背景白到极浅的柔和渐变；屏幕正中间是我们自己的 App 图标，周围飘着班次色的
+/// 背景白到极浅的柔和渐变（1.2.8.001：深色改深灰渐变，不闪白屏）；屏幕正中间是我们自己的 App 图标，周围飘着班次色的
 /// 小 pill/小圆点（日班绿、夜班紫、中班粉、休息青，半透明，像粒子一样）；
 /// 没有「排班空间」四个大字（图标里已有「排」字）；最底下一行小灰字
 /// 「倒班排班 · 一目了然」，字号小、放最底下。
@@ -59,9 +59,9 @@ struct SplashView: View {
 
     var body: some View {
         ZStack {
-            // 背景：白到极浅的柔和渐变。
+            // 背景：白到极浅的柔和渐变（1.2.8.001：深色改深灰渐变，不闪白屏）。
             LinearGradient(
-                gradient: Gradient(colors: [.white, Color(red: 0.95, green: 0.96, blue: 0.98)]),
+                gradient: Gradient(colors: [AppStyle.splashTop, AppStyle.splashBottom]),
                 startPoint: .top,
                 endPoint: .bottom
             )

@@ -155,6 +155,22 @@ struct SettingsView: View {
                 }
             }
 
+            // 外观（1.2.8.001）：深色模式。跟随系统 / 浅色 / 深色，改完立刻生效，不用重启。
+            Section("外观") {
+                Picker("深色模式", selection: Binding(
+                    get: { store.appearance },
+                    set: { store.appearance = $0 }
+                )) {
+                    ForEach(AppearanceMode.allCases, id: \.self) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                Text("跟随系统按手机的深色模式走；选深色就是一直深色，选浅色就是一直浅色。改完立刻生效。")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
             // 工资设置：只有有工资权限的人才显示（1.2.7.001，第 23 条）。
             // 没权限的人连工资 Tab 都没有，设置页也不出现这一行。
             if store.payAccess {
@@ -1009,6 +1025,12 @@ struct UsageGuideView: View {
 struct ChangelogView: View {
     var body: some View {
         Form {
+            Section {
+                changelog(version: "1.2.8.001（内测）", items: [
+                    "设置里加深色模式：跟随系统 / 浅色 / 深色三个选项，改完立刻生效，不用重启 App",
+                    "修深色模式字体模糊：深色下半透明白字（顶栏班次行、倒计时钱那行、三薪行）发灰发虚，改成纯白；顶栏深 navy 卡片和按钮在黑底上没边，深色提亮一档；8–9pt 阴历小字太暗提亮；上下月补的日期深色放亮一点；开屏深色改深灰渐变，不闪白屏",
+                ])
+            }
             Section {
                 changelog(version: "1.2.8", items: [
                     "修小号小组件显示不全：小号宽度有限，顶行日期和底行明日班次都被 … 截断；两行字号都收到 caption2、外边距收紧、班组 pill 收紧，日期和明日班次完整显示，不截断",

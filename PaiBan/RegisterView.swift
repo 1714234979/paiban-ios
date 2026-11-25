@@ -91,7 +91,7 @@ struct RegisterView: View {
                         }
                         .frame(maxWidth: .infinity)
                         .frame(height: AppStyle.buttonHeight)
-                        .background(AppStyle.navy)
+                        .background(AppStyle.navyAdaptive)
                         .foregroundColor(.white)
                         .cornerRadius(AppStyle.buttonRadius)
                     }

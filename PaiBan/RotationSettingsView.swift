@@ -289,7 +289,7 @@ struct RotationSettingsView: View {
                     .foregroundColor(.white)
                 Text(subtitle)
                     .font(.caption)
-                    .foregroundColor(.white.opacity(0.9))
+                    .foregroundColor(AppStyle.whiteText(opacity: 0.9))
             }
             .frame(maxWidth: .infinity, minHeight: 84, alignment: .leading)
             .padding(12)

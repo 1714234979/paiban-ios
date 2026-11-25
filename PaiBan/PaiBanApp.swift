@@ -14,12 +14,16 @@ struct PaiBanApp: App {
             } else {
                 ContentView()
                     .environmentObject(store)
+                    // 1.2.8.001：外观跟设置走（跟随系统传 nil；改完立刻生效，不用重启）。
+                    .preferredColorScheme(store.appearance.colorScheme)
                     // 1.2.7：小组件深链（paiban://schedule 进排班页、paiban://pay 进工资页）。
                     .onOpenURL { store.handleDeepLink($0) }
             }
             #else
             ContentView()
                 .environmentObject(store)
+                // 1.2.8.001：外观跟设置走（跟随系统传 nil；改完立刻生效，不用重启）。
+                .preferredColorScheme(store.appearance.colorScheme)
                 // 1.2.7：小组件深链（paiban://schedule 进排班页、paiban://pay 进工资页）。
                 .onOpenURL { store.handleDeepLink($0) }
             #endif

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit // 自适应色用 UIColor 动态色（1.2.8.001）
 
 /// 全 App 设计规范（1.1.4 统一，老爷 2026-11-24 06:09 定「统一整个软件的 UI 设计」）。
 ///
@@ -21,6 +22,82 @@ import SwiftUI
 enum AppStyle {
     /// 品牌深 navy。
     static let navy = Color(red: 0.11, green: 0.15, blue: 0.23)
+    /// 深 navy 字（反馈页管理员名，1.2.8.001 深色修）：浅色沿用深 navy；
+    /// 深色改亮钢蓝——深 navy 字写在黑底上根本看不清。
+    static var navyText: Color {
+        Color(UIColor { t in
+            t.userInterfaceStyle == .dark
+                ? UIColor(red: 0.65, green: 0.75, blue: 0.95, alpha: 1)
+                : UIColor(red: 0.11, green: 0.15, blue: 0.23, alpha: 1)
+        })
+    }
+    /// 深色提亮一档，不然卡片在黑底上没边、里面的字也糊成一片。
+    static var navyAdaptive: Color {
+        Color(UIColor { t in
+            t.userInterfaceStyle == .dark
+                ? UIColor(red: 0.18, green: 0.23, blue: 0.34, alpha: 1)
+                : UIColor(red: 0.11, green: 0.15, blue: 0.23, alpha: 1)
+        })
+    }
+    /// 半透明白字（1.2.8.001 深色修）：浅色保持原来那个透明度，深色改纯白。
+    /// 深色下 75%/85%/90% 的白字发灰发虚，是「深色模式字体模糊」的头号原因。
+    static func whiteText(opacity lightOpacity: Double) -> Color {
+        Color(UIColor { t in
+            t.userInterfaceStyle == .dark
+                ? UIColor(white: 1, alpha: 1)
+                : UIColor(white: 1, alpha: lightOpacity)
+        })
+    }
+    /// 8–9pt 小灰字（阴历、脚注）（1.2.8.001 深色修）：浅色沿用系统 secondary；
+    /// 深色提亮到 0.78 白——深色下系统 secondary 太暗，小字笔画细、看着发虚。
+    static var tinySecondary: Color {
+        Color(UIColor { t in
+            t.userInterfaceStyle == .dark
+                ? UIColor(white: 0.78, alpha: 1)
+                : UIColor.secondaryLabel
+        })
+    }
+    /// 「三薪」行底衬（1.2.8.001 深色修）：浅色黑 0.22（原来那样）；
+    /// 深色改白 0.14——黑衬在深色 pill 上把那行压得更暗，白字跟着糊。
+    static var tripleScrim: Color {
+        Color(UIColor { t in
+            t.userInterfaceStyle == .dark
+                ? UIColor(white: 1, alpha: 0.14)
+                : UIColor(white: 0, alpha: 0.22)
+        })
+    }
+    /// 当天详情连班禁令提示条（1.2.8.001 深色修）：浅色深棕字 + 浅黄底（原来那样）；
+    /// 深色改浅琥珀字 + 深棕底，不然亮黄块在深色页里晃眼、字也扎眼。
+    static var banHintText: Color {
+        Color(UIColor { t in
+            t.userInterfaceStyle == .dark
+                ? UIColor(red: 1.0, green: 0.85, blue: 0.55, alpha: 1)
+                : UIColor(red: 0.45, green: 0.33, blue: 0.05, alpha: 1)
+        })
+    }
+    static var banHintBackground: Color {
+        Color(UIColor { t in
+            t.userInterfaceStyle == .dark
+                ? UIColor(red: 0.25, green: 0.19, blue: 0.08, alpha: 1)
+                : UIColor(red: 1.0, green: 0.95, blue: 0.80, alpha: 1)
+        })
+    }
+    /// 开屏渐变（1.2.8.001 深色修）：浅色白到极浅（原来那样）；深色改深灰渐变，
+    /// 不然深色下启动先闪一下白屏。
+    static var splashTop: Color {
+        Color(UIColor { t in
+            t.userInterfaceStyle == .dark
+                ? UIColor(red: 0.07, green: 0.08, blue: 0.10, alpha: 1)
+                : UIColor(white: 1, alpha: 1)
+        })
+    }
+    static var splashBottom: Color {
+        Color(UIColor { t in
+            t.userInterfaceStyle == .dark
+                ? UIColor(red: 0.10, green: 0.11, blue: 0.13, alpha: 1)
+                : UIColor(red: 0.95, green: 0.96, blue: 0.98, alpha: 1)
+        })
+    }
     /// 卡片圆角。
     static let cardRadius: CGFloat = 16
     /// 卡片内边距。
@@ -70,7 +147,7 @@ struct AppPrimaryButton: View {
                 .font(.headline)
                 .frame(maxWidth: .infinity)
                 .frame(height: AppStyle.buttonHeight)
-                .background(AppStyle.navy)
+                .background(AppStyle.navyAdaptive)
                 .foregroundColor(.white)
                 .cornerRadius(AppStyle.buttonRadius)
         }
