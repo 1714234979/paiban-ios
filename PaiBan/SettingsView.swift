@@ -434,8 +434,10 @@ struct SettingsView: View {
 
     // MARK: 检查更新
 
-    /// 渠道按钮（1.2.7.002）：当前渠道高亮；点另一个渠道先拉目标渠道最新版、再弹确认。
+    /// 渠道按钮（1.2.7.002）：当前渠道高亮；点另一个渠道先弹确认。
     /// 1.2.7.003：拉取时被点的按钮转圈 + 变灰，让人知道已经点上了。
+    /// 1.2.7.007：.plain 改 .borderless——List 行里并排两个 plain 按钮，
+    /// 行手势把点击吞掉，两个都点不动；borderless 才各自接得到点击。
     private func channelButton(title: String, channel: String) -> some View {
         let selected = UpdateChecker.channel == channel
         let fetching = isFetchingChannelVersion && !selected
@@ -458,32 +460,43 @@ struct SettingsView: View {
             .background(selected ? Color(.systemBackground) : Color.clear)
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
-        .buttonStyle(.plain)
+        .buttonStyle(.borderless)
         .disabled(isFetchingChannelVersion)
         .opacity(fetching ? 0.7 : 1.0)
     }
 
-    /// 点另一个渠道：先拉目标渠道最新版，再弹确认框。
+    /// 点另一个渠道：先弹确认框（立刻有反应），目标渠道最新版后台拉到再填进去。
     /// @MainActor（1.2.7.003 修）：拉网回来后改 @State（pendingChannel、确认框）
     /// 必须在主线程。之前这个函数不是 @MainActor，Task 在后台线程续跑，
     /// @State 改了界面也不刷新，确认框永远弹不出来，看起来就是「点不动」。
+    /// 1.2.7.007：确认框不等拉网——003 的做法是拉到版本号才弹，网慢时点下去
+    /// 半天没反应，看着还是点不动。现在点下立刻弹，版本号到了再补进文案。
     @MainActor
     private func askChannelSwitch(to channel: String) async {
+        pendingChannel = channel
+        pendingChannelVersion = nil
+        showChannelSwitchConfirm = true
         isFetchingChannelVersion = true
         defer { isFetchingChannelVersion = false }
         let info = await store.fetchVersionForChannel(channel)
-        pendingChannel = channel
         pendingChannelVersion = info?.latestVersion
-        showChannelSwitchConfirm = true
     }
 
     /// 确认框文案：当前版本、目标渠道最新版、切了会怎样。
+    /// 1.2.7.007：版本号还在拉时显示「正在获取…」，拉到再补，拉不到才写未知。
     private var channelSwitchMessage: String {
         let current = UpdateChecker.currentVersion
         let currentLabel = UpdateChecker.channelLabel(for: current)
         let target = pendingChannel ?? "stable"
         let targetLabel = target == "beta" ? "内测版" : "正式版"
-        let targetVersion = pendingChannelVersion ?? "未知（没连上服务器）"
+        let targetVersion: String
+        if let v = pendingChannelVersion {
+            targetVersion = v
+        } else if isFetchingChannelVersion {
+            targetVersion = "正在获取…"
+        } else {
+            targetVersion = "未知（没连上服务器）"
+        }
         return "当前版本：\(currentLabel) \(current)\n目标渠道最新版：\(targetLabel) \(targetVersion)\n\n切过去后，App 按\(targetLabel)查更新；\(targetLabel)有新版就推给你装，不装也可以继续用现在的版本。"
     }
 
@@ -990,6 +1003,11 @@ struct UsageGuideView: View {
 struct ChangelogView: View {
     var body: some View {
         Form {
+            Section {
+                changelog(version: "1.2.7.007（内测）", items: [
+                    "修设置页切版本渠道点不动：List 行里并排两个 plain 按钮会被行手势吞掉点击，改 borderless 才点得动；确认框不等拉网，点下立刻弹，目标渠道版本号到了再补进文案",
+                ])
+            }
             Section {
                 changelog(version: "1.2.7.006（内测）", items: [
                     "小组件重写：密钥彻底拿掉，不用再填；取数只走设备直连，云和隧道并行抢答、8 秒封顶，工资拉不到也不拖垮班次；装好打开 App 就刷新，不用删掉重加；设置页小组件里加了「立即同步」，当场测取数通不通",
