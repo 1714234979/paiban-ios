@@ -152,6 +152,22 @@ struct PayView: View {
 
     // MARK: 月度明细
 
+    /// 当前倒班方式的工资是否待定（1.2.7.002：12h/6h 方式工资口径未定，金额不可信）。
+    private var isPayTBD: Bool { store.rotation.mode?.isPayTBD == true }
+
+    /// 当月各班次个数（按实际班次名统计，12h/6h 方式用这个，不走 8h 的日/早/中计数）。
+    private func shiftCountsForMonth(year: Int, month: Int) -> [(name: String, count: Int)] {
+        let m = store.monthFor(year: year, month: month)
+        var counts: [String: Int] = [:]
+        for d in (m.days ?? []) {
+            let parts = ShiftStyle.parts(of: d.shift)
+            for p in parts { counts[p, default: 0] += 1 }
+        }
+        let order = ["白班", "夜班", "日班", "中班", "早班", "前夜", "下午", "早", "后夜", "第一班", "第二班", "第三班", "第四班", "休息"]
+        return counts.map { (name: $0.key, count: $0.value) }
+            .sorted { (order.firstIndex(of: $0.name) ?? 99) < (order.firstIndex(of: $1.name) ?? 99) }
+    }
+
     /// 某月的工资明细：工资取 store.payFor（带 payCache 备忘，同一月只算一次），
     /// 相邻月预渲染时直接读缓存、不现算、不发网络；输入没到齐算不出时先显示加载，
     /// refreshPay 把输入补齐后重画。只看当前页这一份，不用等整页刷新。
@@ -159,6 +175,18 @@ struct PayView: View {
     private func monthBreakdown(year: Int, month: Int) -> some View {
         if let pay = store.payFor(year: year, month: month) {
             VStack(spacing: 16) {
+                // 1.2.7.002：12h/6h 方式工资口径待定——金额不算，只显示班次统计。
+                if isPayTBD {
+                    payTBDBanner(year: year, month: month)
+                    let counts = shiftCountsForMonth(year: year, month: month)
+                    paySection(title: "出勤", rows: [
+                        ("当月应出勤", pay.basicDays.map { "\($0) 天" } ?? "—"),
+                        ("实际出勤", attendanceText(pay.attendance)),
+                        ("班次统计", counts.isEmpty ? "—" : counts.map { "\($0.name) \($0.count) 个" }.joined(separator: "、")),
+                        ("请假", pay.leaveDays.map { "\($0) 天" } ?? "—"),
+                        ("年假剩余", pay.annualLeaveRemaining.map { "\($0) 天（全年 \(pay.annualLeaveTotal ?? 5) 天，已用 \(pay.annualLeaveYearUsed ?? 0) 天）" } ?? "—"),
+                    ])
+                } else {
                 salarySection(pay: pay)
                 bonusSection(pay: pay)
                 paySection(title: "合计", rows: [
@@ -172,6 +200,7 @@ struct PayView: View {
                     ("请假", pay.leaveDays.map { "\($0) 天" } ?? "—"),
                     ("年假剩余", pay.annualLeaveRemaining.map { "\($0) 天（全年 \(pay.annualLeaveTotal ?? 5) 天，已用 \(pay.annualLeaveYearUsed ?? 0) 天）" } ?? "—"),
                 ])
+                }
                 if let tripleDates = pay.tripleDates, !tripleDates.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("三薪明细")
@@ -201,6 +230,29 @@ struct PayView: View {
                 .foregroundColor(.secondary)
                 .padding()
         }
+    }
+
+    /// 工资待定提示卡（1.2.7.002）：12h/6h 方式的工资口径还没定，金额暂不算，
+    /// 只显示班次统计与总工时；等工资口径定了再算。
+    private func payTBDBanner(year: Int, month: Int) -> some View {
+        let mode = store.rotation.mode
+        let hours = (mode?.shiftHours ?? 8)
+        let counts = shiftCountsForMonth(year: year, month: month)
+        let workShifts = counts.filter { $0.name != "休息" }.reduce(0) { $0 + $1.count }
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("工资口径待定")
+                .font(.headline)
+            Text("\(mode?.name ?? "")是 \(hours) 小时班，工资口径还没定（12 小时/6 小时班的加班与津贴规则与 8 小时班不一样），金额暂不算，只显示班次统计。")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            Text("当月共上 \(workShifts) 个班 · \(workShifts * hours) 小时")
+                .font(.subheadline)
+                .bold()
+        }
+        .padding(AppStyle.cardPadding)
+        .background(Color(.systemBackground))
+        .cornerRadius(AppStyle.cardRadius)
+        .padding(.horizontal, 16)
     }
 
     private func paySection(title: String, rows: [(String, String)]) -> some View {

@@ -142,30 +142,62 @@ struct OnboardingView: View {
             } else {
                 Text("选倒班方式和班组")
                     .font(.title2).bold()
-                Text("四班三倒，8 小时三班。方式 A 是最标准的 8 天循环。")
+                Text("方式 A 是最标准的 8 天循环。班组数跟着方式走（五班三倒 5 个班，三班二倒 3 个班）。")
                     .foregroundColor(.secondary)
-                ForEach(RotationModes.fourThree) { mode in
-                    Button {
-                        modeId = mode.id
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(mode.name)
-                                    .foregroundColor(.primary)
-                                Text("\(mode.cycleDays) 天一循环 · \(mode.sequence)")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
+                // 1.2.7.002：全部方式按分类列出（四班三倒 5 种 + 新 15 种）；六班三倒序列未核实，继续留「即将推出」。
+                ForEach(RotationModes.categories, id: \.title) { cat in
+                    Text(cat.title)
+                        .font(.subheadline).bold()
+                        .padding(.top, 4)
+                    ForEach(cat.ids.compactMap { RotationModes.mode(id: $0) }) { mode in
+                        Button {
+                            modeId = mode.id
+                            // 班组跟着方式走：新方式没有当前班就回到第一个班。
+                            if let ids = RotationModes.mode(id: mode.id)?.teamIds, !ids.contains(team) {
+                                team = ids.first ?? "A"
                             }
-                            Spacer()
-                            if modeId == mode.id {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundColor(.green)
+                        } label: {
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(mode.name)
+                                        .foregroundColor(.primary)
+                                    Text("\(mode.cycleDays) 天一循环 · \(mode.sequence)")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    if mode.isPayTBD {
+                                        Text("工资口径待定（金额暂不算）")
+                                            .font(.caption)
+                                            .foregroundColor(.orange)
+                                    }
+                                }
+                                Spacer()
+                                if modeId == mode.id {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundColor(.green)
+                                }
                             }
                         }
+                        .padding(10)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(modeId == mode.id ? Color.blue.opacity(0.08) : Color(.secondarySystemBackground))
+                        .cornerRadius(10)
+                    }
+                }
+                ForEach(RotationModes.comingSoon, id: \.category) { item in
+                    HStack {
+                        Text(item.category)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text("即将推出")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color(.systemGray5))
+                            .cornerRadius(6)
                     }
                     .padding(10)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(modeId == mode.id ? Color.blue.opacity(0.08) : Color(.secondarySystemBackground))
+                    .background(Color(.secondarySystemBackground))
                     .cornerRadius(10)
                 }
             }
@@ -173,7 +205,7 @@ struct OnboardingView: View {
             Text("你在哪个班？")
                 .font(.headline)
             Picker("班组", selection: $team) {
-                ForEach(TeamInfo.allTeams, id: \.self) { t in
+                ForEach(RotationModes.mode(id: modeId)?.teamIds ?? TeamInfo.allTeams, id: \.self) { t in
                     Text("\(t)班").tag(t)
                 }
             }

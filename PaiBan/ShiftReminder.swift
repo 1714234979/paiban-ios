@@ -8,7 +8,6 @@ import UserNotifications
 /// UserDefaults key：shiftReminderEnabled（默认开）。
 enum ShiftReminder {
     static let enabledKey = "shiftReminderEnabled"
-    static let calendarExpandKey = "calendarDefaultExpandMonth"
     static let removeAdsKey = "vipRemoveAds"
 
     /// 开关当前值（默认开）。
@@ -18,12 +17,6 @@ enum ShiftReminder {
             return UserDefaults.standard.bool(forKey: enabledKey)
         }
         set { UserDefaults.standard.set(newValue, forKey: enabledKey) }
-    }
-
-    /// 日历默认展开整月（默认关：打开是当周紧凑视图）。
-    static var defaultExpandMonth: Bool {
-        get { UserDefaults.standard.bool(forKey: calendarExpandKey) }
-        set { UserDefaults.standard.set(newValue, forKey: calendarExpandKey) }
     }
 
     /// 去除广告（VIP 功能；广告系统还没来，只存标识。非 VIP 打开只存标识，不收费、不跳转）。

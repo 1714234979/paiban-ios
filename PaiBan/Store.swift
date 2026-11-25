@@ -1200,18 +1200,38 @@ final class AppStore: ObservableObject {
         }
     }
 
-    /// 手动模式：设某天的班次（shift = 日班/中班/早班/休息）。
+    /// 手动模式：设某天的班次（shift = 班次名，如日班/中班/早班/白班/夜班/休息，
+    /// 或自定义班次码 X1…）。名字按 RotationModes.shiftCode 转码；自定义码直接存。
     func setManualShift(date: String, shift: String) async throws {
         var r = rotation
         let code: String
-        switch shift {
-        case "日班": code = "D"
-        case "中班": code = "M"
-        case "早班": code = "N"
-        default: code = "-"
+        if shift.hasPrefix("X"), rotation.customShifts[shift] != nil {
+            code = shift
+        } else if shift == "休息" {
+            code = "-"
+        } else {
+            code = RotationModes.shiftCode(for: shift)
         }
         r.manualShifts[date] = code
         try await saveRotation(r)
+    }
+
+    /// 手动模式：清除某天的手动排班（「无」按钮：删掉当天的手动记录，那天算休息）。
+    func clearManualShift(date: String) async throws {
+        var r = rotation
+        r.manualShifts.removeValue(forKey: date)
+        try await saveRotation(r)
+    }
+
+    /// 手动排班页：加一个自定义班次（名字 + 颜色），返回新码（X1/X2…）。
+    func addCustomShift(name: String, colorHex: String) async throws -> String {
+        var r = rotation
+        var n = 1
+        while r.customShifts["X\(n)"] != nil { n += 1 }
+        let code = "X\(n)"
+        r.customShifts[code] = CustomShift(name: name, color: colorHex)
+        try await saveRotation(r)
+        return code
     }
 
     /// 按日期取某天（周视图用）：先找月缓存（含调班/请假），没有就本地按轮次算一条。
@@ -1416,6 +1436,27 @@ final class AppStore: ObservableObject {
     func checkForUpdateAfterLaunch() async {
         guard serverReachable || api.baseURL != nil else { return }
         pendingUpdate = await UpdateChecker.checkAfterLaunch(api: api)
+    }
+
+    /// 切渠道后立刻按新渠道查一次（1.2.7.002）：版本不一样就推出来（哪怕数字上更低），
+    /// 只有版本完全一样才说已是最新版本。
+    func checkForUpdateAfterChannelSwitch(channel: String) async {
+        guard serverReachable || api.baseURL != nil else {
+            updateNotice = "现在连不上服务器，稍后再试"
+            return
+        }
+        UpdateChecker.channel = channel
+        switch await UpdateChecker.checkAfterChannelSwitch(api: api, channel: channel) {
+        case .updateAvailable(let info):
+            pendingUpdate = info
+        case .upToDate:
+            updateNotice = "已是最新版本（当前 \(UpdateChecker.currentVersion)）"
+        }
+    }
+
+    /// 取某渠道的最新版本（切渠道确认框里显示目标渠道最新版用）。
+    func fetchVersionForChannel(_ channel: String) async -> VersionInfo? {
+        try? await api.fetchVersion(channel: channel)
     }
 
     /// 设置页「检查更新」手动查：有新版弹提示，没新版显示“已是最新版本”。

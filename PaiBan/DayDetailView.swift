@@ -339,8 +339,44 @@ struct DayDetailView: View {
     /// 连班禁令提示：1.1.4 重排——原来是 .caption 小灰字 + 淡黄底（yellow 0.10），
     /// 字挤、对比度低，看着像水印。现在字号提到 .subheadline、行距 4、深棕字 +
     /// 暖黄底（对比度够），padding 12、圆角 12，和详情卡同一尺寸语言。
+    /// 当前方式的禁令组（1.2.7.002：12h 方式用 12 小时那套，绝不能复用 8 小时那两条）。
+    private var banSet: String { store.rotation.mode?.banSet ?? "8h" }
+
+    /// 当前方式的工作班次名（从循环表里取，去重；调班/还班的候选用）。
+    private var modeShiftNames: [String] {
+        guard let mode = store.rotation.mode else { return ["日班", "中班", "早班"] }
+        var seen: [String] = []
+        for cycle in mode.cycles.values {
+            for s in cycle where s != "休息" && !seen.contains(s) { seen.append(s) }
+        }
+        return seen.isEmpty ? ["日班", "中班", "早班"] : seen
+    }
+
+    /// 12h 方式连上天数上限（与服务端 MAX_CONSECUTIVE_12H 一致）。
+    private var maxConsecutive12h: Int? {
+        switch store.rotation.modeId {
+        case "4-2-a", "4-2-b", "3-2-b": return 2
+        case "4-2-c", "panama": return 3
+        case "4-2-d1", "4-2-d2", "3-2-a", "dupont": return 4
+        default: return nil
+        }
+    }
+
+    /// 连班禁令提示文案（按方式走：12h 方式写 12 小时那套，6h 只写一条）。
+    private var banHintText: String {
+        switch banSet {
+        case "12h":
+            let max = maxConsecutive12h.map { "最多连上 \($0) 天。" } ?? ""
+            return "连班禁令：白班接夜班不行（24 小时连轴）；不能连上两个夜班；夜班后休 48 小时；一天只能上一个班；\(max)"
+        case "6h":
+            return "连班禁令：一天不能上两个相同的班。"
+        default:
+            return "连班禁令：中班接次日早班不行；早班+日班不行（0 点直接上到 16 点）；一天不能上两个相同的班；只剩早+中、日+中两种双班。"
+        }
+    }
+
     private var banHint: some View {
-        Text("连班禁令：中班接次日早班不行；早班+日班不行（0 点直接上到 16 点）；一天不能上两个相同的班；只剩早+中、日+中两种双班。")
+        Text(banHintText)
             .font(.subheadline)
             .lineSpacing(4)
             .foregroundColor(Color(red: 0.45, green: 0.33, blue: 0.05))
@@ -600,6 +636,48 @@ struct DayDetailView: View {
 
     // MARK: 顶岗评估（空间 evalCover 的 App 版）
 
+    /// 12h 禁令（1.2.7.002，与服务端 validateDayShift12h 逐条对齐）：
+    /// 一天只能上一个班；白班↔夜班不能相邻；不能连上两个夜班；
+    /// 夜班后 48 小时内不能上班；连上天数不能超该方式上限。返回 nil = 通过。
+    private func validate12h(newShift: String, dateStr: String) -> String? {
+        if newShift == "休息" { return nil }
+        let parts = ShiftStyle.parts(of: newShift)
+        if parts.count != 1 { return "12 小时班一天只能上一个班，不能拼双班" }
+        let s = parts[0]
+        guard s == "白班" || s == "夜班" else { return nil }
+        guard let date = DateUtil.date(from: dateStr) else { return nil }
+        func shiftOn(_ offset: Int) -> String? {
+            myDayOn(DateUtil.string(from: DateUtil.addingDays(date, offset)))?.shift
+        }
+        func has(_ sh: String?, _ name: String) -> Bool {
+            guard let sh else { return false }
+            return ShiftStyle.parts(of: sh).contains(name)
+        }
+        let prev = shiftOn(-1), prev2 = shiftOn(-2), next = shiftOn(1), next2 = shiftOn(2)
+        if s == "夜班" && has(prev, "白班") { return "白班接夜班不行（08:00 上到次日 08:00，24 小时连轴）" }
+        if s == "白班" && has(next, "夜班") { return "白班接夜班不行（08:00 上到次日 08:00，24 小时连轴）" }
+        if s == "夜班" && (has(prev, "夜班") || has(next, "夜班")) { return "不能连上两个夜班" }
+        if has(prev, "夜班") || has(prev2, "夜班") { return "夜班后要休 48 小时才能再上" }
+        if s == "夜班" && (has(next, "白班") || has(next, "夜班") || has(next2, "白班") || has(next2, "夜班")) { return "夜班后要休 48 小时才能再上" }
+        if let max = maxConsecutive12h {
+            var run = 1
+            var d = 1
+            while d < 40 {
+                let sh = shiftOn(-d)
+                if sh == nil || sh == "休息" { break }
+                run += 1; d += 1
+            }
+            d = 1
+            while d < 40 {
+                let sh = shiftOn(d)
+                if sh == nil || sh == "休息" { break }
+                run += 1; d += 1
+            }
+            if run > max { return "连上不能超过 \(max) 天" }
+        }
+        return nil
+    }
+
     /// 某人替我上 addedShift：他那天变成什么、行不行、不行是为什么。
     /// ownDay：他那天；prevDay/nextDay：他前后天（邻日禁令用，取不到就当没有，服务端还会再验）。
     private func evalCover(ownDay: DaySchedule?, prevDay: DaySchedule?, nextDay: DaySchedule?, addedShift: String) -> CoverEval {
@@ -622,6 +700,21 @@ struct DayDetailView: View {
         if union.count > 2 {
             return CoverEval(eligible: false, reason: "加上就是三个班了，顶不了", ownShift: ownShift, result: nil)
         }
+        // 12h：一天只能上一个班（已有班就不能再加）；再按 12h 禁令验邻日。
+        if banSet == "12h" {
+            if ownShift != "休息" {
+                return CoverEval(eligible: false, reason: "12 小时班一天只能上一个班", ownShift: ownShift, result: nil)
+            }
+            if let reason = validate12h(newShift: addedShift, dateStr: ownDay.date) {
+                return CoverEval(eligible: false, reason: reason, ownShift: ownShift, result: nil)
+            }
+            return CoverEval(eligible: true, reason: nil, ownShift: ownShift, result: ShiftStyle.combined(union))
+        }
+        // 6h：只查一天不能上两个相同的班（前面已查过重复），不查邻日禁令。
+        if banSet == "6h" {
+            return CoverEval(eligible: true, reason: nil, ownShift: ownShift, result: ShiftStyle.combined(union))
+        }
+        // 8h（原有逻辑）。
         if union.contains("早班") && union.contains("日班") {
             return CoverEval(eligible: false, reason: "早班和日班不能一起上：0 点直接上到 16 点，不允许", ownShift: ownShift, result: nil)
         }
@@ -647,6 +740,16 @@ struct DayDetailView: View {
         guard let ownDay else { return (false, "排班还没读出来") }
         if ownDay.onLeave == true { return (false, "这天请假") }
         if newShift == ownDay.shift { return (false, "要换的班和现在这天的班一样") }
+        // 12h：按 12h 禁令验（一天一个班、白夜不相邻、夜班不连、48 小时、连上上限）。
+        if banSet == "12h" {
+            if let reason = validate12h(newShift: newShift, dateStr: ownDay.date) {
+                return (false, reason)
+            }
+            return (true, nil)
+        }
+        // 6h：只查一天不能上两个相同的班（换整天不会重复，直接过）。
+        if banSet == "6h" { return (true, nil) }
+        // 8h（原有逻辑）。
         let newComps = ShiftStyle.parts(of: newShift)
         if newComps.contains("早班") && newComps.contains("日班") {
             return (false, "早班和日班不能一起上：0 点直接上到 16 点，不允许")
@@ -668,7 +771,7 @@ struct DayDetailView: View {
     private var swapShiftOptions: [(shift: String, eligible: Bool, reason: String?)] {
         let prev = myPrevDay(shownDay.date)
         let next = myNextDay(shownDay.date)
-        return ["日班", "中班", "早班", "休息"].map { s in
+        return (modeShiftNames + ["休息"]).map { s in
             let r = evalReplaceShift(ownDay: shownDay, prevDay: prev, nextDay: next, newShift: s)
             return (s, r.eligible, r.reason)
         }
@@ -697,7 +800,7 @@ struct DayDetailView: View {
             let prev = myPrevDay(dateStr)
             let next = myNextDay(dateStr)
             var options: [(shift: String, result: String)] = []
-            for s in ["日班", "中班", "早班"] {
+            for s in modeShiftNames {
                 let ev = evalCover(ownDay: myDay, prevDay: prev, nextDay: next, addedShift: s)
                 if ev.eligible, let result = ev.result { options.append((s, result)) }
             }

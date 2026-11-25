@@ -140,6 +140,18 @@ enum ShiftStyle {
         case "中班": return Color(red: 0.92, green: 0.35, blue: 0.45)   // 粉红
         case "早班": return Color(red: 0.55, green: 0.40, blue: 0.85)   // 紫
         case "休息": return Color(red: 0.10, green: 0.65, blue: 0.65)   // 青
+        // 1.2.7.002：12h 白班深蓝、夜班藏青；6h 前夜深青、下午橙、早浅绿、后夜深紫；
+        // 四班 6 小时一/二/三/四班深蓝/绿/橙/红粉；手动早班橙（与参考图一致）。
+        case "白班": return Color(red: 0.20, green: 0.45, blue: 0.85)   // 深蓝
+        case "夜班": return Color(red: 0.15, green: 0.25, blue: 0.60)   // 藏青
+        case "前夜": return Color(red: 0.10, green: 0.50, blue: 0.60)   // 深青
+        case "下午": return Color(red: 0.95, green: 0.55, blue: 0.15)   // 橙
+        case "早": return Color(red: 0.35, green: 0.75, blue: 0.35)     // 浅绿
+        case "后夜": return Color(red: 0.45, green: 0.30, blue: 0.70)   // 深紫
+        case "第一班": return Color(red: 0.20, green: 0.35, blue: 0.70) // 深蓝
+        case "第二班": return Color(red: 0.25, green: 0.70, blue: 0.40) // 绿
+        case "第三班": return Color(red: 0.90, green: 0.55, blue: 0.20) // 橙
+        case "第四班": return Color(red: 0.85, green: 0.30, blue: 0.40) // 红粉
         default: return .gray
         }
     }
@@ -155,6 +167,16 @@ enum ShiftStyle {
         case "中班": return "16:00–24:00"
         case "早班": return "00:00–08:00"
         case "休息": return "休息"
+        case "白班": return "08:00–20:00"
+        case "夜班": return "20:00–次日 08:00"
+        case "前夜": return "20:00–02:00"
+        case "下午": return "14:00–20:00"
+        case "早": return "08:00–14:00"
+        case "后夜": return "02:00–08:00"
+        case "第一班": return "00:00–06:00"
+        case "第二班": return "06:00–12:00"
+        case "第三班": return "12:00–18:00"
+        case "第四班": return "18:00–24:00"
         case "早中班": return "00:00–08:00 + 16:00–24:00"
         case "日中班": return "08:00–16:00 + 16:00–24:00"
         default: return shift
@@ -223,6 +245,16 @@ enum TeamInfo {
         case "中班": return "中"
         case "早班": return "早"
         case "休息": return "休"
+        case "白班": return "白"
+        case "夜班": return "夜"
+        case "前夜": return "前"
+        case "下午": return "午"
+        case "早": return "早"
+        case "后夜": return "后"
+        case "第一班": return "一"
+        case "第二班": return "二"
+        case "第三班": return "三"
+        case "第四班": return "四"
         default: return shift
         }
     }
@@ -230,8 +262,14 @@ enum TeamInfo {
     /// 班组显示名：有自定义班组名时用自定义名，否则用班组 ID（A/B/C/D）。
     /// teamNames 按 A/B/C/D 的顺序排（下标 0=A、1=B、2=C、3=D）。
     static func displayName(team: String, teamNames: [String]? = nil) -> String {
+        displayName(team: team, teamNames: teamNames, teamIds: allTeams)
+    }
+
+    /// 1.2.7.002：班组数跟着方式走，teamNames 按该方式的 teamIds 顺序排
+    ///（如 3-3-b 的 teamIds 是 [A,B,C,T]，teamNames[3] 是替休的名字）。
+    static func displayName(team: String, teamNames: [String]?, teamIds: [String]) -> String {
         guard let names = teamNames,
-              let idx = allTeams.firstIndex(of: team),
+              let idx = teamIds.firstIndex(of: team),
               idx < names.count, !names[idx].isEmpty else { return team }
         return names[idx]
     }
@@ -254,6 +292,14 @@ struct RotationMode: Codable, Equatable, Identifiable {
     var cycles: [String: [String]]
     var isAvailable: Bool
     var note: String?
+    /// 1.2.7.002：该方式的班组 id（班组数跟着方式走，如五班三倒是 5 个）；
+    /// banSet = 禁令组（8h/12h/6h）；pay = 工资口径（8h 正常 / TBD 待定）。
+    var teamIds: [String] = ["A", "B", "C", "D"]
+    var banSet: String = "8h"
+    var pay: String = "8h"
+
+    /// 该方式的工资是否待定（12h/6h 方式：工资口径未定，金额不可信）。
+    var isPayTBD: Bool { pay == "TBD" }
 
     /// 该方式下某班某天的班次（基准日 = 2026-11-01）。
     func shift(team: String, date: Date) -> String {
@@ -275,13 +321,46 @@ enum RotationModes {
     /// 手动排班的 modeId（不是一种循环方式，是「逐日点」）。
     static let manualId = "manual"
 
-    /// 班次码 → 班次名：D 日班、M 中班、N 早班、- 休息。
+    /// 班次码 → 班次名：D 日班、M 中班、N 早班、- 休息；W 白班、Y 夜班；
+    /// P 前夜、F 下午、R 早、L 后夜；1/2/3/4 四班 6 小时各班；E 手动早班。
+    /// 幂等：已经是班次名时直接返回（本地 cycles 存的是班次名，服务端存的是码）。
     static func shiftName(for code: String) -> String {
         switch code {
-        case "D": return "日班"
-        case "M": return "中班"
-        case "N": return "早班"
+        case "D", "日班": return "日班"
+        case "M", "中班": return "中班"
+        case "N", "早班": return "早班"
+        case "W", "白班": return "白班"
+        case "Y", "夜班": return "夜班"
+        case "P", "前夜": return "前夜"
+        case "F", "下午": return "下午"
+        case "R", "早": return "早"
+        case "L", "后夜": return "后夜"
+        case "1", "第一班": return "第一班"
+        case "2", "第二班": return "第二班"
+        case "3", "第三班": return "第三班"
+        case "4", "第四班": return "第四班"
+        case "E": return "早班"
         default: return "休息"
+        }
+    }
+
+    /// 班次名 → 班次码（手动排班存盘用；自定义班次码 X1… 直接透传）。
+    static func shiftCode(for name: String) -> String {
+        switch name {
+        case "日班": return "D"
+        case "中班": return "M"
+        case "早班": return "N"
+        case "白班": return "W"
+        case "夜班": return "Y"
+        case "前夜": return "P"
+        case "下午": return "F"
+        case "早": return "R"
+        case "后夜": return "L"
+        case "第一班": return "1"
+        case "第二班": return "2"
+        case "第三班": return "3"
+        case "第四班": return "4"
+        default: return "-"
         }
     }
 
@@ -344,23 +423,212 @@ enum RotationModes {
         ),
     ]
 
-    /// 其他分类（调研报告里的分类清单）：先只列出来、不可选。
-    /// 四班两倒要另做禁令组和工资口径、五班三倒要改班组数量上限、三班三倒要替休人员概念、六班三倒序列未核实——都后做。
+    // 1.2.7.002：新增 15 种倒班方式（循环表已逐日验算，见 derive_modes.py）。
+    static let moreModes: [RotationMode] = [
+        RotationMode(
+            id: "5-3-a", name: "五班三倒 · 10天循环", cycleDays: 10, shiftHours: 8, weeklyHours: 33.6,
+            sequence: "日日中中休早早休休休", teamIds: ["A", "B", "C", "D", "E"],
+            banSet: "8h", pay: "8h", note: "每班 6 上 4 休；每天 1 日 1 中 1 早 2 休；替班最容易",
+            cycles: [
+                "A": ["日班", "日班", "中班", "中班", "休息", "早班", "早班", "休息", "休息", "休息"],
+                "B": ["中班", "中班", "休息", "早班", "早班", "休息", "休息", "休息", "日班", "日班"],
+                "C": ["休息", "早班", "早班", "休息", "休息", "休息", "日班", "日班", "中班", "中班"],
+                "D": ["早班", "休息", "休息", "休息", "日班", "日班", "中班", "中班", "休息", "早班"],
+                "E": ["休息", "休息", "日班", "日班", "中班", "中班", "休息", "早班", "早班", "休息"]
+            ],
+            isAvailable: true
+        ),
+        RotationMode(
+            id: "4-2-a", name: "四班两倒 · 8天做二休二", cycleDays: 8, shiftHours: 12, weeklyHours: 42,
+            sequence: "白白休休夜夜休休", teamIds: ["A", "B", "C", "D"],
+            banSet: "12h", pay: "TBD", note: "白班 08–20 / 夜班 20–次日 08；夜班后休 48 小时",
+            cycles: [
+                "A": ["白班", "白班", "休息", "休息", "夜班", "夜班", "休息", "休息"],
+                "B": ["夜班", "夜班", "休息", "休息", "白班", "白班", "休息", "休息"],
+                "C": ["休息", "休息", "白班", "白班", "休息", "休息", "夜班", "夜班"],
+                "D": ["休息", "休息", "夜班", "夜班", "休息", "休息", "白班", "白班"]
+            ],
+            isAvailable: true
+        ),
+        RotationMode(
+            id: "4-2-b", name: "四班两倒 · 4天循环", cycleDays: 4, shiftHours: 12, weeklyHours: 42,
+            sequence: "白夜休休", teamIds: ["A", "B", "C", "D"],
+            banSet: "12h", pay: "TBD", note: "白班 08–20 / 夜班 20–次日 08；两天一循环",
+            cycles: [
+                "A": ["白班", "夜班", "休息", "休息"],
+                "B": ["夜班", "休息", "休息", "白班"],
+                "C": ["休息", "休息", "白班", "夜班"],
+                "D": ["休息", "白班", "夜班", "休息"]
+            ],
+            isAvailable: true
+        ),
+        RotationMode(
+            id: "4-2-c", name: "四班两倒 · 12天做三休三", cycleDays: 12, shiftHours: 12, weeklyHours: 42,
+            sequence: "白白白休休休夜夜夜休休休", teamIds: ["A", "B", "C", "D"],
+            banSet: "12h", pay: "TBD", note: "白班 08–20 / 夜班 20–次日 08；连上 3 天",
+            cycles: [
+                "A": ["白班", "白班", "白班", "休息", "休息", "休息", "夜班", "夜班", "夜班", "休息", "休息", "休息"],
+                "B": ["夜班", "夜班", "夜班", "休息", "休息", "休息", "白班", "白班", "白班", "休息", "休息", "休息"],
+                "C": ["休息", "休息", "休息", "白班", "白班", "白班", "休息", "休息", "休息", "夜班", "夜班", "夜班"],
+                "D": ["休息", "休息", "休息", "夜班", "夜班", "夜班", "休息", "休息", "休息", "白班", "白班", "白班"]
+            ],
+            isAvailable: true
+        ),
+        RotationMode(
+            id: "4-2-d1", name: "四班两倒 · 8天做四休四（单班种）", cycleDays: 8, shiftHours: 12, weeklyHours: 42,
+            sequence: "白白白白休休休休", teamIds: ["A", "B", "C", "D"],
+            banSet: "12h", pay: "TBD", note: "单班种：A 班只上白班、B 班只上夜班，长期单一班次",
+            cycles: [
+                "A": ["白班", "白班", "白班", "白班", "休息", "休息", "休息", "休息"],
+                "B": ["夜班", "夜班", "夜班", "夜班", "休息", "休息", "休息", "休息"],
+                "C": ["休息", "休息", "休息", "休息", "白班", "白班", "白班", "白班"],
+                "D": ["休息", "休息", "休息", "休息", "夜班", "夜班", "夜班", "夜班"]
+            ],
+            isAvailable: true
+        ),
+        RotationMode(
+            id: "4-2-d2", name: "四班两倒 · 16天做四休四（昼夜交替）", cycleDays: 16, shiftHours: 12, weeklyHours: 42,
+            sequence: "白白白白休休休休夜夜夜夜休休休休", teamIds: ["A", "B", "C", "D"],
+            banSet: "12h", pay: "TBD", note: "白班 08–20 / 夜班 20–次日 08；连上 4 天",
+            cycles: [
+                "A": ["白班", "白班", "白班", "白班", "休息", "休息", "休息", "休息", "夜班", "夜班", "夜班", "夜班", "休息", "休息", "休息", "休息"],
+                "B": ["夜班", "夜班", "夜班", "夜班", "休息", "休息", "休息", "休息", "白班", "白班", "白班", "白班", "休息", "休息", "休息", "休息"],
+                "C": ["休息", "休息", "休息", "休息", "白班", "白班", "白班", "白班", "休息", "休息", "休息", "休息", "夜班", "夜班", "夜班", "夜班"],
+                "D": ["休息", "休息", "休息", "休息", "夜班", "夜班", "夜班", "夜班", "休息", "休息", "休息", "休息", "白班", "白班", "白班", "白班"]
+            ],
+            isAvailable: true
+        ),
+        RotationMode(
+            id: "3-2-a", name: "三班二倒 · 6天循环", cycleDays: 6, shiftHours: 12, weeklyHours: 56,
+            sequence: "白白夜夜休休", teamIds: ["A", "B", "C"],
+            banSet: "12h", pay: "TBD", note: "周均 56 小时，超 44 小时法定上限，需综合工时 + 加班费",
+            cycles: [
+                "A": ["白班", "白班", "夜班", "夜班", "休息", "休息"],
+                "B": ["夜班", "夜班", "休息", "休息", "白班", "白班"],
+                "C": ["休息", "休息", "白班", "白班", "夜班", "夜班"]
+            ],
+            isAvailable: true
+        ),
+        RotationMode(
+            id: "3-2-b", name: "三班二倒 · 3天台铁式", cycleDays: 3, shiftHours: 12, weeklyHours: 56,
+            sequence: "白夜休", teamIds: ["A", "B", "C"],
+            banSet: "12h", pay: "TBD", note: "夜班后只休 24 小时，与 48 小时要求冲突",
+            cycles: [
+                "A": ["白班", "夜班", "休息"],
+                "B": ["夜班", "休息", "白班"],
+                "C": ["休息", "白班", "夜班"]
+            ],
+            isAvailable: true
+        ),
+        RotationMode(
+            id: "2-a", name: "两班倒 · 14天每周对调", cycleDays: 14, shiftHours: 8, weeklyHours: 40,
+            sequence: "日日日日日休休中中中中中休休", teamIds: ["A", "B"],
+            banSet: "8h", pay: "8h", note: "无夜班；周六日休息；基准日请选周一",
+            cycles: [
+                "A": ["日班", "日班", "日班", "日班", "日班", "休息", "休息", "中班", "中班", "中班", "中班", "中班", "休息", "休息"],
+                "B": ["中班", "中班", "中班", "中班", "中班", "休息", "休息", "日班", "日班", "日班", "日班", "日班", "休息", "休息"]
+            ],
+            isAvailable: true
+        ),
+        RotationMode(
+            id: "panama", name: "巴拿马 2-2-3 · 28天", cycleDays: 28, shiftHours: 12, weeklyHours: 42,
+            sequence: "白白休休白白白休休白白休休休夜夜休休夜夜夜休休夜夜休休休", teamIds: ["A", "B", "C", "D"],
+            banSet: "12h", pay: "TBD", note: "最长连上 3 天；隔周周末休息",
+            cycles: [
+                "A": ["白班", "白班", "休息", "休息", "白班", "白班", "白班", "休息", "休息", "白班", "白班", "休息", "休息", "休息", "夜班", "夜班", "休息", "休息", "夜班", "夜班", "夜班", "休息", "休息", "夜班", "夜班", "休息", "休息", "休息"],
+                "B": ["休息", "休息", "白班", "白班", "休息", "休息", "休息", "夜班", "夜班", "休息", "休息", "夜班", "夜班", "夜班", "休息", "休息", "夜班", "夜班", "休息", "休息", "休息", "白班", "白班", "休息", "休息", "白班", "白班", "白班"],
+                "C": ["夜班", "夜班", "休息", "休息", "夜班", "夜班", "夜班", "休息", "休息", "夜班", "夜班", "休息", "休息", "休息", "白班", "白班", "休息", "休息", "白班", "白班", "白班", "休息", "休息", "白班", "白班", "休息", "休息", "休息"],
+                "D": ["休息", "休息", "夜班", "夜班", "休息", "休息", "休息", "白班", "白班", "休息", "休息", "白班", "白班", "白班", "休息", "休息", "白班", "白班", "休息", "休息", "休息", "夜班", "夜班", "休息", "休息", "夜班", "夜班", "夜班"]
+            ],
+            isAvailable: true
+        ),
+        RotationMode(
+            id: "dupont", name: "杜邦 · 28天", cycleDays: 28, shiftHours: 12, weeklyHours: 42,
+            sequence: "夜夜夜夜休休休白白白休夜夜夜休休休白白白白休休休休休休休", teamIds: ["A", "B", "C", "D"],
+            banSet: "12h", pay: "TBD", note: "含 7 天连休；4 个夜班连上是最累的一段",
+            cycles: [
+                "A": ["夜班", "夜班", "夜班", "夜班", "休息", "休息", "休息", "白班", "白班", "白班", "休息", "夜班", "夜班", "夜班", "休息", "休息", "休息", "白班", "白班", "白班", "白班", "休息", "休息", "休息", "休息", "休息", "休息", "休息"],
+                "B": ["白班", "白班", "白班", "休息", "夜班", "夜班", "夜班", "休息", "休息", "休息", "白班", "白班", "白班", "白班", "休息", "休息", "休息", "休息", "休息", "休息", "休息", "夜班", "夜班", "夜班", "夜班", "休息", "休息", "休息"],
+                "C": ["休息", "休息", "休息", "白班", "白班", "白班", "白班", "休息", "休息", "休息", "休息", "休息", "休息", "休息", "夜班", "夜班", "夜班", "夜班", "休息", "休息", "休息", "白班", "白班", "白班", "休息", "夜班", "夜班", "夜班"],
+                "D": ["休息", "休息", "休息", "休息", "休息", "休息", "休息", "夜班", "夜班", "夜班", "夜班", "休息", "休息", "休息", "白班", "白班", "白班", "休息", "夜班", "夜班", "夜班", "休息", "休息", "休息", "白班", "白班", "白班", "白班"]
+            ],
+            isAvailable: true
+        ),
+        RotationMode(
+            id: "3-3-a", name: "三班三倒 · 21天每周轮换", cycleDays: 21, shiftHours: 8, weeklyHours: 40,
+            sequence: "日×5休×2中×5休×2早×5休×2", teamIds: ["A", "B", "C"],
+            banSet: "8h", pay: "8h", note: "周六日停产全休；基准日请选周一",
+            cycles: [
+                "A": ["日班", "日班", "日班", "日班", "日班", "休息", "休息", "中班", "中班", "中班", "中班", "中班", "休息", "休息", "早班", "早班", "早班", "早班", "早班", "休息", "休息"],
+                "B": ["中班", "中班", "中班", "中班", "中班", "休息", "休息", "早班", "早班", "早班", "早班", "早班", "休息", "休息", "日班", "日班", "日班", "日班", "日班", "休息", "休息"],
+                "C": ["早班", "早班", "早班", "早班", "早班", "休息", "休息", "日班", "日班", "日班", "日班", "日班", "休息", "休息", "中班", "中班", "中班", "中班", "中班", "休息", "休息"]
+            ],
+            isAvailable: true
+        ),
+        RotationMode(
+            id: "3-3-b", name: "三班三倒 · 21天连续轮休（带替休）", cycleDays: 21, shiftHours: 8, weeklyHours: 40,
+            sequence: "日×6休中×6休早×6休（替休补位）", teamIds: ["A", "B", "C", "T"],
+            banSet: "8h", pay: "8h", note: "替休人员：每天替休息的那个班，21 天上 9 天",
+            cycles: [
+                "A": ["日班", "日班", "日班", "日班", "日班", "日班", "休息", "中班", "中班", "中班", "中班", "中班", "中班", "休息", "早班", "早班", "早班", "早班", "早班", "早班", "休息"],
+                "B": ["中班", "中班", "中班", "中班", "中班", "休息", "中班", "早班", "早班", "早班", "早班", "早班", "休息", "早班", "日班", "日班", "日班", "日班", "日班", "休息", "日班"],
+                "C": ["早班", "早班", "早班", "早班", "休息", "早班", "早班", "日班", "日班", "日班", "日班", "休息", "日班", "日班", "中班", "中班", "中班", "中班", "休息", "中班", "中班"],
+                "T": ["休息", "休息", "休息", "休息", "早班", "中班", "日班", "休息", "休息", "休息", "休息", "日班", "早班", "中班", "休息", "休息", "休息", "休息", "中班", "日班", "早班"]
+            ],
+            isAvailable: true
+        ),
+        RotationMode(
+            id: "5-4-a", name: "五班四倒 · 5天循环", cycleDays: 5, shiftHours: 6, weeklyHours: 33.6,
+            sequence: "前夜下午早后夜休", teamIds: ["A", "B", "C", "D", "E"],
+            banSet: "6h", pay: "TBD", note: "6 小时班：前夜 20–02、下午 14–20、早 08–14、后夜 02–08",
+            cycles: [
+                "A": ["前夜", "下午", "早", "后夜", "休息"],
+                "B": ["下午", "早", "后夜", "休息", "前夜"],
+                "C": ["早", "后夜", "休息", "前夜", "下午"],
+                "D": ["后夜", "休息", "前夜", "下午", "早"],
+                "E": ["休息", "前夜", "下午", "早", "后夜"]
+            ],
+            isAvailable: true
+        ),
+        RotationMode(
+            id: "4-6-a", name: "四班 6 小时 · 28天每周倒换", cycleDays: 28, shiftHours: 6, weeklyHours: 42,
+            sequence: "第一班×7第二班×7第三班×7第四班×7", teamIds: ["A", "B", "C", "D"],
+            banSet: "6h", pay: "TBD", note: "每天 4 个班全上、无休息；基准日请选周一",
+            cycles: [
+                "A": ["第一班", "第一班", "第一班", "第一班", "第一班", "第一班", "第一班", "第二班", "第二班", "第二班", "第二班", "第二班", "第二班", "第二班", "第三班", "第三班", "第三班", "第三班", "第三班", "第三班", "第三班", "第四班", "第四班", "第四班", "第四班", "第四班", "第四班", "第四班"],
+                "B": ["第二班", "第二班", "第二班", "第二班", "第二班", "第二班", "第二班", "第三班", "第三班", "第三班", "第三班", "第三班", "第三班", "第三班", "第四班", "第四班", "第四班", "第四班", "第四班", "第四班", "第四班", "第一班", "第一班", "第一班", "第一班", "第一班", "第一班", "第一班"],
+                "C": ["第三班", "第三班", "第三班", "第三班", "第三班", "第三班", "第三班", "第四班", "第四班", "第四班", "第四班", "第四班", "第四班", "第四班", "第一班", "第一班", "第一班", "第一班", "第一班", "第一班", "第一班", "第二班", "第二班", "第二班", "第二班", "第二班", "第二班", "第二班"],
+                "D": ["第四班", "第四班", "第四班", "第四班", "第四班", "第四班", "第四班", "第一班", "第一班", "第一班", "第一班", "第一班", "第一班", "第一班", "第二班", "第二班", "第二班", "第二班", "第二班", "第二班", "第二班", "第三班", "第三班", "第三班", "第三班", "第三班", "第三班", "第三班"]
+            ],
+            isAvailable: true
+        ),
+    ]
+
+    /// 全部方式（四班三倒 5 种 + 新增 15 种）。
+    static var allModes: [RotationMode] { fourThree + moreModes }
+
+    /// 分类（设置页分组显示）：四班三倒 / 五班三倒 / 四班两倒 / 三班二倒 /
+    /// 两班倒 / 巴拿马 / 杜邦 / 三班三倒 / 五班四倒 / 四班 6 小时。
+    static let categories: [(title: String, ids: [String])] = [
+        ("四班三倒（4 个班 × 3 个班次，8 小时）", ["4-3-a", "4-3-b", "4-3-c", "4-3-d", "4-3-e"]),
+        ("五班三倒（5 个班 × 3 个班次，8 小时）", ["5-3-a"]),
+        ("四班两倒（4 个班 × 2 个班次，12 小时）", ["4-2-a", "4-2-b", "4-2-c", "4-2-d1", "4-2-d2"]),
+        ("三班二倒（3 个班 × 2 个班次，12 小时）", ["3-2-a", "3-2-b"]),
+        ("两班倒（2 个班，8 小时）", ["2-a"]),
+        ("巴拿马 2-2-3（4 个班，12 小时，28 天）", ["panama"]),
+        ("杜邦（4 个班，12 小时，28 天）", ["dupont"]),
+        ("三班三倒（3 个班 × 3 个班次，8 小时）", ["3-3-a", "3-3-b"]),
+        ("五班四倒（5 个班 × 4 个班次，6 小时）", ["5-4-a"]),
+        ("四班 6 小时工作制（4 个班 × 4 个班次，6 小时）", ["4-6-a"]),
+    ]
+
+    /// 其他分类：六班三倒序列未核实（两个版本循环天数冲突、无逐日序列表），继续留「即将推出」。
     static let comingSoon: [(category: String, note: String)] = [
-        ("四班两倒", "12小时班次，禁令与工资口径另做"),
-        ("三班三倒", "需替休人员概念"),
-        ("三班二倒", "12小时班次"),
-        ("两班倒", "8/12小时"),
-        ("五班三倒", "需第5个班组"),
-        ("五班四倒", "6小时班次"),
-        ("六班三倒", "序列未核实"),
-        ("巴拿马 2-2-3", "28天长周期"),
-        ("杜邦", "28天长周期"),
-        ("四班 6 小时工作制", "6小时班次"),
+        ("六班三倒", "序列未核实，暂不推出"),
     ]
 
     static func mode(id: String) -> RotationMode? {
-        fourThree.first { $0.id == id }
+        allModes.first { $0.id == id }
     }
 
     /// 默认推荐：方式 A（8天连休式，最标准）。
@@ -369,26 +637,42 @@ enum RotationModes {
     static let legacyModeId = "4-3-b"
 }
 
+/// 自定义班次（手动排班页「+」加的）：码 X1/X2…、名字、颜色（hex）。
+/// 码与名字都由用户定；存 profile 的 rotation.customShifts，换机同步。
+struct CustomShift: Codable, Equatable {
+    var name: String
+    var color: String
+
+    init(name: String, color: String = "#8E8E93") {
+        self.name = name
+        self.color = color
+    }
+}
+
 /// 用户的倒班设置（per-user，存 profile 的 rotation 字段；服务端与 App 同结构）。
 /// modeId = 倒班方式 id（"manual" = 手动排班）；team = 所在班组 id；
-/// baseDate = 基准日（该日 = 循环第 0 天）；teamNames = 班组名（按 A/B/C/D 顺序）；
-/// manualShifts = 手动模式逐日班次（key 日期、value 班次码 D/M/N/-，未填的当天算休）。
+/// baseDate = 基准日（该日 = 循环第 0 天）；teamNames = 班组名（按该方式 teamIds 顺序）；
+/// manualShifts = 手动模式逐日班次（key 日期、value 班次码，未填的当天算休）；
+/// customShifts = 自定义班次（key 码 X1…、value 名字+颜色）。
 struct RotationSetting: Codable, Equatable {
     var modeId: String
     var team: String
     var baseDate: String
     var teamNames: [String]
     var manualShifts: [String: String]
+    var customShifts: [String: CustomShift]
 
     init(modeId: String = RotationModes.legacyModeId, team: String = "B",
          baseDate: String = RotationModes.commonBaseDate,
          teamNames: [String] = ["A", "B", "C", "D"],
-         manualShifts: [String: String] = [:]) {
+         manualShifts: [String: String] = [:],
+         customShifts: [String: CustomShift] = [:]) {
         self.modeId = modeId
         self.team = team
         self.baseDate = baseDate
         self.teamNames = teamNames
         self.manualShifts = manualShifts
+        self.customShifts = customShifts
     }
 
     static let `default` = RotationSetting()
@@ -396,15 +680,20 @@ struct RotationSetting: Codable, Equatable {
     var isManual: Bool { modeId == RotationModes.manualId }
     var mode: RotationMode? { RotationModes.mode(id: modeId) }
 
-    /// 班组显示名（自定义名优先）。
+    /// 班组显示名（自定义名优先）。teamNames 按该方式的 teamIds 顺序排。
     func teamName(for teamId: String) -> String {
-        TeamInfo.displayName(team: teamId, teamNames: teamNames)
+        TeamInfo.displayName(team: teamId, teamNames: teamNames,
+                             teamIds: mode?.teamIds ?? TeamInfo.allTeams)
     }
 
-    /// 转成 PUT /me/profile 用的字典（manualShifts 的 key 是日期、value 是班次码 D/M/N/-）。
+    /// 转成 PUT /me/profile 用的字典（manualShifts 的 key 是日期、value 是班次码）。
     func asDict() -> [String: Any] {
-        ["modeId": modeId, "team": team, "baseDate": baseDate,
-         "teamNames": teamNames, "manualShifts": manualShifts]
+        var d: [String: Any] = ["modeId": modeId, "team": team, "baseDate": baseDate,
+                                "teamNames": teamNames, "manualShifts": manualShifts]
+        if !customShifts.isEmpty {
+            d["customShifts"] = customShifts.mapValues { ["name": $0.name, "color": $0.color] }
+        }
+        return d
     }
 
     /// 某班某天的基础班次。手动模式查 manualShifts（未填算休）；
@@ -413,12 +702,8 @@ struct RotationSetting: Codable, Equatable {
         if isManual {
             let key = DateUtil.string(from: date)
             guard let code = manualShifts[key] else { return "休息" }
-            switch code {
-            case "D": return "日班"
-            case "M": return "中班"
-            case "N": return "早班"
-            default: return "休息"
-            }
+            if let custom = customShifts[code] { return custom.name }
+            return RotationModes.shiftName(for: code)
         }
         guard let mode = mode else {
             // 方式未知：回落到现有分休式（TeamInfo 各班基准日）。

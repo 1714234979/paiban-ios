@@ -86,7 +86,19 @@ struct ContentView: View {
     }
 
     private func updateMessage(for info: VersionInfo) -> String {
-        var text = "最新版本 \(info.latestVersion)，当前版本 \(UpdateChecker.currentVersion)。"
+        // 1.2.7.002：跨渠道的版本（数字上不比装的新、但是另一条线的）要标明渠道，
+        // 如「正式版 1.2.7 可安装（当前是内测版 1.2.7.001）」，让用户自己决定装不装。
+        let current = UpdateChecker.currentVersion
+        let isCrossChannel = !UpdateChecker.isNewer(latest: info.latestVersion, than: current)
+            && !UpdateChecker.isSameVersion(info.latestVersion, current)
+        var text: String
+        if isCrossChannel {
+            let offeredLabel = UpdateChecker.channelLabel(for: info.latestVersion)
+            let currentLabel = UpdateChecker.channelLabel(for: current)
+            text = "\(offeredLabel) \(info.latestVersion) 可安装（当前是\(currentLabel) \(current)）。"
+        } else {
+            text = "最新版本 \(info.latestVersion)，当前版本 \(current)。"
+        }
         if let notes = info.releaseNotes, !notes.isEmpty {
             text += "\n\n\(notes)"
         } else {

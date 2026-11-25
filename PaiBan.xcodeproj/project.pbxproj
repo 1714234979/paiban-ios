@@ -375,7 +375,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
                 CODE_SIGN_ENTITLEMENTS = PaiBan/PaiBan.entitlements;
 
                 CODE_SIGN_STYLE = Automatic;
-                CURRENT_PROJECT_VERSION = 15;
+                CURRENT_PROJECT_VERSION = 16;
                 GENERATE_INFOPLIST_FILE = NO;
                 INFOPLIST_FILE = PaiBan/Info.plist;
                 INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -384,7 +384,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
                     "$(inherited)",
                     "@executable_path/Frameworks",
                 );
-                MARKETING_VERSION = 1.2.7.001;
+                MARKETING_VERSION = 1.2.7.002;
                 PRODUCT_BUNDLE_IDENTIFIER = com.paiban.app;
                 PRODUCT_NAME = "$(TARGET_NAME)";
                 SWIFT_VERSION = 5.0;
@@ -400,7 +400,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
                 CODE_SIGN_ENTITLEMENTS = PaiBan/PaiBan.entitlements;
 
                 CODE_SIGN_STYLE = Automatic;
-                CURRENT_PROJECT_VERSION = 15;
+                CURRENT_PROJECT_VERSION = 16;
                 GENERATE_INFOPLIST_FILE = NO;
                 INFOPLIST_FILE = PaiBan/Info.plist;
                 INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -409,7 +409,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
                     "$(inherited)",
                     "@executable_path/Frameworks",
                 );
-                MARKETING_VERSION = 1.2.7.001;
+                MARKETING_VERSION = 1.2.7.002;
                 PRODUCT_BUNDLE_IDENTIFIER = com.paiban.app;
                 PRODUCT_NAME = "$(TARGET_NAME)";
                 SWIFT_VERSION = 5.0;
@@ -538,7 +538,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = PaiBanWidget/PaiBanWidget.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 15;
+				CURRENT_PROJECT_VERSION = 16;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PaiBanWidget/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -547,7 +547,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.2.7.001;
+				MARKETING_VERSION = 1.2.7.002;
 				PRODUCT_BUNDLE_IDENTIFIER = com.paiban.app.PaiBanWidget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
@@ -561,7 +561,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = PaiBanWidget/PaiBanWidget.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 15;
+				CURRENT_PROJECT_VERSION = 16;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PaiBanWidget/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -570,7 +570,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.2.7.001;
+				MARKETING_VERSION = 1.2.7.002;
 				PRODUCT_BUNDLE_IDENTIFIER = com.paiban.app.PaiBanWidget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;

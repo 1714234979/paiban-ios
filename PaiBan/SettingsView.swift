@@ -11,10 +11,15 @@ struct SettingsView: View {
     @State private var isCheckingUpdate = false
     @State private var showFeedback = false
     @State private var showAdminBackend = false
+    /// 切渠道确认（1.2.7.002）：目标渠道 + 目标渠道最新版（先拉到再弹框）。
+    @State private var pendingChannel: String?
+    @State private var pendingChannelVersion: String?
+    @State private var showChannelSwitchConfirm = false
+    @State private var isFetchingChannelVersion = false
 
-    // 图一新增行（1.2.7.001）：班次推送提醒 / 日历默认展开整月 / 去除广告。
+    // 图一新增行（1.2.7.001）：班次推送提醒 / 去除广告。
+    // 1.2.7.002：日历只留月视图，「日历默认展开整月」开关已删。
     @State private var reminderOn = ShiftReminder.isEnabled
-    @State private var expandMonth = ShiftReminder.defaultExpandMonth
     @State private var removeAds = ShiftReminder.removeAds
     @State private var showReminderDeniedAlert = false
     @State private var isRefreshingHolidays = false
@@ -104,9 +109,6 @@ struct SettingsView: View {
                 Text("班次前 30 分钟提醒，未来 7 天。关掉取消全部提醒。")
                     .font(.caption)
                     .foregroundColor(.secondary)
-
-                // 日历默认展开整月（默认关：打开是当周紧凑视图）。
-                Toggle("日历默认展开整月", isOn: expandMonthBinding)
 
                 // 更新日历的节假日（手动刷新 + 上次更新时间）。
                 HStack {
@@ -228,12 +230,15 @@ struct SettingsView: View {
                     }
                 }
                 // 内测渠道（1.2.8）：只有内测人员看得到这一行。
+                // 1.2.7.002：点另一个渠道先弹确认（当前版本、目标渠道最新版、切了会怎样），
+                // 确认后切渠道并立刻按新渠道查一次；版本不一样就推出来（哪怕数字更低）。
                 if store.user?.isBetaTester == true {
-                    Picker("版本渠道", selection: channelBinding) {
-                        Text("正式版").tag("stable")
-                        Text("内测版").tag("beta")
+                    HStack(spacing: 0) {
+                        channelButton(title: "正式版", channel: "stable")
+                        channelButton(title: "内测版", channel: "beta")
                     }
-                    .pickerStyle(.segmented)
+                    .background(Color(.systemGray5))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
                     Text("内测版只推给内测人员；切到内测后，下次打开 App 也按内测查。")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -281,6 +286,25 @@ struct SettingsView: View {
             }
         } message: {
             Text(store.updateNotice ?? "")
+        }
+        .alert("切换版本渠道", isPresented: $showChannelSwitchConfirm) {
+            Button("取消", role: .cancel) {
+                pendingChannel = nil
+                pendingChannelVersion = nil
+            }
+            Button(pendingChannel == "beta" ? "切换到内测版" : "切换到正式版") {
+                if let channel = pendingChannel {
+                    Task {
+                        isCheckingUpdate = true
+                        defer { isCheckingUpdate = false }
+                        await store.checkForUpdateAfterChannelSwitch(channel: channel)
+                        pendingChannel = nil
+                        pendingChannelVersion = nil
+                    }
+                }
+            }
+        } message: {
+            Text(channelSwitchMessage)
         }
         .alert("通知权限被拒", isPresented: $showReminderDeniedAlert) {
             Button("知道了", role: .cancel) {}
@@ -352,16 +376,6 @@ struct SettingsView: View {
         )
     }
 
-    /// 日历默认展开整月开关（本地存，排班页读它决定打开是周视图还是月视图）。
-    private var expandMonthBinding: Binding<Bool> {
-        Binding(
-            get: { expandMonth },
-            set: { newValue in
-                expandMonth = newValue
-                ShiftReminder.defaultExpandMonth = newValue
-            }
-        )
-    }
 
     /// 去除广告开关（只存标识；广告系统还没来，非 VIP 打开只提示、不收费、不跳转）。
     private var removeAdsBinding: Binding<Bool> {
@@ -418,16 +432,43 @@ struct SettingsView: View {
 
     // MARK: 检查更新
 
-    /// 内测渠道偏好（1.2.8）：读 / 写 UpdateChecker.channel（本地存，默认正式）。
-    /// 切了立即按新渠道查一次，有新版就弹更新提示。
-    private var channelBinding: Binding<String> {
-        Binding(
-            get: { UpdateChecker.channel },
-            set: { newValue in
-                UpdateChecker.channel = newValue
-                Task { await manualUpdateCheck() }
-            }
-        )
+    /// 渠道按钮（1.2.7.002）：当前渠道高亮；点另一个渠道先拉目标渠道最新版、再弹确认。
+    private func channelButton(title: String, channel: String) -> some View {
+        let selected = UpdateChecker.channel == channel
+        return Button {
+            guard channel != UpdateChecker.channel, !isFetchingChannelVersion else { return }
+            Task { await askChannelSwitch(to: channel) }
+        } label: {
+            Text(title)
+                .font(.subheadline)
+                .bold(selected)
+                .foregroundColor(selected ? .primary : .secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+                .background(selected ? Color(.systemBackground) : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 点另一个渠道：先拉目标渠道最新版，再弹确认框。
+    private func askChannelSwitch(to channel: String) async {
+        isFetchingChannelVersion = true
+        defer { isFetchingChannelVersion = false }
+        let info = await store.fetchVersionForChannel(channel)
+        pendingChannel = channel
+        pendingChannelVersion = info?.latestVersion
+        showChannelSwitchConfirm = true
+    }
+
+    /// 确认框文案：当前版本、目标渠道最新版、切了会怎样。
+    private var channelSwitchMessage: String {
+        let current = UpdateChecker.currentVersion
+        let currentLabel = UpdateChecker.channelLabel(for: current)
+        let target = pendingChannel ?? "stable"
+        let targetLabel = target == "beta" ? "内测版" : "正式版"
+        let targetVersion = pendingChannelVersion ?? "未知（没连上服务器）"
+        return "当前版本：\(currentLabel) \(current)\n目标渠道最新版：\(targetLabel) \(targetVersion)\n\n切过去后，App 按\(targetLabel)查更新；\(targetLabel)有新版就推给你装，不装也可以继续用现在的版本。"
     }
 
     private func manualUpdateCheck() async {
@@ -930,6 +971,15 @@ struct UsageGuideView: View {
 struct ChangelogView: View {
     var body: some View {
         Form {
+            Section {
+                changelog(version: "1.2.7.002（内测）", items: [
+                    "倒班方式全部推出：五班三倒、四班两倒（12 小时）、三班二倒（12 小时）、两班倒、巴拿马 2-2-3、杜邦、三班三倒（带替休）、五班四倒、四班 6 小时工作制；选了方式 + 班次，日历和工资班次统计跟着算",
+                    "12 小时班禁令：白班接夜班不行、不能连上两个夜班、夜班后休 48 小时、一天只能上一个班；12 小时/6 小时班的工资口径待定，工资页只显示班次统计、金额暂不算",
+                    "手动排班改成参考图样式：月历 + 底部班次按钮，点某天再点班次就是给那天排班；可加自定义班次；日历里的「每周排班」整个删掉，日历只留月视图",
+                    "切版本渠道先弹确认：写清当前版本、目标渠道最新版、切了会怎样；切完立刻按新渠道查一次，另一条线的版本也推出来让用户自己决定装不装",
+                    "六班三倒继续留「即将推出」：两个版本的循环天数对不上、没有逐日序列表，核实不了不硬编",
+                ])
+            }
             Section {
                 changelog(version: "1.2.7.001（内测）", items: [
                     "内测渠道：每个版本分内测版 / 正式版两条线；内测人员在设置页切内测 / 正式，管理端按人开内测权限",

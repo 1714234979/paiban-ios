@@ -57,35 +57,52 @@ struct RotationSettingsView: View {
 
             if isManual {
                 Section {
-                    Text("手动排班：班次没有周期规律。去排班页点某一天，设当天班次（日/中/早/休）；没设的当天算休息。调班就是改某天的班。")
+                    Text("手动排班：班次没有周期规律。去手动排班页逐日点班次；没设的当天算休息。调班就是改某天的班。")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
+                    NavigationLink {
+                        ManualScheduleView()
+                    } label: {
+                        HStack {
+                            Text("打开手动排班")
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
                 }
             } else {
-                // 周期：四班三倒 5 种方式。
-                Section("四班三倒（4 个班 × 3 个班次，8 小时）") {
-                    ForEach(RotationModes.fourThree) { mode in
-                        Button {
-                            selectedModeId = mode.id
-                            modeId = mode.id
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(mode.name)
-                                        .foregroundColor(.primary)
-                                    Text("\(mode.cycleDays) 天一循环 · \(mode.sequence) · \(mode.shiftHours) 小时/班 · 周均 \(Int(mode.weeklyHours)) 小时")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    if let note = mode.note {
-                                        Text(note)
+                // 周期：按分类列出全部方式（1.2.7.002：20 种）。
+                ForEach(RotationModes.categories, id: \.title) { cat in
+                    Section(cat.title) {
+                        ForEach(RotationModes.allModes.filter { cat.ids.contains($0.id) }) { mode in
+                            Button {
+                                selectMode(mode)
+                            } label: {
+                                HStack {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(mode.name)
+                                            .foregroundColor(.primary)
+                                        Text("\(mode.cycleDays) 天一循环 · \(mode.sequence) · \(mode.shiftHours) 小时/班 · 周均 \(mode.weeklyHours) 小时")
                                             .font(.caption)
                                             .foregroundColor(.secondary)
+                                        if let note = mode.note {
+                                            Text(note)
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                        if mode.isPayTBD {
+                                            Text("工资口径待定：工资页只显示班次统计，金额暂不算")
+                                                .font(.caption)
+                                                .foregroundColor(.orange)
+                                        }
                                     }
-                                }
-                                Spacer()
-                                if modeId == mode.id {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundColor(.green)
+                                    Spacer()
+                                    if modeId == mode.id {
+                                        Image(systemName: "checkmark.circle.fill")
+                                            .foregroundColor(.green)
+                                    }
                                 }
                             }
                         }
@@ -123,8 +140,8 @@ struct RotationSettingsView: View {
                 // 只有选中了倒班方式，才显示选择班次。
                 Section("选择班次") {
                     Picker("班组", selection: $team) {
-                        ForEach(TeamInfo.allTeams, id: \.self) { t in
-                            Text("\(store.rotation.teamName(for: t))班").tag(t)
+                        ForEach(selectedMode?.teamIds ?? TeamInfo.allTeams, id: \.self) { t in
+                            Text("\(teamName(for: t))班").tag(t)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -132,21 +149,23 @@ struct RotationSettingsView: View {
                     Text("基准日是循环第 1 天。\(team)班在基准日上 \(selectedMode?.cycles[team]?.first ?? "日班")。")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                    if let mode = selectedMode, mode.id == "2-a" || mode.id == "3-3-a" || mode.id == "4-6-a" {
+                        Text("基准日请选周一（按下周一起算，周六日休息）。")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
 
-            // 班组名（第 26 条）：4 个班组名各一行可改。
+            // 班组名（第 26 条）：班组数跟着方式走，各一行可改。
             Section("班组名") {
-                ForEach(TeamInfo.allTeams.indices, id: \.self) { idx in
-                    let teamId = TeamInfo.allTeams[idx]
+                ForEach(selectedMode?.teamIds ?? TeamInfo.allTeams, id: \.self) { teamId in
                     HStack {
                         Text("\(teamId)班")
                             .foregroundColor(.secondary)
                         TextField("班组名", text: Binding(
-                            get: { idx < teamNames.count ? teamNames[idx] : teamId },
-                            set: { newValue in
-                                if idx < teamNames.count { teamNames[idx] = newValue }
-                            }
+                            get: { teamName(for: teamId) },
+                            set: { setTeamName($0, for: teamId) }
                         ))
                         .multilineTextAlignment(.trailing)
                     }
@@ -197,6 +216,31 @@ struct RotationSettingsView: View {
         }
     }
 
+    /// 选一种方式：班组夹到该方式的班组里、班组名按新班组数补齐/截断。
+    private func selectMode(_ mode: RotationMode) {
+        selectedModeId = mode.id
+        modeId = mode.id
+        if !mode.teamIds.contains(team) { team = mode.teamIds.first ?? "A" }
+        teamNames = mode.teamIds.enumerated().map { idx, tid in
+            if idx < teamNames.count, !teamNames[idx].isEmpty { return teamNames[idx] }
+            return tid
+        }
+    }
+
+    private func teamName(for teamId: String) -> String {
+        let ids = selectedMode?.teamIds ?? TeamInfo.allTeams
+        guard let idx = ids.firstIndex(of: teamId), idx < teamNames.count,
+              !teamNames[idx].isEmpty else { return teamId }
+        return teamNames[idx]
+    }
+
+    private func setTeamName(_ name: String, for teamId: String) {
+        let ids = selectedMode?.teamIds ?? TeamInfo.allTeams
+        guard let idx = ids.firstIndex(of: teamId) else { return }
+        while teamNames.count <= idx { teamNames.append("") }
+        teamNames[idx] = name
+    }
+
     private func syncFromStore() {
         let r = store.rotation
         modeId = r.modeId
@@ -214,9 +258,18 @@ struct RotationSettingsView: View {
         do {
             var r = store.rotation
             r.modeId = modeId
+            // 班组夹到该方式的班组里；班组名按该方式班组数补齐/截断。
+            if let mode = selectedMode {
+                if !mode.teamIds.contains(team) { team = mode.teamIds.first ?? "A" }
+                r.teamNames = mode.teamIds.enumerated().map { idx, tid in
+                    if idx < teamNames.count, !teamNames[idx].isEmpty { return teamNames[idx] }
+                    return tid
+                }
+            } else {
+                r.teamNames = teamNames
+            }
             r.team = team
             r.baseDate = DateUtil.string(from: baseDate)
-            r.teamNames = teamNames
             // 班组变了：记一条换班记录（生效日 = 基准日），历史保持一致。
             if team != store.myTeam {
                 _ = try await store.api.addTeamHistory(team: team, effectiveFrom: r.baseDate)

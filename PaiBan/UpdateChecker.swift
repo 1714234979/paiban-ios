@@ -134,6 +134,42 @@ enum UpdateChecker {
         }
     }
 
+    /// 两个版本号是不是同一个（数字段逐段比，缺段按 0；预发布后缀也比）。
+    /// 1.2.7 与 1.2.7.001 不是同一个（第 4 段 0 vs 1）。
+    static func isSameVersion(_ a: String, _ b: String) -> Bool {
+        let av = splitVersion(a), bv = splitVersion(b)
+        let count = max(av.parts.count, bv.parts.count)
+        for i in 0..<count {
+            let x = i < av.parts.count ? av.parts[i] : 0
+            let y = i < bv.parts.count ? bv.parts[i] : 0
+            if x != y { return false }
+        }
+        return av.pre == bv.pre
+    }
+
+    /// 版本号对应的渠道名（1.2.7.002）：四段号（1.2.7.001）或带 beta 后缀的是内测版，
+    /// 三段号（1.2.7）是正式版。内测版号从 1.2.7.001 开始，四段式；正式版三段式。
+    static func channelLabel(for version: String) -> String {
+        let v = splitVersion(version)
+        if v.parts.count >= 4 { return "内测版" }
+        if let pre = v.pre, pre.contains("beta") { return "内测版" }
+        return "正式版"
+    }
+
+    /// 切渠道后立刻按新渠道查一次（1.2.7.002）：渠道不同就是不同的线，
+    /// 新渠道的版本和装的不一样就推出来（哪怕数字上更低，如从 1.2.7.001 切到正式版 1.2.7），
+    /// 让用户自己决定装不装；只有版本完全一样才说已是最新版本。
+    static func checkAfterChannelSwitch(api: APIClient, channel: String) async -> ManualResult {
+        do {
+            let info = try await api.fetchVersion(channel: channel)
+            guard info.hasDownloadURL else { return .upToDate }
+            guard !isSameVersion(info.latestVersion, currentVersion) else { return .upToDate }
+            return .updateAvailable(info)
+        } catch {
+            return .upToDate
+        }
+    }
+
     /// 设置页「检查更新」手动查的结果。
     enum ManualResult {
         case updateAvailable(VersionInfo)  // 有新版且有下载链接：弹同样的提示

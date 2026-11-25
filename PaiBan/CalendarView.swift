@@ -32,22 +32,10 @@ struct CalendarView: View {
     }()
     private var pageRange: Range<Int> { windowStartIndex..<(windowStartIndex + 12) }
 
-    /// 周/月视图切换（1.2.7.001）：默认按设置「日历默认展开整月」；
-    /// 关 = 打开是当周紧凑视图（7 天一行，左右切周）；开 = 打开是整月。
-    @State private var showMonth: Bool = ShiftReminder.defaultExpandMonth
-    /// 当前周的第 1 天（周视图用；周一首日时从周一开始，否则从周日开始）。
-    @State private var weekStart: Date = CalendarView.currentWeekStart()
     /// 共享班表页（1.2.7.001，第 24 条）。
     @State private var showShareSchedule = false
-
-    /// 本周的第 1 天（按周一首日设置）。
-    static func currentWeekStart() -> Date {
-        let now = Date()
-        let weekday = DateUtil.calendar.component(.weekday, from: now) - 1 // 0=周日
-        let mondayFirst = CalendarDisplaySettings.loadLocal().mondayFirst
-        let offset = mondayFirst ? (weekday + 6) % 7 : weekday
-        return DateUtil.addingDays(now, -offset)
-    }
+    /// 手动排班页（1.2.7.002）：手动模式时从排班页进。
+    @State private var showManualSchedule = false
 
     static func monthIndex(year: Int, month: Int) -> Int { year * 12 + (month - 1) }
     private func yearMonth(from index: Int) -> (year: Int, month: Int) { (index / 12, index % 12 + 1) }
@@ -58,18 +46,8 @@ struct CalendarView: View {
                 headerCard
                 teamSwitcher
                 monthNavigator
-                // 周/月切换（1.2.7.001）：默认按设置「日历默认展开整月」。
-                Picker("视图", selection: $showMonth) {
-                    Text("周").tag(false)
-                    Text("月").tag(true)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 160)
-                if showMonth {
-                    monthPager
-                } else {
-                    weekView
-                }
+                // 1.2.7.002：日历只留月视图（周视图已删）。
+                monthPager
                 summaryLine
                 recordsSection
             }
@@ -86,9 +64,17 @@ struct CalendarView: View {
                 }
                 .accessibilityLabel("共享班表")
             }
+            if store.rotation.isManual {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("手动排班") { showManualSchedule = true }
+                }
+            }
         }
         .navigationDestination(isPresented: $showShareSchedule) {
             ShareScheduleView()
+        }
+        .navigationDestination(isPresented: $showManualSchedule) {
+            ManualScheduleView()
         }
         .task {
             // 1.2.6 冷启动回当天：进页对齐到今天所在的月（不再跟 Store 恢复的月份走）。
@@ -327,80 +313,6 @@ struct CalendarView: View {
         .padding(12)
         .background(Color(.systemBackground))
         .cornerRadius(16)
-    }
-
-    /// 周视图（1.2.7.001）：当周紧凑视图，7 天一行，左右切周；点某天开详情。
-    /// 默认打开是当周（设置「日历默认展开整月」关时）；切到月视图再回来还停在当周。
-    private var weekView: some View {
-        VStack(spacing: 4) {
-            weekdayHeader
-            HStack(spacing: 4) {
-                ForEach(0..<7, id: \.self) { offset in
-                    let date = DateUtil.addingDays(weekStart, offset)
-                    let dateString = DateUtil.string(from: date)
-                    if let day = store.dayFor(dateString: dateString) {
-                        DayCell(day: day, isToday: dateString == DateUtil.string(from: Date()),
-                                isSelected: selectedDay?.date == dateString)
-                            .frame(maxWidth: .infinity)
-                            .onTapGesture {
-                                selectedDay = day
-                                showDayDetail = true
-                            }
-                    } else {
-                        Color.clear.frame(height: calendarCellHeight)
-                            .frame(maxWidth: .infinity)
-                    }
-                }
-            }
-            HStack {
-                Button {
-                    weekStart = DateUtil.addingDays(weekStart, -7)
-                } label: {
-                    Image(systemName: "chevron.left")
-                        .frame(width: 36, height: 36)
-                        .background(Color(.systemBackground))
-                        .clipShape(Circle())
-                }
-                Spacer()
-                Text(weekTitle)
-                    .font(.subheadline).bold()
-                Spacer()
-                Button {
-                    weekStart = DateUtil.addingDays(weekStart, 7)
-                } label: {
-                    Image(systemName: "chevron.right")
-                        .frame(width: 36, height: 36)
-                        .background(Color(.systemBackground))
-                        .clipShape(Circle())
-                }
-                Button("本周") {
-                    weekStart = Self.currentWeekStart()
-                }
-                .font(.subheadline)
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(Color(.systemBackground))
-                .cornerRadius(14)
-            }
-            .padding(.top, 8)
-        }
-        .padding(12)
-        .background(Color(.systemBackground))
-        .cornerRadius(16)
-    }
-
-    /// 周视图标题：本周起止日期，如“11月24日 – 11月30日”。
-    private var weekTitle: String {
-        let start = weekStart
-        let end = DateUtil.addingDays(weekStart, 6)
-        let sm = DateUtil.calendar.component(.month, from: start)
-        let sd = DateUtil.calendar.component(.day, from: start)
-        let em = DateUtil.calendar.component(.month, from: end)
-        let ed = DateUtil.calendar.component(.day, from: end)
-        if sm == em {
-            return "\(sm)月\(sd)日 – \(ed)日"
-        }
-        return "\(sm)月\(sd)日 – \(em)月\(ed)日"
     }
 
     /// 汇总与记录看的月份：直接取当前页那份（缓存或本地算，秒出，不等网络）。
