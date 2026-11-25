@@ -235,6 +235,7 @@ final class AppStore: ObservableObject {
             UserDefaults.standard.set(me.id ?? me.username ?? "", forKey: lastUserIdKey)
             loadCacheForCurrentUser()
             isStarting = false
+            registerThisDevice()
             await refreshAll()
             await checkForUpdateAfterLaunch()
         } catch {
@@ -271,6 +272,7 @@ final class AppStore: ObservableObject {
             isOffline = false
             viewTeam = me.displayTeam
             UserDefaults.standard.set(me.id ?? me.username ?? "", forKey: lastUserIdKey)
+            registerThisDevice()
             await refreshAll()
             await checkForUpdateAfterLaunch()
         } catch {
@@ -281,6 +283,14 @@ final class AppStore: ObservableObject {
                 isLoggedIn = false
             }
         }
+    }
+
+    /// 设备直连登记（1.2.7.004）：登录成功后、启动同步成功后，把本机
+    /// identifierForVendor 登记到用户名下；小组件凭设备号拉数据，不用填密钥。
+    /// 后台静默做，失败不打扰用户（小组件仍可走密钥/缓存）。
+    /// 重装后设备号会变，启动时重登记能自己接上。
+    private func registerThisDevice() {
+        Task { await api.registerDevice() }
     }
 
     // MARK: 登录 / 注册 / 退出
@@ -300,6 +310,7 @@ final class AppStore: ObservableObject {
         viewTeam = me.displayTeam
         UserDefaults.standard.set(me.id ?? me.username ?? "", forKey: lastUserIdKey)
         loadCacheForCurrentUser()
+        registerThisDevice()
         await refreshAll()
         await checkForUpdateAfterLaunch()
     }
@@ -322,6 +333,7 @@ final class AppStore: ObservableObject {
         viewTeam = me.displayTeam
         UserDefaults.standard.set(me.id ?? me.username ?? "", forKey: lastUserIdKey)
         loadCacheForCurrentUser()
+        registerThisDevice()
         await refreshAll()
         await checkForUpdateAfterLaunch()
     }
@@ -343,6 +355,7 @@ final class AppStore: ObservableObject {
         viewTeam = me.displayTeam
         UserDefaults.standard.set(me.id ?? me.username ?? "", forKey: lastUserIdKey)
         loadCacheForCurrentUser()
+        registerThisDevice()
         await refreshAll()
         await checkForUpdateAfterLaunch()
     }

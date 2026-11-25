@@ -4,10 +4,13 @@ import Foundation
 /// 根因：重签（全能签）用的描述文件常不带 group.com.paiban.app，
 /// App 写不进快照（WidgetSnapshotStore.save 静默返回）、小组件也读不到，
 /// 只显示「打开 App 登录后显示」占位——登录了也没用，锁屏那个也一样。
-/// 改走服务端：小组件配置里填一次 API 密钥（App 设置页「小组件」里复制），
-/// 存在小组件自己的存储里，不管怎么重签都能通。
+/// 改走服务端：小组件直接从服务器拉数据，不管怎么重签都能通。
+/// 两条认领路（1.2.7.004）：① 设备直连（默认）——App 登录时把
+/// identifierForVendor 登记到用户名下，小组件带 X-Device-Id 拉，不用填密钥；
+/// ② 密钥直拉（手动后备）——小组件配置里填一次 API 密钥（App 设置页「小组件」里复制）。
 /// 拉回的数据缓存到小组件自己的 UserDefaults，离线时显示上次的数，不回占位。
-/// App Group 还通的机器上，优先用快照（快、离线也能看），这条路只是兜底。
+/// App Group 还通的机器上，优先用快照（快、离线也能看），这条路只是兜底；
+/// App Group 代码与权限原样保留，后期上架商店（正规签名）时再用它。
 enum WidgetServerClient {
     private static let cachedSnapshotKey = "paiban.widgetServerSnapshot"
     private static let cachedAtKey = "paiban.widgetServerSnapshotAt"
@@ -25,9 +28,20 @@ enum WidgetServerClient {
         }
     }
 
+    /// 密钥直拉（原有）：小组件配置里填了 API 密钥。
+    static func fetchSnapshot(apiKey: String, now: Date = Date()) async -> WidgetSnapshot? {
+        await fetchSnapshot(authHeader: ("X-API-Key", apiKey), now: now)
+    }
+
+    /// 设备直拉（1.2.7.004）：App 登录时登记过 identifierForVendor，
+    /// 小组件带 X-Device-Id 拉数据，不用填密钥。
+    static func fetchSnapshot(deviceId: String, now: Date = Date()) async -> WidgetSnapshot? {
+        await fetchSnapshot(authHeader: ("X-Device-Id", deviceId), now: now)
+    }
+
     /// 本月 + 本周 + 本月工资，一次拉齐，拼成 WidgetSnapshot。
     /// 失败返回 nil（调用方回落缓存/占位）。
-    static func fetchSnapshot(apiKey: String, now: Date = Date()) async -> WidgetSnapshot? {
+    private static func fetchSnapshot(authHeader: (name: String, value: String), now: Date) async -> WidgetSnapshot? {
         // resolve() 回的是 (baseURL, kind) 元组；小组件只要地址，云优先、云不通走 NAS 隧道。
         guard let resolved = await ServerConfig.resolve() else { return nil }
         let base = resolved.baseURL
@@ -37,11 +51,11 @@ enum WidgetServerClient {
         let weekStart = DateUtil.addingDays(cal.startOfDay(for: now), -(weekday - 1))
         let weekStartStr = DateUtil.string(from: weekStart)
         do {
-            async let me = get(path: "/api/v1/me", base: base, apiKey: apiKey, as: UserProfile.self)
-            async let range = get(path: "/api/v1/me/range", base: base, apiKey: apiKey, query: ["start": weekStartStr, "days": "7"], as: RangeResponse.self)
-            async let month = get(path: "/api/v1/me/month", base: base, apiKey: apiKey, query: ["year": "\(ym.year)", "month": "\(ym.month)"], as: MonthSchedule.self)
-            async let pay = get(path: "/api/v1/me/pay", base: base, apiKey: apiKey, query: ["year": "\(ym.year)", "month": "\(ym.month)"], as: PayMonth.self)
-            async let config = getConfig(base: base, apiKey: apiKey)
+            async let me = get(path: "/api/v1/me", base: base, authHeader: authHeader, as: UserProfile.self)
+            async let range = get(path: "/api/v1/me/range", base: base, authHeader: authHeader, query: ["start": weekStartStr, "days": "7"], as: RangeResponse.self)
+            async let month = get(path: "/api/v1/me/month", base: base, authHeader: authHeader, query: ["year": "\(ym.year)", "month": "\(ym.month)"], as: MonthSchedule.self)
+            async let pay = get(path: "/api/v1/me/pay", base: base, authHeader: authHeader, query: ["year": "\(ym.year)", "month": "\(ym.month)"], as: PayMonth.self)
+            async let config = getConfig(base: base, authHeader: authHeader)
             let (profile, rangeResp, monthResp, payResp, rates) = try await (me, range, month, pay, config)
             guard let snap = buildSnapshot(profile: profile, range: rangeResp, month: monthResp, pay: payResp, rates: rates, now: now) else { return nil }
             saveCached(snap)
@@ -85,14 +99,14 @@ enum WidgetServerClient {
     }
 
     /// 工资配置只取补贴率；拉不到就用默认 70/30/10（不让整个快照失败）。
-    private static func getConfig(base: String, apiKey: String) async -> PayGlobalSettings {
-        if let resp = try? await get(path: "/api/v1/config", base: base, apiKey: apiKey, as: ServerConfigData.self) {
+    private static func getConfig(base: String, authHeader: (name: String, value: String)) async -> PayGlobalSettings {
+        if let resp = try? await get(path: "/api/v1/config", base: base, authHeader: authHeader, as: ServerConfigData.self) {
             return resp.pay?.settings ?? PayGlobalSettings()
         }
         return PayGlobalSettings()
     }
 
-    // MARK: - 最小 HTTP 客户端（只走 X-API-Key；信封 {ok, data}）
+    // MARK: - 最小 HTTP 客户端（只走一条认证头：X-API-Key 或 X-Device-Id；信封 {ok, data}）
 
     private struct Envelope<T: Decodable>: Decodable {
         var ok: Bool
@@ -100,7 +114,7 @@ enum WidgetServerClient {
         var error: String?
     }
 
-    private static func get<T: Decodable>(path: String, base: String, apiKey: String, query: [String: String] = [:], as type: T.Type) async throws -> T {
+    private static func get<T: Decodable>(path: String, base: String, authHeader: (name: String, value: String), query: [String: String] = [:], as type: T.Type) async throws -> T {
         var comps = URLComponents(string: base + path)
         if !query.isEmpty {
             comps?.queryItems = query.map { URLQueryItem(name: $0.key, value: $0.value) }
@@ -109,7 +123,7 @@ enum WidgetServerClient {
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
         req.timeoutInterval = 15
-        req.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        req.setValue(authHeader.value, forHTTPHeaderField: authHeader.name)
         let (data, response) = try await URLSession.shared.data(for: req)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
         let env = try JSONDecoder().decode(Envelope<T>.self, from: data)

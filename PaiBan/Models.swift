@@ -1085,6 +1085,12 @@ struct ApiKeyResponse: Decodable {
     var apiKeyHint: String?
 }
 
+/// POST /api/v1/me/device 返回：{deviceId, platform}（1.2.7.004，设备直连登记）。
+struct DeviceRegisterResponse: Decodable {
+    var deviceId: String?
+    var platform: String?
+}
+
 /// 用户工资设置（缺失字段回落到服务端全局设置）。
 struct PaySettings: Codable, Equatable {
     var baseSalary: Double?

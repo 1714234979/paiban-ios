@@ -990,6 +990,11 @@ struct ChangelogView: View {
     var body: some View {
         Form {
             Section {
+                changelog(version: "1.2.7.004（内测）", items: [
+                    "小组件不用填密钥了：打开 App 登录一次，本机就自动登记好，小组件直接从服务器拉数据；App Group 的权限留着，以后上架商店正规签名时用它",
+                ])
+            }
+            Section {
                 changelog(version: "1.2.7.003（内测）", items: [
                     "修设置页切版本渠道点不动：点「正式版」/「内测版」没反应的问题修好了，现在点另一个渠道会先弹确认框；点完按钮会转圈，不会再让人以为没点上",
                 ])
@@ -1457,10 +1462,11 @@ struct ChangePasswordSheet: View {
     }
 }
 
-/// 小组件页（1.2.8）：五个小组件、怎么添加、数据状态、小组件密钥。
+/// 小组件页（1.2.7.004）：五个小组件、怎么添加、数据状态、小组件密钥。
 /// 老爷反馈：App 里没地方看小组件、也没地方管——这个页就是答案。
 /// 数据状态一眼能看到问题在哪：App Group 不通（重签描述文件没带
-/// group.com.paiban.app）时，快照写不进，小组件走服务端直拉（填密钥）。
+/// group.com.paiban.app）时，快照写不进，小组件走设备直连（打开 App
+/// 登录一次自动登记本机，不用填密钥）；密钥只是备用。
 struct WidgetsView: View {
     @EnvironmentObject private var store: AppStore
     @State private var apiKey: String?
@@ -1483,7 +1489,7 @@ struct WidgetsView: View {
     /// 数据状态一行话：通没通、快照写没写、写的是几点。
     private var statusText: String {
         if !appGroupOK {
-            return "App Group 不通（重签的描述文件里没有 group.com.paiban.app），快照写不进——小组件走服务端直拉，下面填了密钥就能显示。"
+            return "App Group 不通（重签的描述文件里没有 group.com.paiban.app），快照写不进——小组件已走设备直连：打开 App 登录一次就自动登记本机，不用填密钥。App Group 的权限留着，以后上架商店正规签名时用它。"
         }
         if let snap = snapshot {
             return "快照已写（\(Self.timeFormatter.string(from: snap.savedAt))），小组件直接读快照。"
@@ -1504,7 +1510,7 @@ struct WidgetsView: View {
             Section("怎么添加") {
                 Text("主屏：长按桌面 → 点左上角 ＋ → 添加小组件 → 搜「排班空间」→ 选尺寸添加。")
                 Text("锁屏：长按锁屏 → 自定 → 锁屏 → 添加小组件 → 搜「排班空间」→ 选「今日已挣」。")
-                Text("填密钥：长按已添加的小组件 → 编辑小组件 → 把下面复制的密钥粘贴到「小组件密钥」里。")
+                Text("不用填密钥：打开 App 登录一次，本机就自动登记好了，小组件直接显示数据。")
             }
 
             Section("数据状态") {
@@ -1523,8 +1529,8 @@ struct WidgetsView: View {
                 }
             }
 
-            Section("小组件密钥") {
-                Text("小组件不走 App Group 时，靠这个密钥直接从服务器拉数据。密钥只显示这一次，复制后填进小组件配置；重生成后旧密钥立即失效，小组件要重填。")
+            Section("小组件密钥（备用）") {
+                Text("平时不用填：小组件走设备直连，打开 App 登录一次就自动登记本机。这个密钥只是备用——设备直连万一拉不到数据时，填进小组件配置也能显示。密钥只显示这一次；重生成后旧密钥立即失效，小组件要重填。")
                     .font(.caption)
                     .foregroundColor(.secondary)
                 if let key = apiKey {

@@ -480,6 +480,16 @@ final class APIClient {
         try await request(path: "/api/v1/me/api-key", method: "POST")
     }
 
+    /// POST /api/v1/me/device —— 设备直连登记（1.2.7.004）。
+    /// App 登录后把 identifierForVendor 登记到用户名下；小组件此后带
+    /// X-Device-Id 就能拉数据，不用填密钥。只认 session 登录。
+    /// 静默失败（不抛）：登记不上时小组件仍可走密钥/缓存，不打扰用户。
+    func registerDevice() async {
+        guard let deviceId = UIDevice.current.identifierForVendor?.uuidString else { return }
+        let _: DeviceRegisterResponse? = try? await request(path: "/api/v1/me/device", method: "POST",
+                                                             jsonBody: ["deviceId": deviceId, "platform": "ios"])
+    }
+
     /// PUT /api/v1/me/profile — 只传给定的字段（合并更新）。
     /// displayName：改显示名（≤32 字，空串清回用户名）；登录用的 username 不动。
     /// rotation：倒班设置（1.2.7.001：modeId/team/baseDate/teamNames/manualShifts 的字典；

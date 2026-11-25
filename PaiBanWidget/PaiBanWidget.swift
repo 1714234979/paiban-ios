@@ -1,14 +1,18 @@
 import AppIntents
 import SwiftUI
+import UIKit
 import WidgetKit
 
 // MARK: - 入口
 
-/// 小组件时间线（1.2.8）：数据来源按顺序——
-/// ① App Group 快照（App 写、小组件读；通的机器上最快、离线也能看）；
-/// ② 服务端直拉（小组件配置里填了 API 密钥才拉；重签描述文件不带 App Group 时的后备路）；
-/// ③ 缓存的服务端数据（离线时显示上次的数，不回占位）；
-/// ④ 都没有 → 占位「打开 App 登录后显示」。
+/// 小组件时间线（1.2.7.004）：数据来源按顺序——
+/// ① App Group 快照（App 写、小组件读；通的机器上最快、离线也能看；
+///    权限与代码原样保留，后期上架商店正规签名时用它）；
+/// ② 设备直连（App 登录时登记过 identifierForVendor，小组件带
+///    X-Device-Id 拉；不用填密钥）；
+/// ③ 密钥直拉（手动后备：小组件配置里填了 API 密钥才拉）；
+/// ④ 缓存的服务端数据（离线时显示上次的数，不回占位）；
+/// ⑤ 都没有 → 占位「打开 App 登录后显示」。
 /// 今日实时状态（倒计时/已挣）按 entry 时刻现算；工资是拉回/快照里算好的数。
 struct Provider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> Entry {
@@ -33,9 +37,14 @@ struct Provider: AppIntentTimelineProvider {
         return Timeline(entries: entries, policy: .atEnd)
     }
 
-    /// 当前快照：App Group 优先；没有就服务端直拉（配了密钥才拉）；拉不到用缓存。
+    /// 当前快照：App Group 优先；没有就设备直连（不用密钥）；再没有就
+    /// 密钥直拉（手动后备）；拉不到用缓存。
     private func currentSnapshot(apiKey: String?) async -> WidgetSnapshot? {
         if let snap = WidgetSnapshotStore.load() { return snap }
+        if let deviceId = UIDevice.current.identifierForVendor?.uuidString,
+           let fetched = await WidgetServerClient.fetchSnapshot(deviceId: deviceId) {
+            return fetched
+        }
         let key = (apiKey ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !key.isEmpty, let fetched = await WidgetServerClient.fetchSnapshot(apiKey: key) {
             return fetched
