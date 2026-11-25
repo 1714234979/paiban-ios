@@ -1,0 +1,68 @@
+# 小组件截图：模拟器上渲染五个小组件（DEBUG 画廊），出图给老爷看样子。
+# 手动触发（Actions 页 → Run workflow，或 API workflow_dispatch）。不编 IPA、不发版。
+# 画廊用演示数据（2026-11-24 周二、B 班早班 00:00–08:00，05:23 上班中）；
+# 倒计时是系统 timer 文本、按真实现在走——跑截图前先把 runner 的系统时间
+# 拨到 2026-11-24 05:23，倒计时才对得上。runner 是一次性的，拨时间不影响别的。
+name: Widget screenshots
+
+on:
+  workflow_dispatch:
+
+jobs:
+  shots:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Decode app icons
+        run: |
+          for f in tools/icons/*.b64; do
+            base64 -D -i "$f" -o "PaiBan/Assets.xcassets/AppIcon.appiconset/$(basename "$f" .b64)"
+          done
+
+      - name: Build for simulator (Debug)
+        run: |
+          xcodebuild -project PaiBan.xcodeproj \
+            -scheme PaiBan \
+            -configuration Debug \
+            -destination "platform=iOS Simulator,name=iPhone 16 Pro Max" \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      # 画廊的演示时间是 2026-11-24 05:23（早班上班中）；系统 timer 文本按真实现在走，
+      # 不拨表的话倒计时会显示 00:00。runner 用完即扔，拨表无副作用。
+      - name: Set demo clock (2026-11-24 05:23)
+        run: |
+          sudo date 112405232026.11 || echo "date set failed, continuing"
+          date
+
+      - name: Boot simulator and install app
+        run: |
+          xcrun simctl boot "iPhone 16 Pro Max" || true
+          xcrun simctl bootstatus "iPhone 16 Pro Max" -b
+          xcrun simctl install booted build/Build/Products/Debug-iphonesimulator/PaiBan.app
+
+      - name: Take widget screenshots
+        run: |
+          mkdir -p widget-shots
+          for kind in today week pay month lock-circular lock-rectangular; do
+            xcrun simctl terminate booted com.paiban.app || true
+            xcrun simctl launch booted com.paiban.app --widget-preview "$kind"
+            sleep 4
+            xcrun simctl io booted screenshot --type=png "widget-shots/widget-$kind.png"
+            ls -lh "widget-shots/widget-$kind.png"
+          done
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v4
+        with:
+          name: widget-screenshots
+          path: widget-shots/*.png
+          retention-days: 30
