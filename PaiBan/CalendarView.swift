@@ -353,10 +353,14 @@ struct CalendarView: View {
             triple = formatDays(info.tripleDays)
             overtime = formatDays(info.overtimeDays)
         }
-        // 第 41 条：基本天数是法定口径（PayCalc.basicDays，与工资页同表），
-        // 不是 stats.basicDays（那是排班非休息天数，11 月碰巧都是 21，10 月会错成 24）。
+        // 第 44 条（2026-11-26）：应出勤是排班算的出勤（基础轮班天数，
+        // PayCalc.countBaseWork：数 baseShift 不是休息的天数，调班请假不影响），
+        // 基本天数是法定口径（PayCalc.basicDays，与工资页同表），两个数不一样。
+        // 之前应出勤那格误用了 stats.basicDays（那是法定基本天数），10 月/11 月
+        // 和基本天数撞成两个一样的数（18/18、21/21）。
+        let baseWorkDays = PayCalc.countBaseWork(yearDays: displayedMonth?.days ?? [], year: ym.year, month: ym.month)
         let statutoryBasicDays = PayCalc.basicDays(year: ym.year, month: ym.month)
-        return "当月应出勤 \(MoneyUtil.int(stats.basicDays)) 天 · 基本天数 \(statutoryBasicDays) 天 · 实际出勤 \(MoneyUtil.int(stats.actualShifts)) 个班 · 三薪 \(triple) 天 · 加班 \(overtime) 天 · 请假 \(MoneyUtil.int(stats.leaveDays)) 天 · 休息 \(MoneyUtil.int(stats.restDays)) 天"
+        return "当月应出勤 \(baseWorkDays) 天 · 基本天数 \(statutoryBasicDays) 天 · 实际出勤 \(MoneyUtil.int(stats.actualShifts)) 个班 · 三薪 \(triple) 天 · 加班 \(overtime) 天 · 请假 \(MoneyUtil.int(stats.leaveDays)) 天 · 休息 \(MoneyUtil.int(stats.restDays)) 天"
     }
 
     /// 天数显示：整数不带小数（如 0、1），小数保留 1 位。
