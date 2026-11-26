@@ -296,16 +296,9 @@ struct SettingsView: View {
                 }
             }
         }
-        // 1.3.0.009：底栏改回悬浮胶囊（overlay，006 那版），List 底部留 120pt——胶囊下面
-        // 到屏幕底边那块要彻底干净，滑到底「关于我们」离胶囊再远一点；120pt 够它完整露出来。
-        // 1.3.0.013：滚动指示条常显——老爷 19:24 说「没有滑动框」，List 滚的时候右边
-        // 那条灰线默认滚完就淡出、几乎看不见；.scrollIndicators(.visible) 没用（画廊实拍
-        // 证明它根本不画出来），改走自绘滑块 AlwaysVisibleScrollIndicator，一直看得见，
-        // 滚到哪一眼就知道。
+        // 1.3.0.014：底栏换回 001 式满宽栏（safeAreaInset 挂底边，栏本身占位），
+        // List 底部那 120pt 垫底整段删掉（007 同款）——内容在栏上面结束。
         .modifier(AlwaysVisibleScrollIndicator())
-        .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: 120)
-        }
         .navigationTitle("设置")
         .alert("检查更新", isPresented: updateNoticeBinding) {
             Button("知道了", role: .cancel) {
@@ -1103,6 +1096,10 @@ struct ChangelogView: View {
     var body: some View {
         Form {
             Section {
+                changelog(version: "1.3.0.014（内测）", items: [
+                    "底栏按老爷说的办法重做：直接用第一版 1.3.0.001 那条满宽毛玻璃栏（玻璃是对的），把顶上盖着玻璃的那条分隔线拿掉，三个标签（图标加文字）直接坐在玻璃上，中间什么都不隔；整条栏往上挪一点、离屏幕底边留 8pt，不贴底。满宽栏本来就占位，三页底部留白改回 24pt。栏上左右滑切页还在，不震动",
+                    "更新弹窗也修了：012 那次打开 App 不弹更新提示，是启动那一下服务器还没解析好、检查直接跳过了，之后也没人重试；现在查之前先解析一次服务器，主界面稳了 2 秒后再查一次补上",
+                ])
                 changelog(version: "1.3.0.013（内测）", items: [
                     "底栏玻璃换 UIKit 磨砂玻璃：.glassEffect() 连着五版（006/009/010/011/012）全是实心白，参数换遍了、层级核过没遮挡，这条路在咱这个工程里就是不通；这次底栏直接换 UIKit 的 UIVisualEffectView 磨砂玻璃（系统磨砂，实时糊掉底下经过的内容、透出色块，一定看得出来是玻璃），配淡淡白调、柔和投影、发亮细边。设置 → 关于里新加「液态玻璃测试」页：彩色底上并排两颗胶囊，A 是 SwiftUI 玻璃、B 是 UIKit 磨砂玻璃，上下滚彩色块、看哪个透出后面的颜色。悬浮胶囊的样子、位置、选中只变色、没有小药丸、不震动都没变；栏上左右滑切页更好滑了（阈值放宽到 24pt，短滑也切页）；三页的滚动指示条现在一直看得见，滚到哪一眼就知道。更新弹窗修（012）和刷新率适配（006）都在",
                 ])

@@ -150,6 +150,15 @@ struct ContentView: View {
                             .sheet(isPresented: $store.needsHousingFundPrompt) {
                                 HousingFundPromptView()
                             }
+                            // 1.3.0.014：主界面稳了 2 秒后再查一次更新——冷启动那次检查可能
+                            // 赶在开屏/切页动画里、或者解析服务器那一下还没稳，弹窗没弹出来
+                            // 又没重试（012 在老爷 012 上就是这么漏的，只能手动装 013）。
+                            // 界面稳了再查一次补上；当天已点「稍后」的不重复弹
+                            // （checkAfterLaunch 里拦），查失败也不清排队的提示。
+                            .task {
+                                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                                await store.checkForUpdateAfterLaunch()
+                            }
                     }
                 } else if let startupError = store.startupError {
                     OfflineView(message: startupError) {

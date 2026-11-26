@@ -1654,7 +1654,21 @@ final class AppStore: ObservableObject {
     /// 1.3.0.012：只在「确实没新版」时清 pendingUpdate；查失败（没网、服务器不通）
     /// 时保留已有的 pendingUpdate——切回前台时一次瞬断不能把排队等着弹的提示吞了。
     /// （之前是直接拿检查结果覆盖 pendingUpdate，查失败返回 nil 就把弹窗清了。）
+    /// 1.3.0.014：012 在老爷 012 上还是没弹（手动装的 013）。代码 + 线上实测核过：
+    /// 012 包里的修法在（二进制含「查更新」日志串）、版本号对（1.3.0.012 / build 46）、
+    /// 服务端公开回包里有 beta.ios=1.3.0.013、触发点（冷启动 + 切回前台）都在——
+    /// 逻辑本身没毛病，漏在触发时机：开头这行 guard（serverReachable 或 baseURL）
+    /// 会在启动那一下解析服务器还没赶上时直接静默 return，之后再也没人重新解析
+    /// 服务器、也没人重试检查，App 用着缓存好好的，弹窗就这么漏了。这次改成：
+    /// baseURL 还是空就先现解析一次服务器（解析到了再查），再加 ContentView 里
+    /// 主界面稳了 2 秒后的那次重查，双保险。
     func checkForUpdateAfterLaunch() async {
+        if api.baseURL == nil {
+            let reachable = await api.resolveServer()
+            serverReachable = reachable
+            serverBaseURL = api.baseURL
+            serverKind = api.serverKind
+        }
         guard serverReachable || api.baseURL != nil else { return }
         switch await UpdateChecker.checkAfterLaunch(api: api) {
         case .updateAvailable(let info):

@@ -63,9 +63,9 @@ struct PayView: View {
                             monthBreakdown(year: ym.year, month: ym.month)
                             noteCard
                         }
-                        // 1.3.0.009：底栏改回悬浮胶囊（overlay，006 那版），三页底部留白改回 120pt
-                        // （004–006 为悬浮胶囊留的）——滑到底时最后的内容完整露在胶囊上面。
-                        .padding(.bottom, 120)
+                        // 1.3.0.014：底栏换回 001 式满宽栏（safeAreaInset 挂底边，栏本身占位），
+                        // 底部留白 120pt → 24pt（007 同款）——内容在栏上面结束，不用再留 120pt。
+                        .padding(.bottom, 24)
                         // 点编辑框以外的地方就收起（丢弃未保存的改动）。Tap 手势只认轻点，
                         // 拖动（滚动/横滑）不会触发，不跟左右滑切月、上下滚动冲突。
                         .onTapGesture {
