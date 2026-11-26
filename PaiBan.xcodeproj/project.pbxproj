@@ -45,6 +45,7 @@
 		2FA6B94712D2509303CCBDA9 /* WidgetViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3215243FC9D19D67D035FAFE /* WidgetViews.swift */; };
 		811181B98DD57F6033013526 /* WidgetViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3215243FC9D19D67D035FAFE /* WidgetViews.swift */; };
 		FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */ = {isa = PBXBuildFile; fileRef = F181B69F0A58209D8BE07E36 /* WidgetPreviewGallery.swift */; };
+		DDE84E1D954A407CA90D4988 /* GlassTestView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 245E34A6517649FE9F59AC02 /* GlassTestView.swift */; };
 		06272431BA5C904F147E23BF /* Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5C48BCB889F6644C77FA3C9E /* Config.swift */; };
 		EA71640AB84E2509596F332E /* WidgetServerClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68CB61D5FAB155944D08BB4D /* WidgetServerClient.swift */; };
 		90534913C43648B59ADE6EAB /* WidgetServerClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 68CB61D5FAB155944D08BB4D /* WidgetServerClient.swift */; };
@@ -89,6 +90,7 @@
 		9E4E81336F078B0AF8075E97 /* PaiBanWidget.appex */ = {isa = PBXFileReference; explicitFileType = wrapper.app-extension; includeInIndex = 0; path = PaiBanWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		3215243FC9D19D67D035FAFE /* WidgetViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetViews.swift; sourceTree = "<group>"; };
 		F181B69F0A58209D8BE07E36 /* WidgetPreviewGallery.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetPreviewGallery.swift; sourceTree = "<group>"; };
+		245E34A6517649FE9F59AC02 /* GlassTestView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassTestView.swift; sourceTree = "<group>"; };
 		68CB61D5FAB155944D08BB4D /* WidgetServerClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetServerClient.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -198,6 +200,7 @@
             B7A1DAC372E4A65B4E59E2E0 /* WidgetSnapshot.swift */,
                         3215243FC9D19D67D035FAFE /* WidgetViews.swift */,
 F181B69F0A58209D8BE07E36 /* WidgetPreviewGallery.swift */,
+				245E34A6517649FE9F59AC02 /* GlassTestView.swift */,
 68CB61D5FAB155944D08BB4D /* WidgetServerClient.swift */,
 9ECE1EC6686D20864C7D3338 /* PaiBan.entitlements */,
             );
@@ -363,6 +366,7 @@ F181B69F0A58209D8BE07E36 /* WidgetPreviewGallery.swift */,
                         2FA6B94712D2509303CCBDA9 /* WidgetViews.swift in Sources */,
 				90534913C43648B59ADE6EAB /* WidgetServerClient.swift in Sources */,
 FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
+				DDE84E1D954A407CA90D4988 /* GlassTestView.swift in Sources */,
 );
             runOnlyForDeploymentPostprocessing = 0;
         };
@@ -377,7 +381,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
                 CODE_SIGN_ENTITLEMENTS = PaiBan/PaiBan.entitlements;
 
                 CODE_SIGN_STYLE = Automatic;
-                CURRENT_PROJECT_VERSION = 46;
+                CURRENT_PROJECT_VERSION = 47;
                 GENERATE_INFOPLIST_FILE = NO;
                 INFOPLIST_FILE = PaiBan/Info.plist;
                 INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -386,7 +390,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
                     "$(inherited)",
                     "@executable_path/Frameworks",
                 );
-                MARKETING_VERSION = 1.3.0.012;
+                MARKETING_VERSION = 1.3.0.013;
                 PRODUCT_BUNDLE_IDENTIFIER = com.paiban.app;
                 PRODUCT_NAME = "$(TARGET_NAME)";
                 SWIFT_VERSION = 5.0;
@@ -402,7 +406,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
                 CODE_SIGN_ENTITLEMENTS = PaiBan/PaiBan.entitlements;
 
                 CODE_SIGN_STYLE = Automatic;
-                CURRENT_PROJECT_VERSION = 46;
+                CURRENT_PROJECT_VERSION = 47;
                 GENERATE_INFOPLIST_FILE = NO;
                 INFOPLIST_FILE = PaiBan/Info.plist;
                 INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -411,7 +415,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
                     "$(inherited)",
                     "@executable_path/Frameworks",
                 );
-                MARKETING_VERSION = 1.3.0.012;
+                MARKETING_VERSION = 1.3.0.013;
                 PRODUCT_BUNDLE_IDENTIFIER = com.paiban.app;
                 PRODUCT_NAME = "$(TARGET_NAME)";
                 SWIFT_VERSION = 5.0;
@@ -540,7 +544,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = PaiBanWidget/PaiBanWidget.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 46;
+				CURRENT_PROJECT_VERSION = 47;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PaiBanWidget/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -549,7 +553,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.3.0.012;
+				MARKETING_VERSION = 1.3.0.013;
 				PRODUCT_BUNDLE_IDENTIFIER = com.paiban.app.PaiBanWidget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;
@@ -563,7 +567,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				CODE_SIGN_ENTITLEMENTS = PaiBanWidget/PaiBanWidget.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 46;
+				CURRENT_PROJECT_VERSION = 47;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = PaiBanWidget/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -572,7 +576,7 @@ FF8863A15C64775BFE204D2C /* WidgetPreviewGallery.swift in Sources */,
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 1.3.0.012;
+				MARKETING_VERSION = 1.3.0.013;
 				PRODUCT_BUNDLE_IDENTIFIER = com.paiban.app.PaiBanWidget;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_VERSION = 5.0;

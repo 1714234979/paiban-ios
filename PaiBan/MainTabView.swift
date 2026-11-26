@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// 主界面：三个 Tab（排班 / 工资 / 设置），各带自己的 NavigationStack。
 /// 今日 Tab 已删；工资页标题叫「预估工资」。
@@ -191,6 +192,30 @@ import SwiftUI
 /// 其余不动：悬浮胶囊（底离屏幕底边约 23pt、限宽 300pt 居中、overlay 布局）、
 /// 选中只变颜色（蓝色/灰色、没有小药丸）、滑动还是 006 的 .highPriorityGesture()、
 /// 不震动、三页 120pt 底部留白、刷新率适配都在，012 只改弹窗 + 底栏玻璃这两项。
+/// 1.3.0.013（第 46 条再修，老爷 2026-11-26 19:23 发 012 实机截图亲口说：
+/// 「还是没有，我真的生气了」——他已经手动装上 012，胶囊还是实心白，一点玻璃
+/// 都没有）：这是第五次了（006、009、010、011、012），玻璃从来就没在他真机上
+/// 显出来过。这次不许再换个参数就发一版，换个做法——先证明玻璃到底能不能在咱
+/// 这个工程里跑出来，再按结论出包：
+/// 第一步（测试页，GlassTestView.swift，入口：设置 → 关于 → 液态玻璃测试）：
+/// 彩色底（红黄蓝绿紫橙大色块、上下滚）上面并排两颗胶囊——A 是 SwiftUI
+/// .glassEffect(.clear)（012 那套），B 是 UIKit UIVisualEffectView 磨砂玻璃。
+/// 结论只有他真机上看测试页才能下（咱这边没有模拟器、画廊也跑不起来）；但底栏
+/// 不能再等：五版 .glassEffect() 参数换遍了全是实心白、代码层级也核过没遮挡，
+/// 这条路在咱这个工程里就是不通的证据已经够了——底栏直接换 B 的做法。
+/// 第二步（底栏）：胶囊底换成 UIKit UIVisualEffectView（UIViewRepresentable 包
+/// 一层，BlurView，style .systemThinMaterial，配淡淡白 tint + 发亮细边 + 柔和
+/// 投影）。那是久经考验的磨砂玻璃：实时糊掉底下经过的内容、透出色块，一定看得
+/// 出来是玻璃——先让老爷看到玻璃，再谈是不是液态玻璃。iOS 16+ 就有，不用
+/// #available。onAppear 日志标记改记 UIVisualEffectView 路径，随反馈可验。
+/// 其余不动：悬浮胶囊（底离屏幕底边约 23pt、限宽 300pt 居中、overlay 布局）、
+/// 选中只变颜色（蓝色/灰色、没有小药丸）、滑动切页（阈值 40→24pt，更好滑，
+/// 再加 .contentShape(Capsule()) 让胶囊整块都吃手势）、不震动、三页 120pt
+/// 底部留白、更新弹窗修（012）和刷新率适配都在，013 只改底栏玻璃 + 滑动这两项。
+/// 同版再修「没有滑动框」（老爷 19:24 补问，附设置页截图）：① 三页的滚动指示条
+/// 加 .scrollIndicators(.visible)，滚的时候右边那条灰线一直看得见、不淡出；
+/// ② 底栏左右滑切页阈值放宽（见上）。两处都在 013 里，见 SettingsView /
+/// CalendarView / PayView。
 struct MainTabView: View {
     @EnvironmentObject private var store: AppStore
 
@@ -295,18 +320,12 @@ struct MainTabView: View {
     }
 }
 
-/// 悬浮胶囊切换栏（1.3.0.012，按 006 的胶囊、去掉选中小药丸，第 46 条，老爷
-/// 2026-11-26 18:25 亲口定：「我要胶囊的那种啊然后加液态玻璃」；011 根因修：
-/// 010 的白不是磨砂底害的——.glassEffect(.regular) 自带白霜色调，采样均匀浅灰底
-/// 就显实心白；这次改 .glassEffect(.clear, in: Capsule())（无色调、最透），
-/// .shadow() 整段拿掉（阴影的额外合成可能闷掉玻璃的实时采样，玻璃自带亮边纵深）；
-/// onAppear 记一条日志标记：iOS 版本 + 走的玻璃路径，随反馈日志可验；012 再修：
-/// 011 的裸 .clear 还是不显——视频对照文件 App 的胶囊看明白了，真玻璃胶囊有三样
-/// 东西（淡淡白调、柔和投影、发亮细边），裸 .clear 在均匀浅灰底上近乎隐形；这次
-/// .clear 加一点白 tint、柔和阴影加回来、再描一条发亮细边）：
-/// 透明玻璃胶囊：iOS 26+ 只罩 .glassEffect(.clear, in: Capsule())（Liquid Glass
-/// 最透那档）；26 以下 fallback 用 .ultraThinMaterial 磨砂底。浮在内容
-/// 上面；不贴底、不满宽、没有顶部分隔线。选中态绝对不要选中小药丸、不要选中底块——
+/// 悬浮胶囊切换栏（1.3.0.013，第 46 条）：胶囊底换成 UIKit UIVisualEffectView
+/// 磨砂玻璃（BlurView，.systemThinMaterial）——.glassEffect() 连着五版全是实心白，
+/// 这条路在咱这个工程里不通（测试页 GlassTestView 里 A/B 对照可验）；淡淡白 tint
+/// + 柔和投影 + 发亮细边都在，滚动时磨砂实时糊掉底下经过的内容。
+/// 磨砂玻璃胶囊：底是 UIKit UIVisualEffectView（BlurView，.systemThinMaterial），
+/// 实时糊掉底下经过的内容。浮在内容上面；不贴底、不满宽、没有顶部分隔线。选中态绝对不要选中小药丸、不要选中底块——
 /// 选中就是蓝色、没选中就是灰色，只变颜色，什么都不盖在玻璃上（006 错的就是上层
 /// 那个浅色圆角底块、把玻璃盖死了，老爷 17:33 亲口说「底层是对的，上层是错的」）。
 /// 点按钮切换；在栏上左右滑动也能切换（来回都行）。滑动手势用 .highPriorityGesture()
@@ -344,37 +363,41 @@ private struct GlassCapsuleTabBar: View {
             }
         }
         .padding(.horizontal, 10)
-        // 1.3.0.012：液态玻璃三修——011 的裸 .clear 玻璃还是不显。视频对照（文件 App
-        // 的胶囊）看明白了：真玻璃胶囊不只有一层透明玻璃，它有三样东西——淡淡的白调
-        // （跟底色拉开一点）、柔和的投影（浮起来的纵深）、发亮的细边（玻璃的边）。
-        // 011 只罩了一层裸 .clear，均匀浅灰底上近乎隐形，用户看到的就是一片白。
-        // 这次三样都补上：capsuleGlass() 里 .clear 玻璃加一点白 tint、柔和阴影加回来
-        // （文件 App 的胶囊明明有投影，011 拿掉阴影是猜错了）、再描一条发亮的细边。
-        // 滚动时玻璃照样折射底下经过的内容。
-        .capsuleGlass()
+        // 1.3.0.013：底栏玻璃换 UIKit UIVisualEffectView——.glassEffect() 连着五版
+        // （006/009/010/011/012）全是实心白，参数换遍了、层级核过没遮挡，这条路在
+        // 咱这个工程里就是不通。改走 UIKit 磨砂玻璃（BlurView，.systemThinMaterial，
+        // 最透那档磨砂，底下彩色糊得看得见）+ 淡淡白 tint（跟底色拉开）+ 柔和投影 +
+        // 发亮细边（文件 App 的胶囊三样齐全才看得出是玻璃）。滚动时磨砂实时糊掉底下
+        // 经过的内容、透出色块，一定看得出来是玻璃。测试页（设置 → 关于 → 液态玻璃
+        // 测试）里 A/B 两颗胶囊并排，能直接对照 .glassEffect 和 UIVisualEffectView。
+        .background(
+            ZStack {
+                BlurView(style: .systemThinMaterial)
+                Color.white.opacity(0.12)
+            }
+            .clipShape(Capsule())
+        )
         .shadow(color: .black.opacity(0.10), radius: 10, x: 0, y: 4)
         .overlay(Capsule().stroke(Color.white.opacity(0.6), lineWidth: 0.5))
-        // 1.3.0.011：日志标记——证明 glassEffect 路径在他真机上确实跑了。
+        // 1.3.0.013：日志标记——证明 UIVisualEffectView 路径在他真机上确实跑了。
         // 记 iOS 版本 + 走的玻璃路径，随反馈 24 小时日志一起发回来可验。
-        // 胶囊常驻、只在主界面出现时记一次。012 补：这条确认会写（onAppear 挂在
-        // 常驻胶囊上，AppLogger.log 追加写盘；之前没验到只是老爷没发反馈）。
+        // 胶囊常驻、只在主界面出现时记一次。
         .onAppear {
             let v = ProcessInfo.processInfo.operatingSystemVersion
-            if #available(iOS 26.0, *) {
-                AppLogger.shared.log("TabBar glass: iOS \(v.majorVersion).\(v.minorVersion).\(v.patchVersion), glassEffect(.clear.tint(white 0.22), in: Capsule()) + shadow + rim", tag: "UI")
-            } else {
-                AppLogger.shared.log("TabBar glass: iOS \(v.majorVersion).\(v.minorVersion).\(v.patchVersion), fallback ultraThinMaterial", tag: "UI")
-            }
+            AppLogger.shared.log("TabBar glass: iOS \(v.majorVersion).\(v.minorVersion).\(v.patchVersion), UIVisualEffectView(.systemThinMaterial) + white tint 0.12 + shadow + rim", tag: "UI")
         }
-        // 1.3.0.009：滑动手势用 .highPriorityGesture()（006 的修法）。005 的普通
-        // .gesture() 会被三个 Button 的点按手势抢走触摸，真机上左右滑切页滑不动。
-        // 高优先手势让拖动先于 Button 点按被认出来：点按（没位移）时拖动认不出来、
-        // Button 照样能点；左右滑（位移超 12pt）时拖动先认出来、切页。阈值不变。
+        // 1.3.0.013：滑动更好滑——老爷 19:24 说「没有滑动框」。底栏左右滑切页的阈值
+        // 从 40pt 放宽到 24pt（短滑也切页），再加 .contentShape(Capsule()) 让胶囊
+        // 整块（含按钮之间的空隙）都吃手势。手势还是 006 的 .highPriorityGesture()：
+        // 005 的普通 .gesture() 会被三个 Button 的点按手势抢走触摸，真机上左右滑
+        // 切页滑不动；高优先手势让拖动先于 Button 点按被认出来，点按（没位移）时
+        // 拖动认不出来、Button 照样能点。
+        .contentShape(Capsule())
         .highPriorityGesture(
             DragGesture(minimumDistance: 12)
                 .onEnded { value in
                     // 只认横滑（横向位移够大、且比纵向大）；竖滑不管。
-                    guard abs(value.translation.width) > 40,
+                    guard abs(value.translation.width) > 24,
                           abs(value.translation.width) > abs(value.translation.height) else { return }
                     if value.translation.width < 0 {
                         onSwipeLeft()
@@ -386,22 +409,25 @@ private struct GlassCapsuleTabBar: View {
     }
 }
 
-/// 胶囊玻璃（1.3.0.012，第 46 条）：iOS 26+ 只罩 .glassEffect(.clear.tint
-/// (.white.opacity(0.22)), in: Capsule())——.clear 是最透的那档玻璃（无色调，
-/// .regular 自带白霜、采样均匀浅灰底就显实心白，010 就是这么败的）；淡淡的白
-/// tint 让胶囊跟 #F2F2F7 底色拉开、看得出是一颗浮着的玻璃 pill，底下内容照样
-/// 透出来、糊掉、折射（011 的裸 .clear 在均匀浅灰底上近乎隐形，才看着像一片白）；
-/// 背景 clear、不铺任何磨砂；26 以下 fallback 用 .ultraThinMaterial 磨砂底
-/// （磨砂本身 iOS 15+ 就有，部署目标 iOS 16 能用；只在老系统上，26+ 不走这条）。
-/// 阴影和细边不在这里，在调用处（.shadow + .overlay stroke）——文件 App 的胶囊
-/// 就是玻璃 + 柔和投影 + 发亮细边三样齐全才看得出是玻璃。
-private extension View {
-    @ViewBuilder
-    func capsuleGlass() -> some View {
-        if #available(iOS 26.0, *) {
-            self.glassEffect(.clear.tint(.white.opacity(0.22)), in: Capsule())
-        } else {
-            self.background(.ultraThinMaterial, in: Capsule())
-        }
+/// UIKit 磨砂玻璃（1.3.0.013，第 46 条）：UIVisualEffectView 的 UIViewRepresentable
+/// 包装。SwiftUI 的 .glassEffect() 在咱这个工程里连着五版（006/009/010/011/012）
+/// 都显不出来（实心白），参数换遍了、层级核过没遮挡——这条路在咱这儿就是不通，
+/// 改走 UIKit 这条久经考验的路：系统磨砂玻璃实时糊掉底下经过的内容、透出色块，
+/// 一定看得出来是玻璃（先让老爷看到玻璃，再谈是不是液态玻璃）。style 用
+/// .systemThinMaterial（最透那档磨砂，底下彩色糊得看得见）；淡淡白 tint + 发亮
+/// 细边 + 柔和投影在调用处（跟文件 App 的胶囊一个做法）。iOS 16+ 就有，不用
+/// #available。底栏和测试页 B 胶囊都用它。
+struct BlurView: UIViewRepresentable {
+    var style: UIBlurEffect.Style
+
+    func makeUIView(context: Context) -> UIVisualEffectView {
+        let view = UIVisualEffectView(effect: UIBlurEffect(style: style))
+        view.layer.cornerRadius = 28
+        view.clipsToBounds = true
+        return view
+    }
+
+    func updateUIView(_ uiView: UIVisualEffectView, context: Context) {
+        uiView.effect = UIBlurEffect(style: style)
     }
 }
