@@ -279,16 +279,18 @@ struct DayDetailView: View {
         .font(.subheadline)
     }
 
-    /// 1.2.9.001：当天预估工资（与 PayCalc.todayEstimate 同口径，第 29 条）：
-    /// 每个班 = 日工资（基本工资 ÷ 21.75）+ 班次补贴（早 70/中 30/日 0）+ 餐补 10
-    ///          + 每日奖金分摊；三薪日每班再加 3 倍日工资；加班班次每个再加 2 倍日工资；
+    /// 1.2.9.003：当天预估工资（与 PayCalc.todayEstimate 同口径，第 40 条）：
+    /// 每个班 = 基本工资 ÷ 当月实际班数 + 班次补贴（早 70/中 30/日 0）
+    ///          + (工龄津贴 + 高温补贴 + 学历补贴) ÷ 当月实际班数 − 五险一金 ÷ 当月实际班数
+    ///          − 当月个税 ÷ 当月实际班数 + （正常班次才有的）奖金分摊 + 当日类型加成；
+    /// 三薪日每班再加 3 倍日工资（不拿分摊），加班班次每个再加 2 倍日工资（不拿分摊）；
     /// 双班两个班都算；休息 0 元；请假不算钱。
     /// 基本工资按当天所在月的生效表解析（不是今天的口径——看 12 月的日子就用 12 月的数）；
     /// 奖金分摊与加班班次也按当天所在月算。
     private func estimateText(for day: DaySchedule) -> String {
         if day.onLeave == true { return "请假" }
         let inputs = store.estimateInputs(for: day.date)
-        let est = PayCalc.todayEstimate(shift: day.shift, baseSalary: inputs.baseSalary, dateString: day.date, earlyRate: inputs.earlyRate, midRate: inputs.midRate, mealRate: inputs.mealRate, dailyBonusShare: inputs.dailyBonusShare, overtimeShifts: inputs.overtimeShifts)
+        let est = PayCalc.todayEstimate(shift: day.shift, earlyRate: inputs.earlyRate, midRate: inputs.midRate, inputs: inputs.inputs)
         // 第 33 条：休息日逢法定节假日也标「（三薪）」（只标，不算钱；工资口径不动）。
         if est.isRest { return PayCalc.isStatutoryDay(day.date) ? "今日休息（三薪）" : "今日休息" }
         let suffix = est.isTriple ? "（三薪）" : (est.isOvertime ? "（加班）" : "")

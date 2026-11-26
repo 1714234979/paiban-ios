@@ -407,111 +407,183 @@ enum PayCalc {
         return 2420
     }
 
-    /// 每日奖金分摊（第 29 条，2026-11-26）：当月绩效奖金部分 ÷ 当月实际出勤班数。
-    /// 绩效奖金部分 = 奖金总额 − 加班费（加班费按天另算，不摊进每天）。
-    /// 直接用 monthPay 已算好的数推（(科室绩效 + 其他奖罚) × 绩效系数 × 奖金系数 + 缺员补贴），
-    /// 不重算取值链，免得两边对不上。出勤 0 班时分摊 0。
-    /// 例（他 11 月）：(4300 − 0) ÷ 21 = 204.76。
-    static func dailyBonusShare(bonusTotal: Double?, overtimePay: Double?, attendance: Double?) -> Double {
-        guard let att = attendance, att > 0 else { return 0 }
-        let perfPart = (bonusTotal ?? 0) - (overtimePay ?? 0)
-        return round2(perfPart / att)
+    // MARK: - 每日净预估（第 40 条，2026-11-26，老爷 10:39 亲口定，11:04–11:05 改成三薪/加班日不拿分成）
+
+    /// 当日每班次的种类：普通 0 / 加班 2×日工资 / 三薪 3×日工资（rawValue 就是加成倍数）。
+    enum DayPremiumKind: Int, Codable { case normal = 0, overtime = 2, triple = 3 }
+
+    /// 某日每日净预估的全部输入。
+    /// 分项全是未取整的精确值——取整只在 todayEstimate / todaySegments 算出当日总额时做一次。
+    /// （10 月 1 日三薪日班：分项先取整再加会得 394.78，精确加完再取整才是 394.79；
+    /// 9 月加班日班反过来差 1 分，是取整口径不同，不是公式问题；这里统一用精确加完再取整。）
+    struct DayEstimateInputs: Codable, Equatable {
+        var baseShare: Double = 0      // 基本工资 ÷ 当月实际班数
+        var extraShare: Double = 0     // (工龄津贴 + 高温补贴 + 学历补贴) ÷ 当月实际班数
+        var contribShare: Double = 0   // 五险一金 ÷ 当月实际班数
+        var taxShare: Double = 0       // 当月个税 ÷ 当月实际班数
+        var bonusShare: Double = 0     // 基础奖金池 ÷ 正常班数（只分给正常班次）
+        var dailyRate: Double = 0      // 基本工资 ÷ 21.75（只用来算加班/三薪加成）
+        var kinds: [DayPremiumKind] = []       // 当天每班次的种类，按班次顺序
+        var fractionExtra: Double = 0          // 零头班次金额（仅当月最后工作日有；平时 0）
+        var fractionKind: DayPremiumKind = .normal // 零头班次的种类
+
+        /// 当天有三薪班次（含零头）。
+        var isTriple: Bool { kinds.contains(.triple) || (fractionExtra > 0 && fractionKind == .triple) }
+        /// 当天有加班班次（含零头）。
+        var isOvertime: Bool { kinds.contains(.overtime) || (fractionExtra > 0 && fractionKind == .overtime) }
     }
 
-    /// 某天有几个班次算加班（第 29 条，2026-11-26）：当月累计到当天的班次数超过当月基本天数，
-    /// 超出的班次才算加班；三薪日优先算三薪、不算加班；休息/请假不算。
-    /// monthDays 是当月每天 (date, shift, onLeave)；只认当月内的天，不要求事先排好序。
-    /// 返回 0…当天班次数（双班那天最多 2）。累计按班次算（双班那天算 2 个），
-    /// 和月度公式里出勤（班数）对基本天数（天数）是同一口径。
-    static func overtimeShiftCount(dateString: String, monthDays: [(date: String, shift: String, onLeave: Bool)], year: Int, month: Int) -> Int {
-        let prefix = String(format: "%04d-%02d", year, month)
-        guard let target = monthDays.first(where: { $0.date == dateString }) else { return 0 }
-        if target.onLeave || target.shift == "休息" { return 0 }
-        if isStatutoryDay(dateString) { return 0 } // 三薪优先，不算加班
-        let bd = basicDays(year: year, month: month)
-        var before = 0
-        var dayParts = 0
-        for d in monthDays {
-            if !d.date.hasPrefix(prefix) || d.date > dateString { continue }
-            if d.onLeave || d.shift == "休息" { continue }
-            let n = ShiftStyle.parts(of: d.shift).count
-            if d.date == dateString { dayParts = n } else { before += n }
+    /// 某日每日净预估的全部输入（第 40 条）。
+    /// - monthDays: 当月全部天数 (date, shift, onLeave)，不用事先排好序（这里按日期排）。
+    /// - pay: 当月 PayMonth（取 attendance / tripleDays / overtimeDays / overtimePay / 各项）。
+    ///   注意：monthPay 的 overtimePay 已含三薪（overtimePay = triplePay + overtimePayPart），
+    ///   所以基础奖金池 = bonusTotal − overtimePay，不用再减 triplePay。
+    /// - baseSalary: 已解析的基本工资；dailyRate = 基本工资 ÷ 21.75（只用来算加班/三薪加成）。
+    /// - basicDays: 法定基本天数（PayCalc.basicDays，与服务端同表）。
+    /// 分摊公式（老爷 11:04–11:05 定）：每日奖金分摊只给正常上班的日子，
+    ///   分摊 = 基础奖金池 ÷ (当月实际班数 − 三薪天数 − 加班天数）；
+    ///   三薪日只拿三薪加成（+ 工资部分），加班日只拿加班加成（+ 工资部分）。
+    ///   每日净预估 = [基本工资 ÷ 实际班数 + 班次津贴
+    ///   + (工龄津贴 + 高温补贴 + 学历补贴) ÷ 实际班数 − 五险一金 ÷ 实际班数 − 当月个税 ÷ 实际班数]
+    ///   + [正常班次才有的奖金分摊 + 当日类型加成（普通 0、加班 +2×日工资、三薪 +3×日工资）]。
+    ///   水电费不扣，餐补不算；当月实际班数 = pay.attendance（工资页录入值），没有录入时用排班班数。
+    ///   月度工资公式（monthPay）一动不动，只改这里的每日分解；当月每天加起来 = 实发 + 水电费。
+    /// 三薪/加班识别与月度 tripleDays/overtimeDays 同口径：法定上班日按日期顺序先占
+    /// 三薪额度，超出的法定日转加班；非假日上班日累计超过 基本天数 + 三薪天数 才算加班。
+    /// 零头班次：录入出勤比排班班数多出零头（如 10 月 24.31 班、排班 24 班）时，
+    /// 多出的 0.31 个班挂在当月最后工作日上（累计班次就是落在这天），按当日最后
+    /// 一个班次的津贴 + 零头班次自己的种类算；没有零头时 fractionExtra = 0。
+    /// 录入出勤比排班多出整班以上（如 9 月 25 班、App 日历 22 班）是日历缺调班记录，
+    /// 不归这里管（老爷 10:55 说先不管），那几天没有零头可挂。
+    static func dayEstimateInputs(dateString: String,
+                                  monthDays: [(date: String, shift: String, onLeave: Bool)],
+                                  pay: PayMonth,
+                                  baseSalary: Double,
+                                  dailyRate: Double,
+                                  basicDays: Int) -> DayEstimateInputs {
+        var out = DayEstimateInputs()
+        out.dailyRate = dailyRate
+        let days = monthDays.sorted { $0.date < $1.date }
+        let scheduledShifts = days.reduce(0) { $0 + ($1.onLeave || $1.shift == "休息" ? 0 : ShiftStyle.parts(of: $1.shift).count) }
+        let attendance = (pay.attendance ?? 0) > 0 ? (pay.attendance ?? 0) : Double(scheduledShifts)
+        guard attendance > 0 else { return out }
+        out.baseShare = baseSalary / attendance
+        out.extraShare = ((pay.seniority ?? 0) + (pay.heat ?? 0) + (pay.educationSubsidy ?? 0)) / attendance
+        out.contribShare = (pay.contributionTotal ?? 0) / attendance
+        out.taxShare = (pay.incomeTax ?? 0) / attendance
+        // 基础奖金池 = 奖金总额 − 加班费（含三薪，monthPay 的 overtimePay 已含 triplePay）；
+        // 只分给正常班次：正常班数 = 实际班数 − 三薪天数 − 加班天数（9 月 22 天、10 月 18 天、11 月 21 天）。
+        let normalShifts = attendance - (pay.tripleDays ?? 0) - (pay.overtimeDays ?? 0)
+        if normalShifts > 0 {
+            out.bonusShare = ((pay.bonusTotal ?? 0) - (pay.overtimePay ?? 0)) / normalShifts
         }
-        let over = before + dayParts - bd
-        if over <= 0 { return 0 }
-        return min(over, dayParts)
+        // 逐班次分类：法定日先占三薪额度（按日期顺序），超出的法定日转加班；
+        // 非假日班累计超过 基本天数 + 三薪天数 的部分算加班。
+        // 法定日也计入累计（月度 overtimeDays = 出勤 − 基本天数 − 三薪天数 就是这么数的）。
+        let tripleQuota = pay.tripleDays ?? 0
+        let threshold = Double(basicDays) + tripleQuota
+        var tripleUsed: Double = 0
+        var cumulative: Double = 0
+        var lastWorkDate: String? = nil
+        var lastWorkParts: [String] = []
+        for d in days {
+            if d.onLeave || d.shift == "休息" { continue }
+            let parts = ShiftStyle.parts(of: d.shift)
+            lastWorkDate = d.date
+            lastWorkParts = parts
+            let isStatutory = isStatutoryDay(d.date)
+            for _ in parts {
+                cumulative += 1
+                var kind: DayPremiumKind = .normal
+                if isStatutory {
+                    if tripleUsed < tripleQuota {
+                        kind = .triple
+                        tripleUsed += 1
+                    } else {
+                        kind = .overtime
+                    }
+                } else if cumulative > threshold {
+                    kind = .overtime
+                }
+                if d.date == dateString { out.kinds.append(kind) }
+            }
+        }
+        // 零头班次（录入出勤 − 排班班数 ∈ (0, 1)）：挂在当月最后工作日。
+        let remainder = attendance - Double(scheduledShifts)
+        if remainder > 0.001, remainder < 1, dateString == lastWorkDate, !lastWorkParts.isEmpty {
+            // 零头班次的种类：按累计班次（= 录入出勤）判定；法定日先占剩下的三薪额度。
+            var fKind: DayPremiumKind = .normal
+            if let lastDate = lastWorkDate, isStatutoryDay(lastDate) {
+                fKind = tripleUsed < tripleQuota ? .triple : .overtime
+            } else if attendance > threshold {
+                fKind = .overtime
+            }
+            // 零头不拿津贴：月度津贴总额是录入的整班数按班次算死的（如 10 月 800 元），
+            // 0.31 个零头班没有对应的津贴；加了津贴当月每天加起来会比实发 + 水电费多出 21.70。
+            // 零头只拿工资分摊 + 加成（正常零头才拿奖金分摊）。
+            var perShift = out.baseShare + out.extraShare - out.contribShare - out.taxShare + Double(fKind.rawValue) * dailyRate
+            if fKind == .normal { perShift += out.bonusShare }
+            out.fractionExtra = remainder * perShift
+            out.fractionKind = fKind
+        }
+        return out
     }
 
-    /// 今日预估工资（第 29 条口径，2026-11-26，取代第 19 条只算工资的老口径）：
-    /// 每个班 = 日工资（基本工资 ÷ 21.75）+ 班次补贴（早 70 / 中 30 / 日 0）+ 餐补 10
-    ///          + 每日奖金分摊；三薪日每班再加 3 倍日工资；加班班次每个再加 2 倍日工资；
-    /// 双班两班都算；休息 0 元。
-    /// 三薪日按当天全额算，不走月度工资里「三薪提纯」（超出基本天数的部分才算三薪）那条——
-    /// 单日预估按当天全额算（和第 19 条现有做法一致）。
-    /// 加班班次是当天靠后的几个（累计到当天才超出的那几个），每个加 2 倍日工资。
-    /// 例（他 11 月：基本 2420、分摊 204.76）：普通日班日 = 111.26 + 0 + 10 + 204.76 = 326.02；
-    /// 早班三薪日 = 111.26 + 70 + 10 + 204.76 + 333.79 = 729.81。
+    /// 单个班次的精确预估值（未取整）：工资部分 + 津贴 + （正常班次才有的）奖金分摊 + 加成。
+    private static func partValue(part: String, index: Int, earlyRate: Double, midRate: Double, inputs: DayEstimateInputs) -> Double {
+        var v = inputs.baseShare + inputs.extraShare - inputs.contribShare - inputs.taxShare
+        if part == "早班" { v += earlyRate }
+        else if part == "中班" { v += midRate }
+        let kind = index < inputs.kinds.count ? inputs.kinds[index] : .normal
+        if kind == .normal { v += inputs.bonusShare }
+        v += Double(kind.rawValue) * inputs.dailyRate
+        return v
+    }
+
+    /// 今日预估工资（第 40 条口径，2026-11-26，取代第 29 条的老口径）：
+    /// 每个班 = 基本工资 ÷ 当月实际班数 + 班次补贴（早 70 / 中 30 / 日 0）
+    ///          + (工龄津贴 + 高温补贴 + 学历补贴) ÷ 当月实际班数 − 五险一金 ÷ 当月实际班数
+    ///          − 当月个税 ÷ 当月实际班数 + （正常班次才有的）奖金分摊 + 当日类型加成。
+    ///   加成：普通 0、加班 +2×(基本工资÷21.75)、三薪 +3×(基本工资÷21.75)。
+    ///   21.75 只出现在这里；水电费不扣，餐补不算；三薪/加班日不拿奖金分摊（11:04–11:05 定）。
+    /// 分项精确值加完再取整一次（例算：10 月 1 日三薪日班 394.79；分项先取整会得 394.78）。
+    /// 例：11 月普通日班 = 278.05；9 月 25 日三薪中班 = 433.80；9 月普通日班 = 265.46。
+    /// 双班两班都算；休息 0 元；请假不算钱（调用方先拦 onLeave）。
+    /// 零头班次（fractionExtra）只在当月最后工作日有，直接加进总额。
     /// - shift: 今日实际班次（日班/中班/早班/休息/早中班/日中班）。
-    /// - baseSalary: 基本工资（已按生效表/个人设置/全局解析好）。
-    /// - dateString: 今日 "yyyy-MM-dd"，用于查三薪表。
-    /// - earlyRate/midRate/mealRate: 补贴率（全局设置，缺失用 70/30/10）。
-    /// - dailyBonusShare: 每日奖金分摊（当月绩效奖金部分 ÷ 当月实际出勤班数）。
-    /// - overtimeShifts: 当天算加班的班次数（0…当天班次数；三薪日传 0）。
+    /// - earlyRate/midRate: 补贴率（全局设置，缺失用 70/30）。
+    /// - inputs: PayCalc.dayEstimateInputs 算好的当日输入。
     /// 返回 (total: 当日预估总额，isRest: 是否休息，isTriple: 是否三薪日，isOvertime: 是否加班日）。
-    static func todayEstimate(shift: String, baseSalary: Double, dateString: String,
-                              earlyRate: Double = 70, midRate: Double = 30, mealRate: Double = 10,
-                              dailyBonusShare: Double = 0, overtimeShifts: Int = 0) -> (total: Double, isRest: Bool, isTriple: Bool, isOvertime: Bool) {
+    static func todayEstimate(shift: String,
+                              earlyRate: Double = 70, midRate: Double = 30,
+                              inputs: DayEstimateInputs = DayEstimateInputs()) -> (total: Double, isRest: Bool, isTriple: Bool, isOvertime: Bool) {
         if shift == "休息" { return (0, true, false, false) }
-        let dailyRate = baseSalary / 21.75
-        let triple = isStatutoryDay(dateString)
-        // 每项先取整到分再加（老爷的算法：111.26 + 333.79 + 70 + 10 = 525.05）；
-        // 先加未取整的数再取整会得 525.06，差一分。
-        let dayPay = round2(dailyRate)
-        let triplePay = round2(3 * dailyRate)
-        let overtimePay = round2(2 * dailyRate)
         let parts = ShiftStyle.parts(of: shift)
-        // 加班班次在当天靠后的几个；三薪日不算加班（ot 强制 0）。
-        let ot = triple ? 0 : min(max(overtimeShifts, 0), parts.count)
         var total: Double = 0
         for (index, p) in parts.enumerated() {
-            var pay = dayPay + mealRate + dailyBonusShare
-            if p == "早班" { pay += earlyRate }
-            else if p == "中班" { pay += midRate }
-            if triple { pay += triplePay }
-            if index >= parts.count - ot { pay += overtimePay }
-            total += pay
+            total += partValue(part: p, index: index, earlyRate: earlyRate, midRate: midRate, inputs: inputs)
         }
-        return (round2(total), false, triple, ot > 0)
+        return (round2(total + inputs.fractionExtra), false, inputs.isTriple, inputs.isOvertime)
     }
 
     /// 今日的班次时段（供倒计时用）：每个单班一段，起止是当天 0 点起的 Date。
     /// 早中班两段（00:00–08:00 与 16:00–24:00，中间歇着）；日中班两段连着（08:00–24:00）。
-    /// 每段带该段的预估工资（按 todayEstimate 的口径分段算：奖金分摊每段一份，
-    /// 三薪每段加 3 倍日工资，加班的段（当天靠后的几个）每段加 2 倍日工资）。
-    static func todaySegments(shift: String, day: Date, baseSalary: Double, dateString: String,
-                              earlyRate: Double = 70, midRate: Double = 30, mealRate: Double = 10,
-                              dailyBonusShare: Double = 0, overtimeShifts: Int = 0) -> [(start: Date, end: Date, pay: Double)] {
+    /// 每段带该段的预估工资（第 40 条口径：分摊 + 津贴 + 加成；精确值，todayLiveState 里再取整）。
+    /// 零头班次（fractionExtra）挂在最后一段上。
+    static func todaySegments(shift: String, day: Date,
+                              earlyRate: Double = 70, midRate: Double = 30,
+                              inputs: DayEstimateInputs = DayEstimateInputs()) -> [(start: Date, end: Date, pay: Double)] {
         let cal = DateUtil.calendar
         let startOfDay = cal.startOfDay(for: day)
-        let dailyRate = baseSalary / 21.75
-        let triple = isStatutoryDay(dateString)
-        // 每项先取整到分再加（与 todayEstimate 同口径：111.26 + 333.79 + 70 + 10 = 525.05）。
-        let dayPay = round2(dailyRate)
-        let triplePay = round2(3 * dailyRate)
-        let overtimePay = round2(2 * dailyRate)
         let parts = ShiftStyle.parts(of: shift)
-        let ot = triple ? 0 : min(max(overtimeShifts, 0), parts.count)
         var out: [(start: Date, end: Date, pay: Double)] = []
         for (index, p) in parts.enumerated() {
             guard let r = segmentRange(for: p) else { continue }
             guard let s = cal.date(byAdding: .minute, value: r.start, to: startOfDay),
                   let e = cal.date(byAdding: .minute, value: r.end, to: startOfDay) else { continue }
-            var pay = dayPay + mealRate + dailyBonusShare
-            if p == "早班" { pay += earlyRate }
-            else if p == "中班" { pay += midRate }
-            if triple { pay += triplePay }
-            if index >= parts.count - ot { pay += overtimePay }
-            out.append((start: s, end: e, pay: round2(pay)))
+            var pay = partValue(part: p, index: index, earlyRate: earlyRate, midRate: midRate, inputs: inputs)
+            if index == parts.count - 1 { pay += inputs.fractionExtra }
+            out.append((start: s, end: e, pay: pay))
         }
         return out.sorted { $0.start < $1.start }
     }
@@ -529,13 +601,12 @@ enum PayCalc {
     /// 双班按两个班连着算（每段各有自己的单价）；跨夜的早班是当天 00:00–08:00，不跨日期。
     /// - shift: 今日实际班次；onLeave: 请假按休息算（¥0）。
     /// - day: 今天 0 点；now: 当前时刻。
-    /// - dailyBonusShare / overtimeShifts: 第 29 条（奖金分摊 / 当天加班班次数），透传给 todaySegments。
+    /// - inputs: 第 40 条当日输入（透传给 todaySegments）。
     static func todayLiveState(shift: String, onLeave: Bool, day: Date, now: Date,
-                               baseSalary: Double, dateString: String,
-                               earlyRate: Double = 70, midRate: Double = 30, mealRate: Double = 10,
-                               dailyBonusShare: Double = 0, overtimeShifts: Int = 0) -> TodayLiveState {
+                               earlyRate: Double = 70, midRate: Double = 30,
+                               inputs: DayEstimateInputs = DayEstimateInputs()) -> TodayLiveState {
         if onLeave || shift == "休息" { return .rest }
-        let segs = todaySegments(shift: shift, day: day, baseSalary: baseSalary, dateString: dateString, earlyRate: earlyRate, midRate: midRate, mealRate: mealRate, dailyBonusShare: dailyBonusShare, overtimeShifts: overtimeShifts)
+        let segs = todaySegments(shift: shift, day: day, earlyRate: earlyRate, midRate: midRate, inputs: inputs)
         guard let first = segs.first, let last = segs.last else { return .rest }
         let total = round2(segs.reduce(0) { $0 + $1.pay })
         if now < first.start { return .before(start: first.start, total: total) }

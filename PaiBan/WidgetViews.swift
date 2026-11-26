@@ -163,8 +163,8 @@ struct TodayWidgetView: View {
     /// 没工资权限不显示钱（第 29 条补充规矩；倒计时那行不受影响，照常显示）。
     private var moneyLine: String? {
         guard snapshot.payAccess else { return nil }
-        let triple = (snapshot.today.map { PayCalc.isStatutoryDay($0.date) } ?? false)
-        let suffix = triple ? "（三薪）" : (snapshot.todayOvertimeShifts > 0 ? "（加班）" : "")
+        // 第 40 条：三薪/加班以后缀看当日种类（不是法定日就一定是三薪——超额的法定日转加班）。
+        let suffix = snapshot.todayInputs.isTriple ? "（三薪）" : (snapshot.todayInputs.isOvertime ? "（加班）" : "")
         switch entry.live {
         case .rest: return nil
         case .before(_, let total): return "预估 \(MoneyUtil.money(total))\(suffix)"

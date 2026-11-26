@@ -68,7 +68,7 @@ struct Provider: TimelineProvider {
         let snap = snapshot ?? WidgetSnapshotStore.load()
         let live: PayCalc.TodayLiveState
         if let today = snap?.today, let todayDate = DateUtil.date(from: today.date) {
-            live = PayCalc.todayLiveState(shift: today.shift, onLeave: today.onLeave, day: todayDate, now: date, baseSalary: snap?.baseSalary ?? 2420, dateString: today.date, earlyRate: snap?.earlyRate ?? 70, midRate: snap?.midRate ?? 30, mealRate: snap?.mealRate ?? 10, dailyBonusShare: snap?.dailyBonusShare ?? 0, overtimeShifts: snap?.todayOvertimeShifts ?? 0)
+            live = PayCalc.todayLiveState(shift: today.shift, onLeave: today.onLeave, day: todayDate, now: date, earlyRate: snap?.earlyRate ?? 70, midRate: snap?.midRate ?? 30, inputs: snap?.todayInputs ?? PayCalc.DayEstimateInputs())
         } else {
             live = .rest
         }

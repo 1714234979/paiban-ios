@@ -1169,30 +1169,27 @@ final class AppStore: ObservableObject {
         return (base, global.earlyRate ?? 70, global.midRate ?? 30, global.mealRate ?? 10)
     }
 
-    /// 某天预估用的全套输入（第 29 条）：基本工资/补贴率（与 monthPay 同链）
-    /// + 每日奖金分摊 + 当天加班班次数。排班页今日卡片（传今天）、当天详情（传那天）、
-    /// 小组件快照（传今天）共用。本地算不出当月工资（缺全年天数或配置）时分摊为 0、
-    /// 加班 0——退回只算工资的老口径，不崩。
-    func estimateInputs(for dateString: String) -> (baseSalary: Double, earlyRate: Double, midRate: Double, mealRate: Double, dailyBonusShare: Double, overtimeShifts: Int) {
+    /// 某天预估用的全套输入（第 40 条）：基本工资/补贴率/日工资（与 monthPay 同链）
+    /// + PayCalc.dayEstimateInputs 算好的当日分摊与加成。排班页今日卡片（传今天）、
+    /// 当天详情（传那天）、小组件快照（传今天）共用。本地算不出当月工资
+    /// （缺全年天数或配置）时输入全 0——预估显示 ¥0.00，不崩；新口径没有只算工资的
+    /// 退路（分摊要当月工资），等工资刷出来就正常了。
+    func estimateInputs(for dateString: String) -> (baseSalary: Double, earlyRate: Double, midRate: Double, dailyRate: Double, inputs: PayCalc.DayEstimateInputs) {
         let date = DateUtil.date(from: dateString) ?? Date()
         let ym = DateUtil.yearMonth(of: date)
         let key = payCacheKey(year: ym.year, month: ym.month)
         let global = payConfig?.settings ?? PayGlobalSettings()
         let base = PayCalc.resolvedBaseSalary(effective: payConfig?.effective ?? [:], userSettings: user?.paySettings, global: global, monthKey: key)
-        var share: Double = 0
-        var ot = 0
+        var inputs = PayCalc.DayEstimateInputs()
         if let pay = payFor(year: ym.year, month: ym.month) {
-            share = PayCalc.dailyBonusShare(bonusTotal: pay.bonusTotal, overtimePay: pay.overtimePay, attendance: pay.attendance)
+            let monthDays = (yearDaysCache[String(ym.year)] ?? []).filter { $0.date.hasPrefix(key) }.map { (date: $0.date, shift: $0.shift, onLeave: $0.onLeave ?? false) }
+            inputs = PayCalc.dayEstimateInputs(dateString: dateString, monthDays: monthDays, pay: pay, baseSalary: base, dailyRate: base / 21.75, basicDays: PayCalc.basicDays(year: ym.year, month: ym.month))
         }
-        if let days = yearDaysCache[String(ym.year)] {
-            let monthDays = days.filter { $0.date.hasPrefix(key) }.map { (date: $0.date, shift: $0.shift, onLeave: $0.onLeave ?? false) }
-            ot = PayCalc.overtimeShiftCount(dateString: dateString, monthDays: monthDays, year: ym.year, month: ym.month)
-        }
-        return (base, global.earlyRate ?? 70, global.midRate ?? 30, global.mealRate ?? 10, share, ot)
+        return (base, global.earlyRate ?? 70, global.midRate ?? 30, base / 21.75, inputs)
     }
 
     /// 今日预估用的全套输入（estimateInputs 传今天）。
-    var todayEstimateInputs: (baseSalary: Double, earlyRate: Double, midRate: Double, mealRate: Double, dailyBonusShare: Double, overtimeShifts: Int) {
+    var todayEstimateInputs: (baseSalary: Double, earlyRate: Double, midRate: Double, dailyRate: Double, inputs: PayCalc.DayEstimateInputs) {
         estimateInputs(for: DateUtil.string(from: Date()))
     }
 
@@ -1319,7 +1316,8 @@ final class AppStore: ObservableObject {
         let hasPayAccess = payAccess
         let payMonth = hasPayAccess ? payFor(year: ym.year, month: ym.month) : nil
         let pay = payMonth.map { WidgetSnapshot.Pay(year: ym.year, month: ym.month, salarySubtotal: $0.salarySubtotal, salaryNet: $0.salaryNet, bonusAfterTax: $0.bonusAfterTax, grandTotal: $0.grandTotal, bonusTotal: $0.bonusTotal, incomeTax: $0.incomeTax, attendance: $0.attendance, tripleDays: $0.tripleDays, overtimeDays: $0.overtimeDays) }
-        // 今日预估输入（第 29 条）：奖金分摊 + 今天加班班次数；没权限时归 0（小组件不显示钱）。
+        // 今日预估输入（第 40 条）：当日分摊与加成（dayEstimateInputs 算好的整份）；
+        // 没权限时归 0（小组件不显示钱）。
         let estInputs = estimateInputs(for: todayString)
         return WidgetSnapshot(
             savedAt: now,
@@ -1337,8 +1335,7 @@ final class AppStore: ObservableObject {
             midRate: inputs.midRate,
             mealRate: inputs.mealRate,
             payAccess: hasPayAccess,
-            dailyBonusShare: hasPayAccess ? estInputs.dailyBonusShare : 0,
-            todayOvertimeShifts: hasPayAccess ? estInputs.overtimeShifts : 0
+            todayInputs: hasPayAccess ? estInputs.inputs : PayCalc.DayEstimateInputs()
         )
     }
 

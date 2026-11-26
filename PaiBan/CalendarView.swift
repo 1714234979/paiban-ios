@@ -151,7 +151,7 @@ struct CalendarView: View {
                 .foregroundColor(AppStyle.whiteText(opacity: 0.75))
             if let day = store.todaySchedule {
                 let inputs = store.todayEstimateInputs
-                TodayLiveRow(day: day, baseSalary: inputs.baseSalary, earlyRate: inputs.earlyRate, midRate: inputs.midRate, mealRate: inputs.mealRate, dailyBonusShare: inputs.dailyBonusShare, overtimeShifts: inputs.overtimeShifts, showMoney: store.payAccess)
+                TodayLiveRow(day: day, earlyRate: inputs.earlyRate, midRate: inputs.midRate, inputs: inputs.inputs, showMoney: store.payAccess)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -329,6 +329,7 @@ struct CalendarView: View {
     /// 取当月工资算法里的 tripleDays / overtimeDays（12 月是三薪 0 天、加班 1 天）；
     /// 只在看自己班且算得出时显示数字，算不出（输入没到齐）先显示“—”，输入到了重画。
     /// 其他几项（应出勤、实际出勤、请假、休息）不动。
+    /// 第 41 条（2026-11-26）：应出勤后面加「基本天数 N 天」（取当月 BASIC_DAYS，11 月 21 天），随月份变。
     private var summaryLine: some View {
         Group {
             if let stats = displayedMonth?.stats {
@@ -352,7 +353,10 @@ struct CalendarView: View {
             triple = formatDays(info.tripleDays)
             overtime = formatDays(info.overtimeDays)
         }
-        return "当月应出勤 \(MoneyUtil.int(stats.basicDays)) 天 · 实际出勤 \(MoneyUtil.int(stats.actualShifts)) 个班 · 三薪 \(triple) 天 · 加班 \(overtime) 天 · 请假 \(MoneyUtil.int(stats.leaveDays)) 天 · 休息 \(MoneyUtil.int(stats.restDays)) 天"
+        // 第 41 条：基本天数是法定口径（PayCalc.basicDays，与工资页同表），
+        // 不是 stats.basicDays（那是排班非休息天数，11 月碰巧都是 21，10 月会错成 24）。
+        let statutoryBasicDays = PayCalc.basicDays(year: ym.year, month: ym.month)
+        return "当月应出勤 \(MoneyUtil.int(stats.basicDays)) 天 · 基本天数 \(statutoryBasicDays) 天 · 实际出勤 \(MoneyUtil.int(stats.actualShifts)) 个班 · 三薪 \(triple) 天 · 加班 \(overtime) 天 · 请假 \(MoneyUtil.int(stats.leaveDays)) 天 · 休息 \(MoneyUtil.int(stats.restDays)) 天"
     }
 
     /// 天数显示：整数不带小数（如 0、1），小数保留 1 位。
@@ -840,12 +844,9 @@ struct DayCell: View {
 /// 下班后：今日已下班 + 今日已挣 ¥XXX；休息/请假：今日休息/今日请假（钱那行不显示）。
 private struct TodayLiveRow: View {
     let day: DaySchedule
-    let baseSalary: Double
     let earlyRate: Double
     let midRate: Double
-    let mealRate: Double
-    let dailyBonusShare: Double
-    let overtimeShifts: Int
+    let inputs: PayCalc.DayEstimateInputs
     /// 钱显隐（第 29 条补充规矩）：只有开了工资权限才显示「已挣 · 预估」那行；倒计时不是钱，一直显示。
     let showMoney: Bool
 
@@ -855,16 +856,13 @@ private struct TodayLiveRow: View {
             let today = DateUtil.calendar.startOfDay(for: now)
             let state = PayCalc.todayLiveState(
                 shift: day.shift, onLeave: day.onLeave == true, day: today, now: now,
-                baseSalary: baseSalary, dateString: day.date,
-                earlyRate: earlyRate, midRate: midRate, mealRate: mealRate,
-                dailyBonusShare: dailyBonusShare, overtimeShifts: overtimeShifts
+                earlyRate: earlyRate, midRate: midRate, inputs: inputs
             )
-            let triple = PayCalc.isStatutoryDay(day.date)
             VStack(alignment: .leading, spacing: 2) {
                 Text(countdownText(state: state, now: now))
                     .font(.subheadline)
                     .foregroundColor(.white)
-                if let money = moneyText(state: state, triple: triple) {
+                if let money = moneyText(state: state) {
                     Text(money)
                         .font(.subheadline)
                         .foregroundColor(AppStyle.whiteText(opacity: 0.75))
@@ -901,9 +899,10 @@ private struct TodayLiveRow: View {
     /// 钱那行：上班中/上班前显示已挣 + 预估；下班后显示今日已挣；休息/请假不显示。
     /// 三薪那天末尾带「（三薪）」，加班那天带「（加班）」。
     /// 没工资权限不显示这行（第 29 条补充规矩）。
-    private func moneyText(state: PayCalc.TodayLiveState, triple: Bool) -> String? {
+    private func moneyText(state: PayCalc.TodayLiveState) -> String? {
         guard showMoney else { return nil }
-        let suffix = triple ? "（三薪）" : (overtimeShifts > 0 ? "（加班）" : "")
+        // 第 40 条：三薪/加班以后缀看当日种类（不是法定日就一定是三薪——超额的法定日转加班）。
+        let suffix = inputs.isTriple ? "（三薪）" : (inputs.isOvertime ? "（加班）" : "")
         switch state {
         case .rest:
             return nil

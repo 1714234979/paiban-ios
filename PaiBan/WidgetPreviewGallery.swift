@@ -96,18 +96,21 @@ struct WidgetPreviewGallery: View {
             midRate: 30,
             mealRate: 10,
             payAccess: true,
-            dailyBonusShare: 204.76,
-            todayOvertimeShifts: 0
+            // 演示那天（11 月 24 日）是正常早班：第 40 条输入（11 月正常日分摊 204.76）。
+            todayInputs: PayCalc.DayEstimateInputs(
+                baseShare: 2420 / 21, extraShare: 180 / 21, contribShare: 1014.61 / 21,
+                taxShare: 46.36 / 21, bonusShare: 4300 / 21, dailyRate: 2420 / 21.75,
+                kinds: [.normal], fractionExtra: 0, fractionKind: .normal)
         )
     }
 
     /// 演示 entry：2026-11-24 05:23:11，上班中（倒计时到 08:00）。
-    /// 第 29 条新口径：早班预估 ¥396.02（111.26 + 70 + 10 + 204.76），已挣约 ¥266.64。
+    /// 第 40 条新口径：早班预估 ¥348.05（115.24 + 70 + 8.57 − 48.31 + 204.76 − 2.21），已挣约 ¥234.34。
     private static func demoEntry(snapshot: WidgetSnapshot) -> Entry {
         let cal = DateUtil.calendar
         let now = cal.date(from: DateComponents(year: 2026, month: 11, day: 24, hour: 5, minute: 23, second: 11))!
         let dayStart = cal.startOfDay(for: now)
-        let live = PayCalc.todayLiveState(shift: "早班", onLeave: false, day: dayStart, now: now, baseSalary: 2420, dateString: "2026-11-24", earlyRate: 70, midRate: 30, mealRate: 10, dailyBonusShare: 204.76, overtimeShifts: 0)
+        let live = PayCalc.todayLiveState(shift: "早班", onLeave: false, day: dayStart, now: now, earlyRate: 70, midRate: 30, inputs: snapshot.todayInputs)
         return Entry(date: now, snapshot: snapshot, live: live)
     }
 }

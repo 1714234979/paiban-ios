@@ -127,10 +127,13 @@ enum WidgetServerClient {
                 bonusTotal: p.bonusTotal, incomeTax: p.incomeTax,
                 attendance: p.attendance, tripleDays: p.tripleDays, overtimeDays: p.overtimeDays)
         } : nil
-        // 今日预估输入（第 29 条）：奖金分摊 = (奖金总额 − 加班费) ÷ 出勤班数；今天加班班次数按当月累计算。
-        // 工资拉不到时分摊为 0（退回只算工资的老口径）；没权限时归 0（小组件不显示钱）。
-        let share = hasPayAccess ? PayCalc.dailyBonusShare(bonusTotal: pay?.bonusTotal, overtimePay: pay?.overtimePay, attendance: pay?.attendance) : 0
-        let ot = hasPayAccess ? PayCalc.overtimeShiftCount(dateString: todayStr, monthDays: monthDays.map { (date: $0.date, shift: $0.shift, onLeave: $0.onLeave) }, year: ym.year, month: ym.month) : 0
+        // 今日预估输入（第 40 条）：当日分摊与加成（dayEstimateInputs 算好的整份）。
+        // 工资拉不到时输入全 0；没权限时归 0（小组件不显示钱）。
+        let base = pay?.baseSalary ?? profile?.paySettings?.baseSalary ?? cached?.baseSalary ?? 2420
+        var todayInputs = PayCalc.DayEstimateInputs()
+        if hasPayAccess, let p = pay {
+            todayInputs = PayCalc.dayEstimateInputs(dateString: todayStr, monthDays: monthDays.map { (date: $0.date, shift: $0.shift, onLeave: $0.onLeave) }, pay: p, baseSalary: base, dailyRate: base / 21.75, basicDays: PayCalc.basicDays(year: ym.year, month: ym.month))
+        }
         return WidgetSnapshot(
             savedAt: Date(),
             displayName: profile?.displayName ?? cached?.displayName,
@@ -142,13 +145,12 @@ enum WidgetServerClient {
             monthYear: ym.year,
             month: ym.month,
             pay: paySnap,
-            baseSalary: pay?.baseSalary ?? profile?.paySettings?.baseSalary ?? cached?.baseSalary ?? 2420,
+            baseSalary: base,
             earlyRate: rates.earlyRate ?? 70,
             midRate: rates.midRate ?? 30,
             mealRate: rates.mealRate ?? 10,
             payAccess: hasPayAccess,
-            dailyBonusShare: share,
-            todayOvertimeShifts: ot)
+            todayInputs: todayInputs)
     }
 
     /// 工资配置只取补贴率；拉不到就用默认 70/30/10（不让整个快照失败）。
