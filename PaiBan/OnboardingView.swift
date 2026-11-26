@@ -475,14 +475,15 @@ struct PayGuideView: View {
                 Spacer()
                 Picker("年份", selection: $hireYear) {
                     ForEach(1990...Calendar.current.component(.year, from: Date()), id: \.self) { y in
-                        Text("\(y)").tag(y)
+                        // 36 条：同设置页——Text("\(y)") 是 LocalizedStringKey，2018 会变 2,018；verbatim 拼纯数字。
+                        Text(verbatim: "\(y)").tag(y)
                     }
                 }
                 .pickerStyle(.menu)
                 Text("年")
                 Picker("月份", selection: $hireMonth) {
                     ForEach(1...12, id: \.self) { m in
-                        Text("\(m)").tag(m)
+                        Text(verbatim: "\(m)").tag(m)
                     }
                 }
                 .pickerStyle(.menu)

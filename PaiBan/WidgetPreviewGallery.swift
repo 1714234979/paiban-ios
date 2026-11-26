@@ -2,7 +2,7 @@
 import SwiftUI
 
 /// 小组件截图画廊：只在 DEBUG 包里编进（Release 包没有，不会发出去）。
-/// 模拟器启动参数：--widget-preview <today|week|pay|month|lock-circular|lock-rectangular>
+/// 模拟器启动参数：--widget-preview <today|week|pay|month|lock-circular|lock-rectangular|app-calendar-dark|app-pay-dark|app-settings-dark|app-calendar-light|app-pay-light|app-settings-light|app-daydetail-dark|app-daydetail-light|app-payguide-dark|app-payguide-light|app-hireyear-light>
 /// 演示数据：2026-11-24 周二、B 班早班 00:00–08:00，05:23 上班中。
 /// 班次按真 8 天轮算（ScheduleCalculator），工资按基本工资 2420 口径——
 /// 不是真人实时数据，是给老爷看样子用的；真机装上后小组件读 App 里自己的排班/工资。
@@ -129,7 +129,11 @@ private struct AppPagePreview: View {
 
     var body: some View {
         Group {
-            if kind.hasPrefix("app-payguide") {
+            if kind.hasPrefix("app-hireyear") {
+                // 入职时间年份滚轮（1.2.9.001，第 36 条）：验年份显示纯数字。
+                // 菜单行（真控件的样子，选中 2018）+ 滚轮（同批标签，2018 居中）。
+                HireYearGalleryPreview()
+            } else if kind.hasPrefix("app-payguide") {
                 // 工资引导（1.2.9.001，第 30 条）：演示账号刚开通工资权限，弹窗走一遍 3 步引导。
                 PayGuideView()
                     .environmentObject(store)
@@ -244,6 +248,48 @@ private struct AppPagePreview: View {
             yearDays: yearDays, global: PayGlobalSettings(), userSettings: settings,
             recordedMonths: [:], effective: [:], annualLeaveOffset: 0, year: 2026, month: 11
         )
+    }
+}
+
+/// 入职时间年份滚轮画廊（1.2.9.001，第 36 条，DEBUG 专属）：验年份显示纯数字。
+/// 菜单行是真控件的样子（选中 2018）；滚轮用同一批标签（2018 居中），
+/// 滚轮里 2016–2020 都是纯数字即算过——2012 与 2018 是同一批标签。
+private struct HireYearGalleryPreview: View {
+    @State private var hireYear = 2018
+    private var years: [Int] { Array(1990...Calendar.current.component(.year, from: Date())) }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    HStack {
+                        Text("入职时间")
+                        Spacer()
+                        Picker("年份", selection: $hireYear) {
+                            ForEach(years, id: \.self) { y in
+                                Text(verbatim: "\(y)").tag(y)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        Text("年")
+                    }
+                } header: {
+                    Text("工资设置 → 入职时间（第 36 条）")
+                } footer: {
+                    Text("年份显示纯数字（2012、2018），不带千分位逗号。")
+                }
+                Section("年份滚轮") {
+                    Picker("年份", selection: $hireYear) {
+                        ForEach(years, id: \.self) { y in
+                            Text(verbatim: "\(y)").tag(y)
+                        }
+                    }
+                    .pickerStyle(.wheel)
+                    .frame(height: 200)
+                }
+            }
+            .navigationTitle("入职时间")
+        }
     }
 }
 

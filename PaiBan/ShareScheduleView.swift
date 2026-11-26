@@ -272,7 +272,8 @@ private struct SharedMonthView: View {
         HStack {
             Button { shiftMonth(-1) } label: { Image(systemName: "chevron.left") }
             Spacer()
-            Text("\(yearMonth.year)年\(yearMonth.month)月")
+            // 36 条：年份走 yearMonthTitle 拼纯数字（Text("\(year)年\(month)月") 是 LocalizedStringKey，会变 2,026）。
+            Text(DateUtil.yearMonthTitle(year: yearMonth.year, month: yearMonth.month))
                 .font(.headline)
             Spacer()
             Button { shiftMonth(1) } label: { Image(systemName: "chevron.right") }

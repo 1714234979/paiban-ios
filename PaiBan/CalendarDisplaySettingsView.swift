@@ -121,7 +121,8 @@ private struct CalendarPreviewView: View {
                     .frame(maxWidth: .infinity, minHeight: 34)
                 }
             }
-            Text("\(year)年\(month)月 · 预览按当前开关显示")
+            // 36 条：Text("\(year)年\(month)月") 是 LocalizedStringKey，年份会带分组符变 2,026；verbatim 拼纯数字。
+            Text(verbatim: "\(year)年\(month)月 · 预览按当前开关显示")
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
