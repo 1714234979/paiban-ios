@@ -296,10 +296,10 @@ struct SettingsView: View {
                 }
             }
         }
-        // 1.3.0.004：List 底部留 100pt——悬浮胶囊顶离内容底边约 41pt，
-        // 不留的话滑到底「关于我们」会被胶囊盖住；100pt 够它完整露出来。
+        // 1.3.0.005：List 底部留 120pt——胶囊下面到屏幕底边那块（老爷划了红线）
+        // 要彻底干净，滑到底「关于我们」离胶囊再远一点；120pt 够它完整露出来。
         .safeAreaInset(edge: .bottom) {
-            Color.clear.frame(height: 100)
+            Color.clear.frame(height: 120)
         }
         .navigationTitle("设置")
         .alert("检查更新", isPresented: updateNoticeBinding) {
@@ -1083,6 +1083,9 @@ struct ChangelogView: View {
     var body: some View {
         Form {
             Section {
+                changelog(version: "1.3.0.005（内测）", items: [
+                    "底部切换栏照 iOS 文件 App 那个悬浮胶囊重做：004 的玻璃胶囊还是半透明，工资页奖金那几行透过胶囊露出来、重在一起，屏幕最底边那块也不干净；现在胶囊改成不透明实色，内容滚到下面直接被挡住，不会透出来。选中那个有浅色圆角底块 + 蓝色图标文字，没选中的是灰色。位置、宽度、滑动切页都不变，震动还是不要。三页底部留白加到 120pt，滑到底最底下的内容离胶囊更远",
+                ])
                 changelog(version: "1.3.0.004（内测）", items: [
                     "底部切换栏照音乐 App 那个悬浮胶囊改：003 的胶囊还是太宽、浮得太高，看着像回到了以前那条；现在底栏位置跟视频里一样（胶囊底离屏幕底边约 23pt，比 003 低约 27pt），胶囊按三个标签的宽度做短一点（限宽 300pt 居中），不照视频四个标签的宽度。震动不要了，点按和滑动切换都不震",
                 ])

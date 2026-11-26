@@ -27,6 +27,17 @@ import SwiftUI
 /// 屏幕底边约 23pt（003 是 50pt，往下挪约 27pt）；三个标签，胶囊按三个标签
 /// 的宽度做，适当做短一点（限宽 300pt 居中），不照视频四个标签的宽度做。
 /// 震动不要了，点按和滑动都不震（003 的共享震动器整段删掉）。
+///
+/// 1.3.0.005（第 46 条再修，老爷 2026-11-26 发文件 App 视频 + 工资页截图亲口纠，
+/// 「还不对，按照视频里的那个弄，别糊弄我了」）：004 还是不对——工资页奖金那几行
+/// 透过玻璃胶囊露出来、重在一起；屏幕最底边（胶囊下面到屏幕底边那块）也被划了红线。
+/// 根子是胶囊是半透明 Liquid Glass，内容滚到下面会透出来。照视频（iOS 文件 App 的
+/// 悬浮胶囊底栏：最近项目/共享/浏览）重做：胶囊改成**不透明**实色（systemBackground，
+/// 深浅色系统自己适配），内容滚到下面直接被挡住、不会透出来；选中那个有浅色圆角底块
+/// （systemGray5 圆角矩形，matchedGeometryEffect 平滑滑动）+ 蓝色图标文字，未选中
+/// 是 secondary。位置、宽度、滑动切页都不变（底离屏幕底边约 23pt，限宽 300pt 居中，
+/// 栏上左右滑切换，不震动）。底部留白 100 → 120pt，三页滑到底最底下的内容离胶囊更远，
+/// 胶囊下面到屏幕底边那块只剩干净的页面底色。
 /// 同版再修底栏盖内容：safeAreaInset 在 NavigationStack 里传不进去，三页
 /// 滑到底最底下的内容都被胶囊盖住（排班统计卡、设置「关于」）。改成 overlay
 /// 纯悬浮 + 各页自己留 100pt 底部留白，胶囊顶离内容底边约 41pt，够露出来。
@@ -90,15 +101,12 @@ struct MainTabView: View {
                 .opacity(store.selectedTab == 2 ? 1 : 0)
                 .allowsHitTesting(store.selectedTab == 2)
         }
-        // 悬浮胶囊玻璃栏：按三个标签的宽度做短一点（限宽 300pt 居中），
-        // 位置照视频——胶囊底离屏幕底边约 23pt。
-        // 1.3.0.004 修重合：原来用 safeAreaInset 占位，但它在 NavigationStack
-        // 里传不进去，内容照样滑到胶囊底下（排班统计卡、设置「关于」都被盖）。
-        // 改成 overlay 纯悬浮（只管样子、不占位），底部留白改由各页自己留
-        // （排班/工资 ScrollView padding.bottom 100，设置 List safeAreaInset 100），
-        // 胶囊顶离内容底边约 41pt，100pt 够最底下的内容完整露出来。
+        // 悬浮胶囊栏（1.3.0.005，照文件 App 视频）：不透明实色胶囊，选中那个有
+        // 浅色圆角底块 + 蓝色图标文字。位置照视频——胶囊底离屏幕底边约 23pt，
+        // 限宽 300pt 居中。overlay 纯悬浮（只管样子、不占位），底部留白由各页
+        // 自己留（排班/工资 ScrollView padding.bottom 120，设置 List safeAreaInset 120）。
         .overlay(alignment: .bottom) {
-            GlassTabBar(
+            FilesTabBar(
                 items: tabItems,
                 selectedTab: $store.selectedTab,
                 onSwipeLeft: { switchTab(step: 1) },
@@ -135,23 +143,25 @@ struct MainTabView: View {
     }
 }
 
-/// 悬浮胶囊切换栏（1.3.0.002，第 46 条修订）：圆角胶囊 + 系统玻璃底，浮在内容上面。
-/// 不贴底、不满宽、没有顶部分隔线；点按钮切换；在栏上左右滑动也能切换（来回都行）。
-/// 1.3.0.004 起不震动了（老爷亲口定：震动不要），点按和滑动都只切页、不震。
-/// 选中态走 AccentColor 资产（浅色深 navy、深色亮蓝，1.2.8.002 已改好）；
-/// 未选中态用 secondary，跟着深浅色走。
-private struct GlassTabBar: View {
+/// 悬浮胶囊切换栏（1.3.0.005，照 iOS 文件 App 视频重做，第 46 条）：
+/// 不透明实色胶囊（systemBackground，深浅色系统自己适配），浮在内容上面；
+/// 不贴底、不满宽、没有顶部分隔线。内容滚到胶囊下面直接被挡住，不会透出来。
+/// 选中那个有浅色圆角底块（systemGray5 圆角矩形，matchedGeometryEffect 平滑滑动）
+/// + 蓝色图标文字；未选中是 secondary，没有底块。点按钮切换；在栏上左右滑动
+/// 也能切换（来回都行）。不震动（老爷亲口定：震动不要），点按和滑动都只切页、不震。
+private struct FilesTabBar: View {
     let items: [(tag: Int, title: String, icon: String)]
     @Binding var selectedTab: Int
     let onSwipeLeft: () -> Void
     let onSwipeRight: () -> Void
+    @Namespace private var pillNamespace
 
     var body: some View {
         HStack(spacing: 0) {
             ForEach(items, id: \.tag) { item in
                 Button {
                     guard item.tag != selectedTab else { return }
-                    withAnimation(.easeInOut(duration: 0.2)) {
+                    withAnimation(.easeInOut(duration: 0.25)) {
                         selectedTab = item.tag
                     }
                 } label: {
@@ -163,13 +173,22 @@ private struct GlassTabBar: View {
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 8)
-                    .foregroundColor(item.tag == selectedTab ? Color.accentColor : .secondary)
+                    .padding(.horizontal, 4)
+                    .background {
+                        // 选中底块：浅色圆角矩形，跟着选中的那个走（平滑滑动）。
+                        if item.tag == selectedTab {
+                            RoundedRectangle(cornerRadius: 14)
+                                .fill(Color(.systemGray5))
+                                .matchedGeometryEffect(id: "selectedPill", in: pillNamespace)
+                        }
+                    }
+                    .foregroundColor(item.tag == selectedTab ? .blue : .secondary)
                 }
                 .buttonStyle(.plain)
             }
         }
         .padding(.horizontal, 10)
-        .glassBarBackground()
+        .background(Color(.systemBackground), in: Capsule())
         .shadow(color: .black.opacity(0.15), radius: 12, x: 0, y: 4)
         .gesture(
             DragGesture(minimumDistance: 12)
@@ -184,29 +203,5 @@ private struct GlassTabBar: View {
                     }
                 }
         )
-    }
-}
-
-/// 玻璃底（1.3.0.002）：iOS 26+ 用系统 Liquid Glass（.glassEffect()，
-/// 默认 regular，透明度跟系统走，深浅色系统自己适配）；iOS 26 以下
-/// fallback 回 ultraThinMaterial（老样子，不崩）。
-/// 部署目标 iOS 16，.glassEffect() 是 iOS 26 SDK 的 API，必须包在
-/// if #available 里——而且构建机必须用 Xcode 26 才能编过
-/// （macos-15 镜像默认是 Xcode 16.4，工作流里要显式选 Xcode_26.3.app）。
-private struct GlassBarBackground: ViewModifier {
-    func body(content: Content) -> some View {
-        if #available(iOS 26.0, *) {
-            content
-                .glassEffect(.regular, in: Capsule())
-        } else {
-            content
-                .background(.ultraThinMaterial, in: Capsule())
-        }
-    }
-}
-
-private extension View {
-    func glassBarBackground() -> some View {
-        modifier(GlassBarBackground())
     }
 }

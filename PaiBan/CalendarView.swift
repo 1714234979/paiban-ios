@@ -52,9 +52,9 @@ struct CalendarView: View {
                 recordsSection
             }
             .padding(.horizontal, 16)
-            // 1.3.0.004：底部留白 24 → 100——悬浮胶囊顶离内容底边约 41pt，
-            // 24pt 不够，统计卡最底下一行会被胶囊盖住；100pt 够它完整露出来。
-            .padding(.bottom, 100)
+            // 1.3.0.005：底部留白 100 → 120——胶囊下面到屏幕底边那块（老爷划了红线）
+            // 要彻底干净，最底下的内容离胶囊再远一点；120pt 够它完整露出来。
+            .padding(.bottom, 120)
         }
         .background(Color(.systemGroupedBackground))
         .toolbar {
