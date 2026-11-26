@@ -14,6 +14,13 @@ import UIKit
 /// 圆角胶囊浮在内容上面，离底边和左右都留一截空隙（像钉钉那个）。
 /// 玻璃用 iOS 26+ 的 .glassEffect()（系统最新的 Liquid Glass，透明度跟系统走，
 /// iOS 27 上就是它）；部署目标 iOS 16，26 以下 fallback 回 ultraThinMaterial。
+///
+/// 1.3.0.003（第 46 条再修，老爷 2026-11-26 亲口纠）：002 的旧底栏没藏住，
+/// 底下还露着原来那条（.toolbar(.hidden, for: .tabBar) 在 iOS 27 上不生效），
+/// 点旧栏会震、点胶囊不震，滑动也没震动。改法：不用 TabView 了，改手动切 Tab，
+/// 三个 NavigationStack 都活着（各页导航状态不丢），只显示选中的那一个，
+/// 底下只留悬浮胶囊这一条栏。震动改共享一个震动器，点按和滑动都要震。
+/// 胶囊尺寸：左右留边再收窄（栏做长一点）、底部空隙再加大（往上靠一点点）。
 struct MainTabView: View {
     @EnvironmentObject private var store: AppStore
 
@@ -31,34 +38,51 @@ struct MainTabView: View {
         ].filter { availableTabs.contains($0.tag) }
     }
 
-    var body: some View {
-        TabView(selection: $store.selectedTab) {
+    /// 每页的 NavigationStack。手动切 Tab 时三页都留在层级里（导航状态不丢），
+    /// 只显示选中的那一页。
+    @ViewBuilder
+    private func tabPage(tag: Int) -> some View {
+        switch tag {
+        case 0:
             NavigationStack {
                 CalendarView()
                     .navigationTitle("排班")
                     .navigationBarTitleDisplayMode(.inline)
             }
-            .tag(0)
-
+        case 1:
             // 工资 Tab：只有有工资权限的人才显示（1.2.7.001，第 23 条）。
             // 没权限的人只有排班 / 设置两个 Tab；年休假跟着工资走，也一并隐藏。
-            if store.payAccess {
-                NavigationStack {
-                    PayView()
-                        .navigationTitle("预估工资")
-                        .navigationBarTitleDisplayMode(.inline)
-                }
-                .tag(1)
+            NavigationStack {
+                PayView()
+                    .navigationTitle("预估工资")
+                    .navigationBarTitleDisplayMode(.inline)
             }
-
+        default:
             NavigationStack {
                 SettingsView()
             }
-            .tag(2)
         }
-        // 原生 Tab 栏藏掉，底下放悬浮胶囊玻璃栏。栏本身左右留边、底部留空隙，
-        // 不贴底、不满宽，浮在内容上面；safeAreaInset 照样占位，内容不会被栏挡住。
-        .toolbar(.hidden, for: .tabBar)
+    }
+
+    var body: some View {
+        // 不用 TabView：原生 Tab 栏在 iOS 27 上藏不掉，底下会多露一条旧底栏，
+        // 还会抢点按和震动。手动切 Tab：三页都活着，只显示选中的那一页，
+        // 底下只留悬浮胶囊这一条栏。
+        ZStack {
+            tabPage(tag: 0)
+                .opacity(store.selectedTab == 0 ? 1 : 0)
+                .allowsHitTesting(store.selectedTab == 0)
+            if store.payAccess {
+                tabPage(tag: 1)
+                    .opacity(store.selectedTab == 1 ? 1 : 0)
+                    .allowsHitTesting(store.selectedTab == 1)
+            }
+            tabPage(tag: 2)
+                .opacity(store.selectedTab == 2 ? 1 : 0)
+                .allowsHitTesting(store.selectedTab == 2)
+        }
+        // 悬浮胶囊玻璃栏：左右留边再收窄（栏做长一点）、底部空隙再加大（往上靠一点点）；
+        // safeAreaInset 照样占位，内容不会被栏挡住。
         .safeAreaInset(edge: .bottom) {
             GlassTabBar(
                 items: tabItems,
@@ -66,8 +90,8 @@ struct MainTabView: View {
                 onSwipeLeft: { switchTab(step: 1) },
                 onSwipeRight: { switchTab(step: -1) }
             )
-            .padding(.horizontal, 20)
-            .padding(.bottom, 8)
+            .padding(.horizontal, 12)
+            .padding(.bottom, 16)
         }
         // 没登录时点小组件进来的深链：登录后进主界面再跳（store.handleDeepLink 先记下来）。
         .task {
@@ -98,11 +122,14 @@ struct MainTabView: View {
     }
 }
 
-/// 震动（1.3.0.001，第 46 条）：滑动切 Tab 时震一下。
+/// 震动（1.3.0.001，第 46 条；1.3.0.003 改共享震动器）：
+/// 点胶囊切换页面要震，栏上左右滑切换页面也要震，都是轻震。
 /// iOS 16 部署目标，用 UIKit 的 UIImpactFeedbackGenerator（sensoryFeedback 要 iOS 17）。
+/// 共享一个震动器：每次新建一个、震完就扔，Taptic Engine 没热起来、震动发不出来；
+/// 常驻一个，prepare() 后再震，点按和滑动都稳。
 private enum Haptics {
+    private static let generator = UIImpactFeedbackGenerator(style: .light)
     static func tabSwitch() {
-        let generator = UIImpactFeedbackGenerator(style: .light)
         generator.prepare()
         generator.impactOccurred()
     }
