@@ -437,9 +437,9 @@ struct BlurView: UIViewRepresentable {
 /// 常显滚动指示条（1.3.0.013，第 46 条；老爷 19:24 说「没有滑动框」）。
 /// 教训：.scrollIndicators(.visible) 在这个工程里没用——画廊实拍（run 45811123307）
 /// 三页右边缘全高都是均匀底色，指示条根本没画出来（List 和 ScrollView 静止时都不显）。
-/// 所以自己画一条：iOS 17+ 用 onScrollGeometryChange 读滚动几何（contentOffset /
+/// 所以自己画一条：iOS 18+ 用 onScrollGeometryChange 读滚动几何（contentOffset /
 /// contentSize / containerSize），按比例算滑块位置和长度，叠在右边缘、一直看得见；
-/// 原生指示条同时藏掉（.scrollIndicators(.hidden)），免得两条重影。iOS 16 没有
+/// 原生指示条同时藏掉（.scrollIndicators(.hidden)），免得两条重影。iOS 17 及以下没有
 /// onScrollGeometryChange，退回 .scrollIndicators(.visible) 尽力而为。
 /// 滑块：宽 4pt、圆角 2、Color.primary 35%（深浅模式自适应），离右边缘 2pt；
 /// 长度 = 视口² / 内容高（最短 44pt）；位置 = 滚动进度 ×（视口高 − 滑块长）。
@@ -454,7 +454,7 @@ struct AlwaysVisibleScrollIndicator: ViewModifier {
     @State private var geo = ScrollGeo()
 
     func body(content: Content) -> some View {
-        if #available(iOS 17, *) {
+        if #available(iOS 18, *) {
             content
                 .scrollIndicators(.hidden)
                 .onScrollGeometryChange(for: ScrollGeo.self) { g in
