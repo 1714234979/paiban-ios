@@ -141,6 +141,10 @@ struct ContentView: View {
                         ForcedBindGateView(onEnterAnyway: { bindGateDismissedForSession = true })
                     } else {
                         MainTabView()
+                            // 第 30 条：工资权限刚开通时，弹工资引导（3 步弹窗，走完记完成，不再弹）。
+                            .sheet(isPresented: $store.needsPayGuide) {
+                                PayGuideView()
+                            }
                     }
                 } else if let startupError = store.startupError {
                     OfflineView(message: startupError) {

@@ -46,6 +46,12 @@ struct WidgetSnapshot: Codable, Equatable {
     var earlyRate: Double      // 早班补贴（默认 70）
     var midRate: Double        // 中班补贴（默认 30）
     var mealRate: Double       // 餐补（默认 10）
+    // 第 29 条（2026-11-26）：钱跟着工资权限走——只有开了工资权限才显示钱数。
+    // payAccess=false 时小组件只显示班次和倒计时，不显示钱（今日/锁屏/本月工资都一样）。
+    // 三个字段都有默认值：老快照（磁盘缓存）缺这几个键也能解出来，不会整个快照读失败。
+    var payAccess: Bool = true
+    var dailyBonusShare: Double = 0  // 每日奖金分摊（当月绩效奖金部分 ÷ 当月实际出勤班数）
+    var todayOvertimeShifts: Int = 0 // 今天算加班的班次数（0…今天班次数）
 
     /// 组件库预览用的假数据（不含真人信息）：11 月 25 日周三、B 班、休息，
     /// 本周 22–28 日轮次，本月工资应发 3370、实发工资 2355.39。
@@ -76,7 +82,10 @@ struct WidgetSnapshot: Codable, Equatable {
             baseSalary: 2420,
             earlyRate: 70,
             midRate: 30,
-            mealRate: 10
+            mealRate: 10,
+            payAccess: true,
+            dailyBonusShare: 204.76,
+            todayOvertimeShifts: 0
         )
     }
 }

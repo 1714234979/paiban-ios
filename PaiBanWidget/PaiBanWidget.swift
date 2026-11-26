@@ -62,11 +62,13 @@ struct Provider: TimelineProvider {
     }
 
     /// 某时刻的 entry：按那一刻算今日实时状态（倒计时/已挣）。
+    /// 预估口径是第 29 条（工资 + 奖金分摊 + 加班/三薪加成）；钱的显隐由各视图按快照 payAccess 定，
+    /// 这里只算数、不藏数。
     private func makeEntry(date: Date, snapshot: WidgetSnapshot? = nil) -> Entry {
         let snap = snapshot ?? WidgetSnapshotStore.load()
         let live: PayCalc.TodayLiveState
         if let today = snap?.today, let todayDate = DateUtil.date(from: today.date) {
-            live = PayCalc.todayLiveState(shift: today.shift, onLeave: today.onLeave, day: todayDate, now: date, baseSalary: snap?.baseSalary ?? 2420, dateString: today.date, earlyRate: snap?.earlyRate ?? 70, midRate: snap?.midRate ?? 30, mealRate: snap?.mealRate ?? 10)
+            live = PayCalc.todayLiveState(shift: today.shift, onLeave: today.onLeave, day: todayDate, now: date, baseSalary: snap?.baseSalary ?? 2420, dateString: today.date, earlyRate: snap?.earlyRate ?? 70, midRate: snap?.midRate ?? 30, mealRate: snap?.mealRate ?? 10, dailyBonusShare: snap?.dailyBonusShare ?? 0, overtimeShifts: snap?.todayOvertimeShifts ?? 0)
         } else {
             live = .rest
         }

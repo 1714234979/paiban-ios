@@ -69,6 +69,12 @@ final class AppStore: ObservableObject {
                 calendarDisplay = ds
                 ds.saveLocal()
             }
+            // 换账号/退出：清掉旧账号的引导弹窗状态，免得串到新账号上。
+            if Self.userKey(for: oldValue) != Self.userKey(for: user) {
+                needsPayGuide = false
+            }
+            // 第 30 条：工资权限刚开通（false→true）时，弹工资引导。
+            checkPayGuide()
         }
     }
     @Published var isStarting = true          // 启动中（正在选路 / 试登录）
@@ -1100,6 +1106,89 @@ final class AppStore: ObservableObject {
         return (base, global.earlyRate ?? 70, global.midRate ?? 30, global.mealRate ?? 10)
     }
 
+    /// 某天预估用的全套输入（第 29 条）：基本工资/补贴率（与 monthPay 同链）
+    /// + 每日奖金分摊 + 当天加班班次数。排班页今日卡片（传今天）、当天详情（传那天）、
+    /// 小组件快照（传今天）共用。本地算不出当月工资（缺全年天数或配置）时分摊为 0、
+    /// 加班 0——退回只算工资的老口径，不崩。
+    func estimateInputs(for dateString: String) -> (baseSalary: Double, earlyRate: Double, midRate: Double, mealRate: Double, dailyBonusShare: Double, overtimeShifts: Int) {
+        let date = DateUtil.date(from: dateString) ?? Date()
+        let ym = DateUtil.yearMonth(of: date)
+        let key = payCacheKey(year: ym.year, month: ym.month)
+        let global = payConfig?.settings ?? PayGlobalSettings()
+        let base = PayCalc.resolvedBaseSalary(effective: payConfig?.effective ?? [:], userSettings: user?.paySettings, global: global, monthKey: key)
+        var share: Double = 0
+        var ot = 0
+        if let pay = payFor(year: ym.year, month: ym.month) {
+            share = PayCalc.dailyBonusShare(bonusTotal: pay.bonusTotal, overtimePay: pay.overtimePay, attendance: pay.attendance)
+        }
+        if let days = yearDaysCache[String(ym.year)] {
+            let monthDays = days.filter { $0.date.hasPrefix(key) }.map { (date: $0.date, shift: $0.shift, onLeave: $0.onLeave ?? false) }
+            ot = PayCalc.overtimeShiftCount(dateString: dateString, monthDays: monthDays, year: ym.year, month: ym.month)
+        }
+        return (base, global.earlyRate ?? 70, global.midRate ?? 30, global.mealRate ?? 10, share, ot)
+    }
+
+    /// 今日预估用的全套输入（estimateInputs 传今天）。
+    var todayEstimateInputs: (baseSalary: Double, earlyRate: Double, midRate: Double, mealRate: Double, dailyBonusShare: Double, overtimeShifts: Int) {
+        estimateInputs(for: DateUtil.string(from: Date()))
+    }
+
+    // MARK: - 工资引导（第 30 条，2026-11-26）
+
+    /// 工资引导弹窗（第 30 条）：管理端给用户开了工资权限后，下次进软件弹出来走一遍工资引导。
+    /// 触发：启动/同步时发现 payAccess 从 false 变成 true、且还没走过这遍引导。
+    /// 已有权限、设定填好了的老用户不弹（他们的 payAccess 一直是 true，没经过 false→true 的翻转）。
+    @Published var needsPayGuide = false
+
+    private static func userKey(for profile: UserProfile?) -> String {
+        profile?.id ?? profile?.username ?? ""
+    }
+
+    private var payGuideDoneKey: String { "paiban.payGuideDone." + Self.userKey(for: user) }
+    private var lastPayAccessKey: String { "paiban.lastPayAccess." + Self.userKey(for: user) }
+
+    private var payGuideDone: Bool {
+        get { UserDefaults.standard.bool(forKey: payGuideDoneKey) }
+        set { UserDefaults.standard.set(newValue, forKey: payGuideDoneKey) }
+    }
+
+    /// 每次服务端 profile 刷新（user 被赋值）后调：看 payAccess 是不是刚从 false 翻成 true。
+    /// 只在主界面已就绪（引导已过）时才弹；引导页里不弹。
+    /// 跳过（以后再说）不记完成、不更新上次权限——下次启动还会再弹，直到走完为止。
+    private func checkPayGuide() {
+        guard let u = user, u.onboardingDone == true else { return }
+        guard !payGuideDone else { return }
+        let currentAccess = u.payAccess ?? true
+        guard currentAccess else {
+            // 还没开通：记下当前状态（false），等以后翻成 true 再弹。
+            UserDefaults.standard.set(false, forKey: lastPayAccessKey)
+            return
+        }
+        let last = UserDefaults.standard.object(forKey: lastPayAccessKey) as? Bool
+        let flipped = (last == false)
+        // 首跑这版：以前没记过权限，且用户一条工资设定都没填过——当成刚开通，弹一次。
+        // 已有权限的老用户都有 paySettings（哪怕只填了一项），不会误弹。
+        let firstRunUnsetUp = (last == nil && u.paySettings == nil)
+        if flipped || firstRunUnsetUp {
+            needsPayGuide = true
+            // 先不更新 lastPayAccess：跳过的话下次启动还会再弹；走完引导时再记。
+        } else {
+            UserDefaults.standard.set(true, forKey: lastPayAccessKey)
+        }
+    }
+
+    /// 工资引导走完了：记完成、记下当前权限，下次不再弹。
+    func completePayGuide() {
+        payGuideDone = true
+        UserDefaults.standard.set(true, forKey: lastPayAccessKey)
+        needsPayGuide = false
+    }
+
+    /// 工资引导点「以后再说」：这次不弹了，但不记完成——下次进软件还会再弹，直到走完为止。
+    func skipPayGuide() {
+        needsPayGuide = false
+    }
+
     /// 小组件深链：paiban://schedule 进排班页，paiban://pay 进工资页。
     /// 没登录时先记下来，登录后进主界面再跳（MainTabView 的 .task 里应用）。
     func handleDeepLink(_ url: URL) {
@@ -1163,9 +1252,12 @@ final class AppStore: ObservableObject {
                 monthDays.append(dayFor(date))
             }
         }
-        // 本月工资（本地算好的那份）。
-        let payMonth = payFor(year: ym.year, month: ym.month)
+        // 本月工资（本地算好的那份）。没工资权限不放工资数（第 29 条补充规矩：钱跟着 payAccess 走）。
+        let hasPayAccess = payAccess
+        let payMonth = hasPayAccess ? payFor(year: ym.year, month: ym.month) : nil
         let pay = payMonth.map { WidgetSnapshot.Pay(year: ym.year, month: ym.month, salarySubtotal: $0.salarySubtotal, salaryNet: $0.salaryNet, bonusAfterTax: $0.bonusAfterTax, grandTotal: $0.grandTotal, bonusTotal: $0.bonusTotal, incomeTax: $0.incomeTax, attendance: $0.attendance, tripleDays: $0.tripleDays, overtimeDays: $0.overtimeDays) }
+        // 今日预估输入（第 29 条）：奖金分摊 + 今天加班班次数；没权限时归 0（小组件不显示钱）。
+        let estInputs = estimateInputs(for: todayString)
         return WidgetSnapshot(
             savedAt: now,
             displayName: user?.displayName ?? user?.username,
@@ -1180,7 +1272,10 @@ final class AppStore: ObservableObject {
             baseSalary: inputs.baseSalary,
             earlyRate: inputs.earlyRate,
             midRate: inputs.midRate,
-            mealRate: inputs.mealRate
+            mealRate: inputs.mealRate,
+            payAccess: hasPayAccess,
+            dailyBonusShare: hasPayAccess ? estInputs.dailyBonusShare : 0,
+            todayOvertimeShifts: hasPayAccess ? estInputs.overtimeShifts : 0
         )
     }
 

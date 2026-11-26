@@ -226,7 +226,8 @@ struct DayDetailView: View {
                 row("双班", ShiftStyle.parts(of: shownDay.shift).joined(separator: " + ") + "（共 \(shownDay.totalHours ?? 16) 小时）")
             }
             // 1.2.7：预估工资（只看自己班时显示；看别的班不显示——那是别人的工资口径）。
-            if (shownDay.team ?? store.myTeam) == store.myTeam {
+            // 1.2.9.001：第 29 条补充规矩——没工资权限不显示这行（钱跟着 payAccess 走）。
+            if (shownDay.team ?? store.myTeam) == store.myTeam && store.payAccess {
                 row("预估工资", estimateText(for: shownDay))
             }
             if let holiday = shownDay.holiday, !holiday.isEmpty {
@@ -272,20 +273,19 @@ struct DayDetailView: View {
         .font(.subheadline)
     }
 
-    /// 1.2.7：当天预估工资（与 PayCalc.todayEstimate 同口径）：
-    /// 每个班 = 日工资（基本工资 ÷ 21.75）+ 班次补贴（早 70/中 30/日 0）+ 餐补 10，
-    /// 法定节假日三薪那天再加 3 倍日工资；双班两个班都算；休息 0 元；请假不算钱。
-    /// 基本工资按当天所在月的生效表解析（不是今天的口径——看 12 月的日子就用 12 月的数）。
+    /// 1.2.9.001：当天预估工资（与 PayCalc.todayEstimate 同口径，第 29 条）：
+    /// 每个班 = 日工资（基本工资 ÷ 21.75）+ 班次补贴（早 70/中 30/日 0）+ 餐补 10
+    ///          + 每日奖金分摊；三薪日每班再加 3 倍日工资；加班班次每个再加 2 倍日工资；
+    /// 双班两个班都算；休息 0 元；请假不算钱。
+    /// 基本工资按当天所在月的生效表解析（不是今天的口径——看 12 月的日子就用 12 月的数）；
+    /// 奖金分摊与加班班次也按当天所在月算。
     private func estimateText(for day: DaySchedule) -> String {
         if day.onLeave == true { return "请假" }
-        let date = DateUtil.date(from: day.date) ?? Date()
-        let ym = DateUtil.yearMonth(of: date)
-        let key = String(format: "%04d-%02d", ym.year, ym.month)
-        let global = store.payConfig?.settings ?? PayGlobalSettings()
-        let base = PayCalc.resolvedBaseSalary(effective: store.payConfig?.effective ?? [:], userSettings: store.user?.paySettings, global: global, monthKey: key)
-        let est = PayCalc.todayEstimate(shift: day.shift, baseSalary: base, dateString: day.date, earlyRate: global.earlyRate ?? 70, midRate: global.midRate ?? 30, mealRate: global.mealRate ?? 10)
+        let inputs = store.estimateInputs(for: day.date)
+        let est = PayCalc.todayEstimate(shift: day.shift, baseSalary: inputs.baseSalary, dateString: day.date, earlyRate: inputs.earlyRate, midRate: inputs.midRate, mealRate: inputs.mealRate, dailyBonusShare: inputs.dailyBonusShare, overtimeShifts: inputs.overtimeShifts)
         if est.isRest { return "今日休息" }
-        return "预估 " + MoneyUtil.money(est.total) + (est.isTriple ? "（三薪）" : "")
+        let suffix = est.isTriple ? "（三薪）" : (est.isOvertime ? "（加班）" : "")
+        return "预估 " + MoneyUtil.money(est.total) + suffix
     }
 
     /// 其他班次：选中这天，其他三个班组按 8 天一轮基础排班算出的班次（横向一排小 chip）。

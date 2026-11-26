@@ -159,15 +159,18 @@ struct TodayWidgetView: View {
     }
 
     /// 钱那行：上班前「预估 ¥XXX」；上班中「已挣 ¥X · 预估 ¥XXX」；下班后「今日已挣 ¥XXX」；休息没有。
-    /// 三薪那天末尾带「（三薪）」。
+    /// 三薪那天末尾带「（三薪）」，加班那天带「（加班）」。
+    /// 没工资权限不显示钱（第 29 条补充规矩；倒计时那行不受影响，照常显示）。
     private var moneyLine: String? {
-        let triple = (snapshot.today.map { PayCalc.isStatutoryDay($0.date) } ?? false) ? "（三薪）" : ""
+        guard snapshot.payAccess else { return nil }
+        let triple = (snapshot.today.map { PayCalc.isStatutoryDay($0.date) } ?? false)
+        let suffix = triple ? "（三薪）" : (snapshot.todayOvertimeShifts > 0 ? "（加班）" : "")
         switch entry.live {
         case .rest: return nil
-        case .before(_, let total): return "预估 \(MoneyUtil.money(total))\(triple)"
-        case .working(_, let earned, let total): return "已挣 \(MoneyUtil.money(earned)) · 预估 \(MoneyUtil.money(total))\(triple)"
-        case .between(_, let earned, let total): return "已挣 \(MoneyUtil.money(earned)) · 预估 \(MoneyUtil.money(total))\(triple)"
-        case .done(let total): return "今日已挣 \(MoneyUtil.money(total))\(triple)"
+        case .before(_, let total): return "预估 \(MoneyUtil.money(total))\(suffix)"
+        case .working(_, let earned, let total): return "已挣 \(MoneyUtil.money(earned)) · 预估 \(MoneyUtil.money(total))\(suffix)"
+        case .between(_, let earned, let total): return "已挣 \(MoneyUtil.money(earned)) · 预估 \(MoneyUtil.money(total))\(suffix)"
+        case .done(let total): return "今日已挣 \(MoneyUtil.money(total))\(suffix)"
         }
     }
 }
@@ -297,7 +300,16 @@ struct PayWidgetView: View {
                     .background(Color.secondary.opacity(0.12))
                     .cornerRadius(5)
             }
-            if let pay = snapshot.pay, pay.year == DateUtil.yearMonth(of: entry.date).year, pay.month == DateUtil.yearMonth(of: entry.date).month {
+            if !snapshot.payAccess {
+                // 没工资权限：不显示钱（第 29 条补充规矩），只提示。
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("没有工资权限")
+                        .font(.subheadline).bold()
+                    Text("请联系管理员开通")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            } else if let pay = snapshot.pay, pay.year == DateUtil.yearMonth(of: entry.date).year, pay.month == DateUtil.yearMonth(of: entry.date).month {
                 payRow("应发", pay.salarySubtotal)
                 payRow("实发工资", pay.salaryNet)
                 payRow("实发奖金", pay.bonusAfterTax)
@@ -490,6 +502,12 @@ struct LockWidgetView: View {
                     Text("休")
                         .font(.title2).bold()
                         .foregroundColor(ShiftStyle.color(for: "休息"))
+                } else if !snapshot.payAccess {
+                    // 没工资权限不显示钱（第 29 条补充规矩）：只显示班次字，和「休」「假」一个路子。
+                    Text(shiftPillText(today.shift))
+                        .font(.title2).bold()
+                        .foregroundColor(shiftPillColor(today.shift))
+                        .minimumScaleFactor(0.6)
                 } else {
                     VStack(spacing: 0) {
                         Text(MoneyUtil.money0(earnedAmount))
@@ -517,7 +535,8 @@ struct LockWidgetView: View {
                         .font(.headline)
                 } else {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("\(today.shift) · 已挣 \(MoneyUtil.money(earnedAmount))")
+                        // 没工资权限不显示钱（第 29 条补充规矩）：只显示班次，倒计时那行照常。
+                        Text(snapshot.payAccess ? "\(today.shift) · 已挣 \(MoneyUtil.money(earnedAmount))" : today.shift)
                             .font(.headline)
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)

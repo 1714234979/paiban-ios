@@ -94,16 +94,20 @@ struct WidgetPreviewGallery: View {
             baseSalary: 2420,
             earlyRate: 70,
             midRate: 30,
-            mealRate: 10
+            mealRate: 10,
+            payAccess: true,
+            dailyBonusShare: 204.76,
+            todayOvertimeShifts: 0
         )
     }
 
-    /// 演示 entry：2026-11-24 05:23:11，上班中（倒计时到 08:00，已挣约 ¥129）。
+    /// 演示 entry：2026-11-24 05:23:11，上班中（倒计时到 08:00）。
+    /// 第 29 条新口径：早班预估 ¥396.02（111.26 + 70 + 10 + 204.76），已挣约 ¥266.64。
     private static func demoEntry(snapshot: WidgetSnapshot) -> Entry {
         let cal = DateUtil.calendar
         let now = cal.date(from: DateComponents(year: 2026, month: 11, day: 24, hour: 5, minute: 23, second: 11))!
         let dayStart = cal.startOfDay(for: now)
-        let live = PayCalc.todayLiveState(shift: "早班", onLeave: false, day: dayStart, now: now, baseSalary: 2420, dateString: "2026-11-24", earlyRate: 70, midRate: 30, mealRate: 10)
+        let live = PayCalc.todayLiveState(shift: "早班", onLeave: false, day: dayStart, now: now, baseSalary: 2420, dateString: "2026-11-24", earlyRate: 70, midRate: 30, mealRate: 10, dailyBonusShare: 204.76, overtimeShifts: 0)
         return Entry(date: now, snapshot: snapshot, live: live)
     }
 }
@@ -125,7 +129,11 @@ private struct AppPagePreview: View {
 
     var body: some View {
         Group {
-            if kind.contains("-daydetail-") {
+            if kind.hasPrefix("app-payguide") {
+                // 工资引导（1.2.9.001，第 30 条）：演示账号刚开通工资权限，弹窗走一遍 3 步引导。
+                PayGuideView()
+                    .environmentObject(store)
+            } else if kind.contains("-daydetail-") {
                 // 当天详情（1.2.8.002）：2026-11-24 早班那天的详情页直接渲染，
                 // 验深色下调班/请假入口、提示文字、选中描边清不清楚。
                 NavigationStack {
@@ -176,12 +184,15 @@ private struct AppPagePreview: View {
         store.serverBaseURL = "http://47.97.168.14:3003"
         store.serverKind = .cloud
         store.pay = AppPagePreview.demoPay()
+        // 1.2.9.001：演示日历/详情的今日预估要走新口径（奖金分摊 + 加班判定），
+        // 得有全年天数和工资配置，本地现算——和真机同一条链。
+        store.yearDaysCache = ["2026": AppPagePreview.demoYearDays()]
+        store.payConfig = PayConfigData(settings: PayGlobalSettings(), months: [:], effective: [:])
         return store
     }
 
-    /// 演示工资（2026 年 11 月）：全年天数按 B 班 8 天轮本地算，
-    /// 11-02、11-03 按真记录记年休假，PayCalc 现算（和 App 本地算同一条链）。
-    static func demoPay() -> PayMonth? {
+    /// 演示全年天数（2026 年，B 班 8 天轮本地算；11-02、11-03 按真记录记年休假）。
+    static func demoYearDays() -> [DaySchedule] {
         var yearDays: [DaySchedule] = []
         for m in 1...12 {
             yearDays += ScheduleCalculator.localMonth(team: "B", year: 2026, month: m).days ?? []
@@ -194,6 +205,13 @@ private struct AppPagePreview: View {
             }
             return d
         }
+        return yearDays
+    }
+
+    /// 演示工资（2026 年 11 月）：全年天数按 B 班 8 天轮本地算，
+    /// 11-02、11-03 按真记录记年休假，PayCalc 现算（和 App 本地算同一条链）。
+    static func demoPay() -> PayMonth? {
+        let yearDays = demoYearDays()
         let settings = PaySettings(
             baseSalary: 2420, bonusCoef: 1, contributionBase: 5938, position: nil,
             utilities: 60, hireYear: 2018, hireMonth: 10, deptPerfDefault: nil,

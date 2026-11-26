@@ -269,3 +269,273 @@ struct OnboardingView: View {
         }
     }
 }
+
+/// 工资引导（第 30 条，2026-11-26）：管理端给用户开了工资权限后，下次进软件弹窗走一遍。
+/// 弹窗（sheet）3 步，不是全屏页；字段与校验和设置页「工资设置」同一套（养老月扣反推基数、
+/// 岗位四档、入职年月、剩余年休假 0–365），只取新用户引导里藏起来的那 6 项核心设定。
+/// 保存走 store.saveProfile(paySettings:)（和设置页同一条路，服务端合并、不洗掉其他设定）。
+/// 「以后再说」可跳过，但不记完成——下次进软件还会再弹，直到走完为止（见 Store.skipPayGuide）。
+/// 完成时记完成（Store.completePayGuide），不再弹。
+struct PayGuideView: View {
+    @EnvironmentObject private var store: AppStore
+
+    @State private var step = 0
+    @State private var baseSalaryText = ""
+    @State private var bonusCoefText = ""
+    @State private var pensionText = ""
+    @State private var position = "员工"
+    @State private var hireYear = 2018
+    @State private var hireMonth = 10
+    @State private var annualLeaveText = "5"
+    @State private var errorText: String?
+    @State private var isBusy = false
+
+    private var totalSteps: Int { 3 }
+    private let positions = ["员工", "现场组长", "自控组长", "班长"]
+
+    /// 养老月扣反推缴费基数：基数 = 养老月扣 ÷ 0.08（和设置页同一公式，保留两位小数）。
+    private var derivedBase: Double? {
+        guard let pension = Double(pensionText.trimmingCharacters(in: .whitespaces)), pension > 0 else { return nil }
+        return PayCalc.round2(pension / 0.08)
+    }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 0) {
+                ProgressView(value: Double(step + 1), total: Double(totalSteps))
+                    .tint(.accentColor)
+                    .padding(.horizontal, AppStyle.pagePadding)
+                    .padding(.top, 12)
+
+                ScrollView {
+                    VStack(alignment: .leading, spacing: AppStyle.sectionSpacing) {
+                        Text("第 \(step + 1) 步 / 共 \(totalSteps) 步")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        stepBody
+                        if let errorText {
+                            Text(errorText)
+                                .font(.subheadline)
+                                .foregroundColor(.red)
+                        }
+                    }
+                    .padding(AppStyle.pagePadding)
+                }
+
+                HStack(spacing: 12) {
+                    if step > 0 {
+                        Button("上一步") { step -= 1 }
+                            .buttonStyle(.bordered)
+                    }
+                    Spacer()
+                    Button(step == totalSteps - 1 ? "完成" : "下一步") {
+                        if step == totalSteps - 1 {
+                            Task { await finish() }
+                        } else {
+                            step += 1
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(isBusy)
+                }
+                .padding(.horizontal, AppStyle.pagePadding)
+                .padding(.bottom, 24)
+            }
+            .navigationTitle("设置你的工资")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("以后再说") { store.skipPayGuide() }
+                        .disabled(isBusy)
+                }
+            }
+            .interactiveDismissDisabled(true)
+        }
+        .onAppear(perform: fillFields)
+    }
+
+    // MARK: 各步内容
+
+    @ViewBuilder
+    private var stepBody: some View {
+        if step == 0 {
+            stepSalary
+        } else if step == 1 {
+            stepContribution
+        } else {
+            stepHire
+        }
+    }
+
+    /// 第 1 步：基本工资 + 奖金系数（必填，工资页按这两个数算）。
+    private var stepSalary: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("先填工资底数")
+                .font(.title2).bold()
+            Text("基本工资和奖金系数决定了工资和奖金的底数，填好后工资页就能按你的数算。")
+                .foregroundColor(.secondary)
+            HStack {
+                Text("基本工资")
+                Spacer()
+                TextField("2420", text: $baseSalaryText)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 120)
+            }
+            HStack {
+                Text("奖金系数")
+                Spacer()
+                TextField("1.0", text: $bonusCoefText)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 120)
+            }
+            Text("不知道填多少就问管理员，或先按默认的 2420 / 1.0，之后在设置 → 工资设置里改。")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    /// 第 2 步：养老月扣（反推缴费基数）+ 岗位。
+    /// 养老月扣看工资条上扣的那笔养老保险；基数 = 月扣 ÷ 0.08，当场验算医疗 × 2%、失业 × 0.3%。
+    private var stepContribution: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("社保缴费基数和岗位")
+                .font(.title2).bold()
+            Text("养老月扣填工资条上扣的养老保险那笔，基数会自动反推出来。")
+                .foregroundColor(.secondary)
+            HStack {
+                Text("养老月扣")
+                Spacer()
+                TextField("475.04", text: $pensionText)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 120)
+            }
+            if let base = derivedBase {
+                HStack {
+                    Text("社保缴费基数")
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text("\(PayCalc.jsNum(base))（医疗 \(MoneyUtil.money(PayCalc.round2(base * 0.02))) · 失业 \(MoneyUtil.money(PayCalc.round2(base * 0.003)))）")
+                        .foregroundColor(.secondary)
+                }
+                .font(.caption)
+            } else {
+                Text("养老月扣空着也行，基数先按默认的 5938，之后在设置 → 工资设置里补。")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            HStack {
+                Text("岗位")
+                Spacer()
+                Picker("岗位", selection: $position) {
+                    ForEach(positions, id: \.self) { p in
+                        Text(p).tag(p)
+                    }
+                }
+                .pickerStyle(.menu)
+            }
+        }
+    }
+
+    /// 第 3 步：入职时间 + 剩余年休假天数。
+    private var stepHire: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("入职时间和年休假")
+                .font(.title2).bold()
+            Text("入职时间只到月份，用来算工龄津贴；剩余年休假是今年还没休的年假天数。")
+                .foregroundColor(.secondary)
+            HStack {
+                Text("入职时间")
+                Spacer()
+                Picker("年份", selection: $hireYear) {
+                    ForEach(1990...Calendar.current.component(.year, from: Date()), id: \.self) { y in
+                        Text("\(y)").tag(y)
+                    }
+                }
+                .pickerStyle(.menu)
+                Text("年")
+                Picker("月份", selection: $hireMonth) {
+                    ForEach(1...12, id: \.self) { m in
+                        Text("\(m)").tag(m)
+                    }
+                }
+                .pickerStyle(.menu)
+                Text("月")
+            }
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("剩余年休假天数")
+                    Text("没休完的累计到明年，不清零；休了年假会自动扣")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                TextField("5", text: $annualLeaveText)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .frame(width: 120)
+            }
+            Text("填完点「完成」，工资页就按这些数算。以后在设置 → 工资设置里随时能改。")
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+    }
+
+    // MARK: 预填与保存
+
+    /// 预填：用户已有的设定（管理员可能先帮填了一部分）；没有就按设置页同一套默认值。
+    private func fillFields() {
+        let settings = store.user?.paySettings
+        baseSalaryText = settings?.baseSalary.map { moneyText($0) } ?? "2420"
+        bonusCoefText = settings?.bonusCoef.map { String(format: "%.1f", $0) } ?? "1.0"
+        let base = settings?.contributionBase ?? 5938
+        pensionText = moneyText(PayCalc.round2(base * 0.08))
+        position = settings?.position ?? "员工"
+        hireYear = settings?.hireYear ?? 2018
+        hireMonth = settings?.hireMonth ?? 10
+        annualLeaveText = settings?.annualLeaveRemaining.map { String($0) } ?? "5"
+    }
+
+    private func moneyText(_ value: Double) -> String {
+        if value == value.rounded() {
+            return String(Int(value))
+        }
+        return String(value)
+    }
+
+    /// 完成：校验 → 保存 6 项设定 → 记引导完成、关弹窗。
+    private func finish() async {
+        errorText = nil
+        isBusy = true
+        defer { isBusy = false }
+        guard let baseSalary = Double(baseSalaryText.trimmingCharacters(in: .whitespaces)), baseSalary > 0 else {
+            errorText = "基本工资要填一个大于 0 的数"
+            return
+        }
+        guard let bonusCoef = Double(bonusCoefText.trimmingCharacters(in: .whitespaces)), bonusCoef > 0 else {
+            errorText = "奖金系数要填一个大于 0 的数"
+            return
+        }
+        let leave = Int(annualLeaveText.trimmingCharacters(in: .whitespaces)) ?? -1
+        guard leave >= 0, leave <= 365 else {
+            errorText = "剩余年休假天数要在 0–365 之间"
+            return
+        }
+        var settings: [String: Any] = [:]
+        settings["baseSalary"] = baseSalary
+        settings["bonusCoef"] = bonusCoef
+        if let base = derivedBase { settings["contributionBase"] = base }
+        settings["position"] = position
+        settings["hireYear"] = hireYear
+        settings["hireMonth"] = hireMonth
+        settings["annualLeaveRemaining"] = leave
+        do {
+            try await store.saveProfile(paySettings: settings)
+            store.completePayGuide()
+        } catch {
+            errorText = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+}

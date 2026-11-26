@@ -150,8 +150,8 @@ struct CalendarView: View {
                 .font(.subheadline)
                 .foregroundColor(AppStyle.whiteText(opacity: 0.75))
             if let day = store.todaySchedule {
-                let inputs = store.todayPayInputs
-                TodayLiveRow(day: day, baseSalary: inputs.baseSalary, earlyRate: inputs.earlyRate, midRate: inputs.midRate, mealRate: inputs.mealRate)
+                let inputs = store.todayEstimateInputs
+                TodayLiveRow(day: day, baseSalary: inputs.baseSalary, earlyRate: inputs.earlyRate, midRate: inputs.midRate, mealRate: inputs.mealRate, dailyBonusShare: inputs.dailyBonusShare, overtimeShifts: inputs.overtimeShifts, showMoney: store.payAccess)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -843,6 +843,10 @@ private struct TodayLiveRow: View {
     let earlyRate: Double
     let midRate: Double
     let mealRate: Double
+    let dailyBonusShare: Double
+    let overtimeShifts: Int
+    /// 钱显隐（第 29 条补充规矩）：只有开了工资权限才显示「已挣 · 预估」那行；倒计时不是钱，一直显示。
+    let showMoney: Bool
 
     var body: some View {
         TimelineView(.periodic(from: Date(), by: 1)) { context in
@@ -851,7 +855,8 @@ private struct TodayLiveRow: View {
             let state = PayCalc.todayLiveState(
                 shift: day.shift, onLeave: day.onLeave == true, day: today, now: now,
                 baseSalary: baseSalary, dateString: day.date,
-                earlyRate: earlyRate, midRate: midRate, mealRate: mealRate
+                earlyRate: earlyRate, midRate: midRate, mealRate: mealRate,
+                dailyBonusShare: dailyBonusShare, overtimeShifts: overtimeShifts
             )
             let triple = PayCalc.isStatutoryDay(day.date)
             VStack(alignment: .leading, spacing: 2) {
@@ -893,9 +898,11 @@ private struct TodayLiveRow: View {
     }
 
     /// 钱那行：上班中/上班前显示已挣 + 预估；下班后显示今日已挣；休息/请假不显示。
-    /// 三薪那天末尾带「（三薪）」，免得数字大得让人摸不着头脑。
+    /// 三薪那天末尾带「（三薪）」，加班那天带「（加班）」。
+    /// 没工资权限不显示这行（第 29 条补充规矩）。
     private func moneyText(state: PayCalc.TodayLiveState, triple: Bool) -> String? {
-        let suffix = triple ? "（三薪）" : ""
+        guard showMoney else { return nil }
+        let suffix = triple ? "（三薪）" : (overtimeShifts > 0 ? "（加班）" : "")
         switch state {
         case .rest:
             return nil
