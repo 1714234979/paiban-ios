@@ -229,7 +229,9 @@ enum PayCalc {
         let medical = round2(base * 0.02)
         let unemployment = round2(base * 0.003)
         let socialInsurance = round2(pension + medical + unemployment)
-        let housingFund = floor(base * 0.068)
+        // 公积金（1.3.0.001，第 47 条）：不用公式算，只用用户填的数；
+        // 没填就是 0（不扣公积金）。每个人的基数不同，基数×6.8% 反推对不上工资条。
+        let housingFund = userSettings?.housingFund ?? 0
         let contributionTotal = round2(socialInsurance + housingFund)
         let salaryPayable = round2(salarySubtotal - contributionTotal)
         // 水电费取值链：单月记录 > 用户设置 > 全局默认 > 0（老爷自己的 60 存在他自己的 paySettings 里）。

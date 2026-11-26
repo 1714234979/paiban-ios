@@ -72,9 +72,13 @@ final class AppStore: ObservableObject {
             // 换账号/退出：清掉旧账号的引导弹窗状态，免得串到新账号上。
             if Self.userKey(for: oldValue) != Self.userKey(for: user) {
                 needsPayGuide = false
+                needsHousingFundPrompt = false
+                housingFundPromptEvaluatedThisSession = false
             }
             // 第 30 条：工资权限刚开通（false→true）时，弹工资引导。
             checkPayGuide()
+            // 第 47 条：公积金没填时，弹一次窗让用户填。
+            checkHousingFundPrompt()
         }
     }
     @Published var isStarting = true          // 启动中（正在选路 / 试登录）
@@ -1200,6 +1204,13 @@ final class AppStore: ObservableObject {
     /// 已有权限、设定填好了的老用户不弹（他们的 payAccess 一直是 true，没经过 false→true 的翻转）。
     @Published var needsPayGuide = false
 
+    /// 公积金弹窗（第 47 条，1.3.0.001）：公积金没填时，更新后首次打开 App 弹一次窗让用户填。
+    /// 开关就是「公积金为空就弹」：内测版没填的弹，正式版出来没填的还会再弹一次。
+    @Published var needsHousingFundPrompt = false
+    /// 本次启动里已经评过一次公积金弹窗（评过就不再评，免得后台同步又弹出来；
+    /// 下次启动重新评，没填的再弹，直到填了为止）。
+    private var housingFundPromptEvaluatedThisSession = false
+
     private static func userKey(for profile: UserProfile?) -> String {
         profile?.id ?? profile?.username ?? ""
     }
@@ -1237,16 +1248,35 @@ final class AppStore: ObservableObject {
         }
     }
 
+    /// 公积金弹窗（第 47 条，1.3.0.001）：公积金没填就弹一次窗让用户填。
+    /// 只在主界面已就绪（引导已过）时才弹；引导页里不弹；没工资权限的不弹
+    /// （公积金是工资设置，没权限的人没有这项）。
+    /// 每次启动只评一次：评过就不再评，免得后台同步又弹出来；下次启动重新评，
+    /// 没填的再弹，直到填了为止。工资引导（第 30 条）优先：它在弹的时候不评，
+    /// 等它关了（completePayGuide / skipPayGuide）再评。
+    private func checkHousingFundPrompt() {
+        guard !housingFundPromptEvaluatedThisSession else { return }
+        guard let u = user, u.onboardingDone == true else { return }
+        guard u.payAccess ?? true else { return }
+        guard !needsPayGuide else { return }
+        housingFundPromptEvaluatedThisSession = true
+        if u.paySettings?.housingFund == nil {
+            needsHousingFundPrompt = true
+        }
+    }
+
     /// 工资引导走完了：记完成、记下当前权限，下次不再弹。
     func completePayGuide() {
         payGuideDone = true
         UserDefaults.standard.set(true, forKey: lastPayAccessKey)
         needsPayGuide = false
+        checkHousingFundPrompt()
     }
 
     /// 工资引导点「以后再说」：这次不弹了，但不记完成——下次进软件还会再弹，直到走完为止。
     func skipPayGuide() {
         needsPayGuide = false
+        checkHousingFundPrompt()
     }
 
     /// 小组件深链：paiban://schedule 进排班页，paiban://pay 进工资页。

@@ -570,3 +570,86 @@ struct PayGuideView: View {
         }
     }
 }
+
+/// 公积金弹窗（第 47 条，1.3.0.001）：公积金没填时，更新后首次打开 App 弹一次窗让用户填。
+/// 框里留空（不预填算出来的数），用户照工资条上的实际月扣金额填、保存；能关掉，
+/// 没填的下次打开再弹，直到填了为止。正式版出来时没填的还会再弹一次——开关就是
+/// 「公积金为空就弹」（见 Store.checkHousingFundPrompt），不用另写版本逻辑。
+/// 保存走 store.saveProfile(paySettings:)（和设置页同一条路，服务端合并、不洗掉其他设定）。
+/// 「以后再说」只关掉这次弹窗，不记完成——下次进软件还会再弹，直到填了为止。
+struct HousingFundPromptView: View {
+    @EnvironmentObject private var store: AppStore
+
+    @State private var housingFundText = ""
+    @State private var errorText: String?
+    @State private var isBusy = false
+
+    var body: some View {
+        NavigationStack {
+            VStack(alignment: .leading, spacing: AppStyle.sectionSpacing) {
+                Text("公积金按工资条上的实际月扣金额填。以前按缴费基数×6.8% 反推，算出来的和工资条对不上，所以现在直接填；不填按 0 算（不扣公积金）。")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                HStack {
+                    Text("公积金")
+                    Spacer()
+                    TextField("", text: $housingFundText)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 140)
+                }
+                .font(.body)
+                if let errorText {
+                    Text(errorText)
+                        .font(.subheadline)
+                        .foregroundColor(.red)
+                }
+                Spacer()
+                Button {
+                    Task { await save() }
+                } label: {
+                    if isBusy {
+                        ProgressView()
+                    } else {
+                        Text("保存")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .frame(maxWidth: .infinity)
+                .disabled(isBusy)
+            }
+            .padding(AppStyle.pagePadding)
+            .navigationTitle("填一下公积金")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarTrailing) {
+                    Button("以后再说") { store.needsHousingFundPrompt = false }
+                        .disabled(isBusy)
+                }
+            }
+        }
+    }
+
+    /// 保存：0–10000；空着不保存——提示用户填了再保存，不填就点右上角「以后再说」。
+    private func save() async {
+        errorText = nil
+        let trimmed = housingFundText.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty {
+            errorText = "还没填数：填了再保存，不填就点右上角「以后再说」"
+            return
+        }
+        guard let value = Double(trimmed), value >= 0, value <= 10000 else {
+            errorText = "公积金要在 0–10000 之间"
+            return
+        }
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await store.saveProfile(paySettings: ["housingFund": value])
+            await store.refreshPay()
+            store.needsHousingFundPrompt = false
+        } catch {
+            errorText = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+}

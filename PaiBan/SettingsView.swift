@@ -688,6 +688,8 @@ struct PaySettingsView: View {
     @State private var baseSalaryText = ""
     @State private var bonusCoefText = ""
     @State private var pensionText = ""
+    /// 公积金（1.3.0.001，第 47 条）：用户直接填的月扣金额；留空 = 没填，算工资时按 0 算。
+    @State private var housingFundText = ""
     @State private var position = "员工"
     @State private var education = "其他"
     @State private var shortageAmountText = "0"
@@ -746,6 +748,19 @@ struct PaySettingsView: View {
                             .foregroundColor(.secondary)
                     }
                     .font(.caption)
+                }
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("公积金")
+                        Text("月扣金额，照工资条上的实际数填；不填按 0 算（不扣公积金）")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    TextField("", text: $housingFundText)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 120)
                 }
                 Picker("岗位", selection: $position) {
                     ForEach(positions, id: \.self) { p in
@@ -873,6 +888,8 @@ struct PaySettingsView: View {
         // 同事没填过就按全局默认基数 5938 算。
         let base = settings?.contributionBase ?? 5938
         pensionText = moneyText(PayCalc.round2(base * 0.08))
+        // 公积金（1.3.0.001，第 47 条）：没填过就留空，不预填算出来的数。
+        housingFundText = settings?.housingFund.map { moneyText($0) } ?? ""
         position = settings?.position ?? "员工"
         education = settings?.education ?? "其他"
         shortageAmountText = settings?.shortageSubsidy?.amount.map { moneyText($0) } ?? "0"
@@ -901,6 +918,18 @@ struct PaySettingsView: View {
         if let value = Double(baseSalaryText) { settings["baseSalary"] = value }
         if let value = Double(bonusCoefText) { settings["bonusCoef"] = value }
         if let base = derivedBase { settings["contributionBase"] = base }
+        // 公积金（1.3.0.001，第 47 条）：填了就用填的数；空着 = 清掉（没填按 0 算）。
+        // 0–10000，超出不保存并提示。
+        let trimmedHF = housingFundText.trimmingCharacters(in: .whitespaces)
+        if trimmedHF.isEmpty {
+            if store.user?.paySettings?.housingFund != nil { settings["housingFund"] = NSNull() }
+        } else if let value = Double(trimmedHF) {
+            guard value >= 0, value <= 10000 else {
+                saveMessage = "公积金要在 0–10000 之间"
+                return
+            }
+            settings["housingFund"] = value
+        }
         settings["position"] = position
         settings["education"] = education
         // 入职时间（只到月份）+ 剩余年休假天数（1.2.6）：整数 0–365，超出不保存并提示。
@@ -1049,6 +1078,10 @@ struct ChangelogView: View {
     var body: some View {
         Form {
             Section {
+                changelog(version: "1.3.0.001（内测）", items: [
+                    "底部切换栏加玻璃效果：排班/工资/设置那条栏变成毛玻璃，透出底下内容；在栏上左右滑动能切换页面（也能点），滑动时震一下，像钉钉那样",
+                    "公积金改直接填：以前按缴费基数×6.8% 反推，算出来的和工资条对不上；现在工资设置里直接填月扣金额，照工资条填，不填按 0 算（不扣公积金）。更新后第一次打开会弹一次窗让填，没填的下次打开再弹，正式版出来没填的还会再弹一次。养老、医疗、失业还是按基数算，不动",
+                ])
                 changelog(version: "1.3.0（正式版）", items: [
                     "内容与 1.2.9.004 内测版相同：每日预估改按实发算、排班页统计行加上基本天数、应出勤改按排班算（基础轮班天数）、小组件介绍图换成真实截图、小号今日小组件钱那行不再截断、入职时间年份纯数字且横着一行显示",
                 ])

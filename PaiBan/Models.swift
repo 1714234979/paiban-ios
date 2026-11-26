@@ -1141,6 +1141,9 @@ struct PaySettings: Codable, Equatable {
     var baseSalary: Double?
     var bonusCoef: Double?
     var contributionBase: Double?
+    /// 公积金（1.3.0.001，第 47 条）：用户直接填的月扣金额；没填就是 nil，算工资时按 0 算。
+    /// 不用公式反推（每个人的基数不同，基数×6.8% 对不上工资条）。
+    var housingFund: Double?
     var position: String?
     var utilities: Double?
     var hireYear: Int?

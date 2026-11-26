@@ -145,6 +145,11 @@ struct ContentView: View {
                             .sheet(isPresented: $store.needsPayGuide) {
                                 PayGuideView()
                             }
+                            // 第 47 条：公积金没填时，弹一次窗让用户填（框里留空，照工资条填；
+                            // 能关掉，没填的下次打开再弹，直到填了为止）。
+                            .sheet(isPresented: $store.needsHousingFundPrompt) {
+                                HousingFundPromptView()
+                            }
                     }
                 } else if let startupError = store.startupError {
                     OfflineView(message: startupError) {
