@@ -1651,9 +1651,19 @@ final class AppStore: ObservableObject {
 
     /// 启动后（服务器连通时）调一次版本清单；有新版就 pendingUpdate，界面弹提示。
     /// 检查失败静默，不弹错。
+    /// 1.3.0.012：只在「确实没新版」时清 pendingUpdate；查失败（没网、服务器不通）
+    /// 时保留已有的 pendingUpdate——切回前台时一次瞬断不能把排队等着弹的提示吞了。
+    /// （之前是直接拿检查结果覆盖 pendingUpdate，查失败返回 nil 就把弹窗清了。）
     func checkForUpdateAfterLaunch() async {
         guard serverReachable || api.baseURL != nil else { return }
-        pendingUpdate = await UpdateChecker.checkAfterLaunch(api: api)
+        switch await UpdateChecker.checkAfterLaunch(api: api) {
+        case .updateAvailable(let info):
+            pendingUpdate = info
+        case .upToDate:
+            pendingUpdate = nil
+        case .failed:
+            break
+        }
     }
 
     /// 切渠道后立刻按新渠道查一次（1.2.7.002）：版本不一样就推出来（哪怕数字上更低），

@@ -158,6 +158,39 @@ import SwiftUI
 /// .clear 显透 + 折射亮边；阴影那次额外合成也没了；分支正确、中间无实色遮挡都
 /// 已核过。剩下唯一的变量是底色本身均匀浅灰——.clear 玻璃靠亮边和边缘折射也能
 /// 在均匀底上显出液态感（文件 App 的胶囊就是这么做的）。
+///
+/// 1.3.0.012（第 46 条再修，老爷 2026-11-26 19:06 发视频 + 截图亲口说：
+/// 「仔细看视频，还有，不弹窗，现在还是不行再改」——两件都得修）：
+/// ① 不弹窗（重点）：老爷现在是 010，011 早发了，打开 App 更新弹窗一次都没弹过，
+/// 只能自己去文件 App 里翻 IPA 手动装（011 的包 19:04 已下到文件 App 里）。
+/// 根因（代码 + 线上实测核过）：007 的 installedChannel 只修了「问哪条线」，
+/// 没修认证依赖——服务端只在「登录后带认证 + 是内测人员」时才把 latestVersion
+/// 换成内测版号；版本请求一旦没带上有效 session（启动时序、切线路、7 天 session
+/// 过期、短信登录没 Keychain 密码兜底），服务端照旧回正式版 1.3.0，比装的
+/// 1.3.0.010 旧，isNewer 直接 false，弹窗永远不弹。线上实测：不带认证调
+/// /api/v1/version?platform=ios&channel=beta 回的是 latestVersion 1.3.0、
+/// channel stable，但 beta.ios.version 1.3.0.011 就在回包里公开躺着——App
+/// 的 VersionInfo 从来没解 beta 这个字段。修法：内测用户直接读公开的 beta.ios
+/// 版号/链接比（UpdateChecker.offeredVersion），弹窗不再依赖认证；正式用户
+/// 照旧比 latestVersion。另修一个次生毛病：Store 原来拿检查结果直接覆盖
+/// pendingUpdate，查失败返回 nil 就把排队等着弹的提示清了——切回前台时一次
+/// 瞬断就把弹窗吞了；现在只在「确实没新版」时清，查失败保留已有的提示。
+/// 触发点不变（冷启动 startup 里查 + 切回前台 scenePhase .active 再查），
+/// 不加节流（「稍后」当天不弹是用户自己点的，照旧）。
+/// ② 液态玻璃还是不行：视频里文件 App 底下那个悬浮胶囊（最近项目/共享/浏览）
+/// 就是真正的液态玻璃胶囊——半透明、浮着、能透出后面的文件图标和文字。我们的
+/// 胶囊还是实心白。011 的裸 .clear 玻璃 + 去阴影还是不显，原因看视频就明白了：
+/// 真玻璃胶囊不只有一层透明玻璃，它有三样东西——淡淡的白调（跟底色拉开一点）、
+/// 柔和的投影（浮起来的纵深）、发亮的细边（玻璃的边）。011 只罩了一层裸 .clear，
+/// 均匀浅灰底上近乎隐形，用户看到的就是一片白。所以这次三样都补上：
+/// .clear 玻璃加一点白 tint（.white.opacity(0.22)，跟底色拉开、底下内容照样
+/// 透出来糊掉折射）、柔和阴影加回来（文件 App 的胶囊明明有投影，011 拿掉阴影
+/// 是猜错了；只加柔和的一档，opacity 0.10 / radius 10）、再描一条发亮的细边
+/// （白 0.6 / 0.5pt）。滚动时玻璃照样折射底下经过的内容。011 埋的日志标记还在，
+/// onAppear 那条确认会写（胶囊常驻、主界面出现就记一次，AppLogger 追加写盘）。
+/// 其余不动：悬浮胶囊（底离屏幕底边约 23pt、限宽 300pt 居中、overlay 布局）、
+/// 选中只变颜色（蓝色/灰色、没有小药丸）、滑动还是 006 的 .highPriorityGesture()、
+/// 不震动、三页 120pt 底部留白、刷新率适配都在，012 只改弹窗 + 底栏玻璃这两项。
 struct MainTabView: View {
     @EnvironmentObject private var store: AppStore
 
@@ -262,12 +295,15 @@ struct MainTabView: View {
     }
 }
 
-/// 悬浮胶囊切换栏（1.3.0.011，按 006 的胶囊、去掉选中小药丸，第 46 条，老爷
+/// 悬浮胶囊切换栏（1.3.0.012，按 006 的胶囊、去掉选中小药丸，第 46 条，老爷
 /// 2026-11-26 18:25 亲口定：「我要胶囊的那种啊然后加液态玻璃」；011 根因修：
 /// 010 的白不是磨砂底害的——.glassEffect(.regular) 自带白霜色调，采样均匀浅灰底
 /// 就显实心白；这次改 .glassEffect(.clear, in: Capsule())（无色调、最透），
 /// .shadow() 整段拿掉（阴影的额外合成可能闷掉玻璃的实时采样，玻璃自带亮边纵深）；
-/// onAppear 记一条日志标记：iOS 版本 + 走的玻璃路径，随反馈日志可验）：
+/// onAppear 记一条日志标记：iOS 版本 + 走的玻璃路径，随反馈日志可验；012 再修：
+/// 011 的裸 .clear 还是不显——视频对照文件 App 的胶囊看明白了，真玻璃胶囊有三样
+/// 东西（淡淡白调、柔和投影、发亮细边），裸 .clear 在均匀浅灰底上近乎隐形；这次
+/// .clear 加一点白 tint、柔和阴影加回来、再描一条发亮细边）：
 /// 透明玻璃胶囊：iOS 26+ 只罩 .glassEffect(.clear, in: Capsule())（Liquid Glass
 /// 最透那档）；26 以下 fallback 用 .ultraThinMaterial 磨砂底。浮在内容
 /// 上面；不贴底、不满宽、没有顶部分隔线。选中态绝对不要选中小药丸、不要选中底块——
@@ -308,20 +344,24 @@ private struct GlassCapsuleTabBar: View {
             }
         }
         .padding(.horizontal, 10)
-        // 1.3.0.011：液态玻璃再修根因——010 的白不是磨砂底害的，是 .glassEffect
-        // (.regular) 自带的白霜色调（采样均匀浅灰底就显实心白）。这次改 .clear
-        // （无色调、最透的那档玻璃，折射和亮边在浅底上也看得见），.shadow() 整段
-        // 拿掉（阴影的额外合成可能闷掉玻璃的实时采样；玻璃自带亮边和纵深，不用
-        // 另加阴影）。只留下面那个 .capsuleGlass()（26+ 是 .glassEffect(.clear,
-        // in: Capsule())，26 以下 fallback 用 .ultraThinMaterial）。
+        // 1.3.0.012：液态玻璃三修——011 的裸 .clear 玻璃还是不显。视频对照（文件 App
+        // 的胶囊）看明白了：真玻璃胶囊不只有一层透明玻璃，它有三样东西——淡淡的白调
+        // （跟底色拉开一点）、柔和的投影（浮起来的纵深）、发亮的细边（玻璃的边）。
+        // 011 只罩了一层裸 .clear，均匀浅灰底上近乎隐形，用户看到的就是一片白。
+        // 这次三样都补上：capsuleGlass() 里 .clear 玻璃加一点白 tint、柔和阴影加回来
+        // （文件 App 的胶囊明明有投影，011 拿掉阴影是猜错了）、再描一条发亮的细边。
+        // 滚动时玻璃照样折射底下经过的内容。
         .capsuleGlass()
+        .shadow(color: .black.opacity(0.10), radius: 10, x: 0, y: 4)
+        .overlay(Capsule().stroke(Color.white.opacity(0.6), lineWidth: 0.5))
         // 1.3.0.011：日志标记——证明 glassEffect 路径在他真机上确实跑了。
         // 记 iOS 版本 + 走的玻璃路径，随反馈 24 小时日志一起发回来可验。
-        // 胶囊常驻、只在主界面出现时记一次。
+        // 胶囊常驻、只在主界面出现时记一次。012 补：这条确认会写（onAppear 挂在
+        // 常驻胶囊上，AppLogger.log 追加写盘；之前没验到只是老爷没发反馈）。
         .onAppear {
             let v = ProcessInfo.processInfo.operatingSystemVersion
             if #available(iOS 26.0, *) {
-                AppLogger.shared.log("TabBar glass: iOS \(v.majorVersion).\(v.minorVersion).\(v.patchVersion), glassEffect(.clear, in: Capsule())", tag: "UI")
+                AppLogger.shared.log("TabBar glass: iOS \(v.majorVersion).\(v.minorVersion).\(v.patchVersion), glassEffect(.clear.tint(white 0.22), in: Capsule()) + shadow + rim", tag: "UI")
             } else {
                 AppLogger.shared.log("TabBar glass: iOS \(v.majorVersion).\(v.minorVersion).\(v.patchVersion), fallback ultraThinMaterial", tag: "UI")
             }
@@ -346,16 +386,20 @@ private struct GlassCapsuleTabBar: View {
     }
 }
 
-/// 胶囊玻璃（1.3.0.011，第 46 条）：iOS 26+ 只罩 .glassEffect(.clear,
-/// in: Capsule())（Liquid Glass 最透那档，无色调——.regular 自带白霜，采样均匀
-/// 浅灰底就显实心白，010 就是这么败的；.clear 的折射和亮边在浅底上也看得见），
-/// 背景 clear、不铺任何磨砂、不加阴影；26 以下 fallback 用 .ultraThinMaterial
-/// 磨砂底（磨砂本身 iOS 15+ 就有，部署目标 iOS 16 能用；只在老系统上，26+ 不走这条）。
+/// 胶囊玻璃（1.3.0.012，第 46 条）：iOS 26+ 只罩 .glassEffect(.clear.tint
+/// (.white.opacity(0.22)), in: Capsule())——.clear 是最透的那档玻璃（无色调，
+/// .regular 自带白霜、采样均匀浅灰底就显实心白，010 就是这么败的）；淡淡的白
+/// tint 让胶囊跟 #F2F2F7 底色拉开、看得出是一颗浮着的玻璃 pill，底下内容照样
+/// 透出来、糊掉、折射（011 的裸 .clear 在均匀浅灰底上近乎隐形，才看着像一片白）；
+/// 背景 clear、不铺任何磨砂；26 以下 fallback 用 .ultraThinMaterial 磨砂底
+/// （磨砂本身 iOS 15+ 就有，部署目标 iOS 16 能用；只在老系统上，26+ 不走这条）。
+/// 阴影和细边不在这里，在调用处（.shadow + .overlay stroke）——文件 App 的胶囊
+/// 就是玻璃 + 柔和投影 + 发亮细边三样齐全才看得出是玻璃。
 private extension View {
     @ViewBuilder
     func capsuleGlass() -> some View {
         if #available(iOS 26.0, *) {
-            self.glassEffect(.clear, in: Capsule())
+            self.glassEffect(.clear.tint(.white.opacity(0.22)), in: Capsule())
         } else {
             self.background(.ultraThinMaterial, in: Capsule())
         }

@@ -24,6 +24,16 @@ struct VersionInfo: Codable, Equatable, Identifiable {
     var holidaysUpdatedAt: String?
     var holidaysYear: [Int]?
 
+    /// 内测渠道版本（1.3.0.012，弹窗根因修）：服务端公开回包里就有
+    /// data.beta.ios / data.beta.android（各含 version/downloadUrl/releaseNotes），
+    /// 不用认证也能读到。之前 App 根本没解这个字段，内测更新全指望服务端把
+    /// latestVersion 换成内测版号——而服务端只在「登录后带认证 + 是内测人员」
+    /// 时才换；版本请求一旦没带上有效 session（启动时序、切线路、7 天 session
+    /// 过期、短信登录没 Keychain 密码兜底），服务端就回正式版 1.3.0，比装的
+    /// 1.3.0.010 旧，弹窗永远不弹。007 的 installedChannel 只修了「问哪条线」，
+    /// 没修这个认证依赖。这次内测用户直接读公开的 beta.ios 比，不再依赖认证。
+    var beta: BetaChannelVersions?
+
     var id: String { latestVersion }
 
     /// 有可用的下载链接才算能更新；没有链接时只提示、不给「更新」按钮。
@@ -38,6 +48,20 @@ struct VersionInfo: Codable, Equatable, Identifiable {
         guard let code = extractionCode?.trimmingCharacters(in: .whitespaces), !code.isEmpty else { return nil }
         return code
     }
+}
+
+/// 内测渠道某平台的版本（1.3.0.012）：服务端公开回包 data.beta.ios /
+/// data.beta.android 里就是这个形状，不用认证也能读到。
+struct BetaVersionInfo: Codable, Equatable {
+    var version: String?
+    var downloadUrl: String?
+    var releaseNotes: String?
+}
+
+/// 内测渠道两平台的版本（1.3.0.012）。
+struct BetaChannelVersions: Codable, Equatable {
+    var ios: BetaVersionInfo?
+    var android: BetaVersionInfo?
 }
 
 /// App 内更新检查器（可复用、无界面依赖）。
@@ -128,23 +152,68 @@ enum UpdateChecker {
         UserDefaults.standard.set(DateUtil.string(from: Date()), forKey: dismissedDateKey)
     }
 
-    /// 启动后调用一次：有新版且今天没点过「稍后」→ 返回版本记录；否则返回 nil。
+    /// 查更新的结果（1.3.0.012）：必须区分「确实没新版」和「查失败了」——
+    /// 查失败（没网、服务器不通）不能清掉已经排队等着弹的更新提示，否则切回前台
+    /// 时一次瞬断就把弹窗吞了。Store 里只在 .upToDate 时清 pendingUpdate，
+    /// .failed 时保留已有的 pendingUpdate。
+    enum CheckResult {
+        case updateAvailable(VersionInfo)
+        case upToDate
+        case failed
+    }
+
+    /// 某条线最新可装的版本（版号 + 链接 + 说明）：内测线直接读回包里公开的
+    /// beta.ios（不用等服务端按认证换 latestVersion，1.3.0.012 弹窗根因修），
+    /// 正式线读 latestVersion。没发这条线 / 没链接时返回 nil。
+    private static func offeredVersion(for channel: String, in info: VersionInfo) -> (version: String, downloadUrl: String, releaseNotes: String?)? {
+        if channel == "beta" {
+            guard let v = info.beta?.ios?.version, !v.isEmpty,
+                  let u = info.beta?.ios?.downloadUrl, !u.trimmingCharacters(in: .whitespaces).isEmpty,
+                  URL(string: u) != nil else { return nil }
+            return (v, u, info.beta?.ios?.releaseNotes)
+        }
+        guard info.hasDownloadURL, let u = info.downloadUrl else { return nil }
+        return (info.latestVersion, u, info.releaseNotes)
+    }
+
+    /// 按装的版本那条线评回包：内测版看公开的 beta.ios，正式版看 latestVersion。
+    /// 有新版且有下载链接 → .updateAvailable（把版号/链接/说明换成那条线的），
+    /// 否则 .upToDate。调用方（Store）按 CheckResult 决定清不清除排队的提示。
+    private static func evaluate(info: VersionInfo) -> CheckResult {
+        let channel = installedChannel
+        guard let offered = offeredVersion(for: channel, in: info) else {
+            AppLogger.shared.log("查更新：装的 \(currentVersion)（\(channel)），那条线没发新版", tag: "Update")
+            return .upToDate
+        }
+        AppLogger.shared.log("查更新：装的 \(currentVersion)（\(channel)），线上 \(offered.version)", tag: "Update")
+        guard isNewer(latest: offered.version, than: currentVersion) else { return .upToDate }
+        var out = info
+        out.latestVersion = offered.version
+        out.downloadUrl = offered.downloadUrl
+        out.releaseNotes = offered.releaseNotes ?? info.releaseNotes
+        return .updateAvailable(out)
+    }
+
+    /// 启动后调用一次：有新版 → .updateAvailable；确实没新版 → .upToDate；
+    /// 查失败 → .failed。失败不弹错，也不清排队的提示（见 CheckResult）。
     /// 约定（canonical）：downloadUrl 为空表示没有更新——即使 latestVersion 高于当前版，
-    /// 只要 downloadUrl 为空就不弹。失败（没网、服务器不通、清单格式不对）静默返回 nil。
+    /// 只要 downloadUrl 为空就不弹。失败（没网、服务器不通、清单格式不对）返回 .failed。
     /// 1.3.0.007：查更新走装的版本那条线（installedChannel），不用存的偏好 channel——
     /// 偏好只在设置页确认切换时才写，从不跟装的版本同步（1.2.7.009 同一个毛病）；
     /// 一旦脱节（偏好是 stable、装的是 1.3.0.005 内测版），查更新拿到的就是正式版 1.3.0，
     /// 1.3.0 比 1.3.0.005 旧，isNewer 直接 false，内测版 006 永远弹不出来。
     /// 装的版本才是现在用的那条线，查更新必须按它走。
-    static func checkAfterLaunch(api: APIClient) async -> VersionInfo? {
-        guard !dismissedToday else { return nil }
+    /// 1.3.0.012：光问对线还不够——内测线还要服务端按认证换 latestVersion 才回内测版号，
+    /// 请求没带有效 session 时服务端照旧回正式版 1.3.0，弹窗还是不弹。这次内测线直接读
+    /// 回包里公开的 beta.ios（见 offeredVersion），不再依赖认证。
+    static func checkAfterLaunch(api: APIClient) async -> CheckResult {
+        guard !dismissedToday else { return .upToDate }
         do {
             let info = try await api.fetchVersion(channel: installedChannel)
-            guard info.hasDownloadURL else { return nil }
-            guard isNewer(latest: info.latestVersion, than: currentVersion) else { return nil }
-            return info
+            return evaluate(info: info)
         } catch {
-            return nil
+            AppLogger.shared.log("查更新失败：\(error.localizedDescription)", tag: "Update")
+            return .failed
         }
     }
 
@@ -173,12 +242,18 @@ enum UpdateChecker {
     /// 切渠道后立刻按新渠道查一次（1.2.7.002）：渠道不同就是不同的线，
     /// 新渠道的版本和装的不一样就推出来（哪怕数字上更低，如从 1.2.7.001 切到正式版 1.2.7），
     /// 让用户自己决定装不装；只有版本完全一样才说已是最新版本。
+    /// 1.3.0.012：内测线直接读公开的 beta.ios（见 offeredVersion），不用等服务端按认证换
+    /// latestVersion——切到内测时请求还没带上新身份也照样能看到内测版号。
     static func checkAfterChannelSwitch(api: APIClient, channel: String) async -> ManualResult {
         do {
             let info = try await api.fetchVersion(channel: channel)
-            guard info.hasDownloadURL else { return .upToDate }
-            guard !isSameVersion(info.latestVersion, currentVersion) else { return .upToDate }
-            return .updateAvailable(info)
+            guard let offered = offeredVersion(for: channel, in: info) else { return .upToDate }
+            guard !isSameVersion(offered.version, currentVersion) else { return .upToDate }
+            var out = info
+            out.latestVersion = offered.version
+            out.downloadUrl = offered.downloadUrl
+            out.releaseNotes = offered.releaseNotes ?? info.releaseNotes
+            return .updateAvailable(out)
         } catch {
             return .upToDate
         }
@@ -195,16 +270,16 @@ enum UpdateChecker {
     /// 约定（canonical）：downloadUrl 为空表示没有更新，即使版本号有差异也按无更新处理。
     /// 1.3.0.007：跟 checkAfterLaunch 同理，走装的版本那条线（installedChannel），
     /// 不用存的偏好——不然偏好是 stable 时手动查也只能查到正式版，内测版永远查不出来。
+    /// 1.3.0.012：内测线直接读公开的 beta.ios（见 offeredVersion），不再依赖认证。
     static func checkManually(api: APIClient) async -> ManualResult {
         do {
             let info = try await api.fetchVersion(channel: installedChannel)
-            guard info.hasDownloadURL else {
+            switch evaluate(info: info) {
+            case .updateAvailable(let offered):
+                return .updateAvailable(offered)
+            case .upToDate, .failed:
                 return .upToDate
             }
-            guard isNewer(latest: info.latestVersion, than: currentVersion) else {
-                return .upToDate
-            }
-            return .updateAvailable(info)
         } catch {
             return .upToDate
         }
