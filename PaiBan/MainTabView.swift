@@ -43,6 +43,32 @@ import SwiftUI
 /// 同版再修底栏盖内容：safeAreaInset 在 NavigationStack 里传不进去，三页
 /// 滑到底最底下的内容都被胶囊盖住（排班统计卡、设置「关于」）。改成 overlay
 /// 纯悬浮 + 各页自己留 100pt 底部留白，胶囊顶离内容底边约 41pt，够露出来。
+///
+/// 1.3.0.006（第 46 条再修，老爷 2026-11-26 在真机上试了 005 亲口纠：
+/// 「ui 还是有问题，而且不能滑动，不是透明玻璃效果」；同版又加刷新率适配，第 34 条）：
+/// ① 不能滑动：005 里底栏上左右滑切页在真机上滑不动。根子是手势挂法：DragGesture
+/// 用普通 .gesture() 挂在装了三个 Button 的 HStack 上，Button 的点按手势会先抢
+/// 住触摸、父级的拖动手势拿不到事件（SwiftUI 里子视图手势优先于父级普通手势）。
+/// 改法：改成 .highPriorityGesture()，让拖动手势优先于 Button 的点按——点按
+/// （没位移）时拖动认不出来、Button 照样能点；左右滑（位移超 12pt）时拖动先认
+/// 出来、切页。手势阈值不变（横滑 >40pt 且大于纵向）。
+/// ② 不是透明玻璃：005 的不透明实色胶囊他不要，要透明玻璃效果（像音乐 / 文件 App
+/// 视频里那种 Liquid Glass，磨砂、半透明、透出底下内容的模糊影子）。但 004 被否
+/// 是因为玻璃太透、工资页的字透过胶囊清清楚楚能读出来。所以这次玻璃要透、但透出
+/// 来的是糊的、字读不出来：胶囊底先铺一层 .thickMaterial（重磨砂，把底下内容糊成
+/// 色块、字认不出来），上面再罩 iOS 26+ 的 .glassEffect(.regular)（Liquid Glass
+/// 的折射和亮边，看上去还是玻璃、不是 005 那种实色死板）；26 以下只有磨砂底
+/// （.glassEffect 是 26+ API，#available 包着）。其余不动：选中底块+蓝色、未选中
+/// 灰色、底离屏幕底边约 23pt、限宽 300pt 居中、不震动、内容在胶囊上面结束、胶囊
+/// 下面到屏幕底边干净（VStack 底部固定不动）。
+/// ③ 刷新率适配（第 34 条，老爷说刷新率太低、要 140Hz）：先说硬件事实——iPhone
+/// ProMotion 自适应刷新封顶就是 120Hz（他那台 iPhone 17 Pro Max 也是），140Hz
+/// 在 iOS 硬件上做不到。根因：代码里没有任何帧率设置（没 CADisplayLink、没
+/// preferredFrameRateRange、没 Timer），SwiftUI 默认跟 ProMotion 走，但没有显式
+/// 声明帧率范围，系统在部分场景下只给 60Hz。改法：App 启动时建一个 CADisplayLink，
+/// preferredFrameRateRange 设成 10–120Hz（preferred 120），显式告诉系统这 App
+/// 要用满自适应刷新；静止时系统自己会降频省电（minimum 10Hz），不用管。
+/// （实现在 PaiBanApp.swift 的 RefreshRateBoost，空转、只声明范围、不干活。）
 struct MainTabView: View {
     @EnvironmentObject private var store: AppStore
 
@@ -145,12 +171,15 @@ struct MainTabView: View {
     }
 }
 
-/// 悬浮胶囊切换栏（1.3.0.005，照 iOS 文件 App 视频重做，第 46 条）：
-/// 不透明实色胶囊（systemBackground，深浅色系统自己适配），浮在内容上面；
-/// 不贴底、不满宽、没有顶部分隔线。内容滚到胶囊下面直接被挡住，不会透出来。
-/// 选中那个有浅色圆角底块（systemGray5 圆角矩形，matchedGeometryEffect 平滑滑动）
-/// + 蓝色图标文字；未选中是 secondary，没有底块。点按钮切换；在栏上左右滑动
-/// 也能切换（来回都行）。不震动（老爷亲口定：震动不要），点按和滑动都只切页、不震。
+/// 悬浮胶囊切换栏（1.3.0.006，照 iOS 文件 App 视频重做，第 46 条）：
+/// 透明玻璃胶囊：底铺 .thickMaterial（重磨砂，把底下内容糊成色块、字认不出来），
+/// 上面再罩 iOS 26+ 的 .glassEffect(.regular)（Liquid Glass 的折射和亮边，
+/// 看上去还是玻璃、不是 005 那种实色死板）；26 以下只有磨砂底。浮在内容上面；
+/// 不贴底、不满宽、没有顶部分隔线。选中那个有浅色圆角底块（systemGray5 圆角矩形，
+/// matchedGeometryEffect 平滑滑动）+ 蓝色图标文字；未选中是 secondary，没有底块。
+/// 点按钮切换；在栏上左右滑动也能切换（来回都行）。滑动手势用 .highPriorityGesture()
+/// （005 的普通 .gesture() 会被 Button 的点按手势抢走、真机上滑不动）。
+/// 不震动（老爷亲口定：震动不要），点按和滑动都只切页、不震。
 private struct FilesTabBar: View {
     let items: [(tag: Int, title: String, icon: String)]
     @Binding var selectedTab: Int
@@ -190,9 +219,17 @@ private struct FilesTabBar: View {
             }
         }
         .padding(.horizontal, 10)
-        .background(Color(.systemBackground), in: Capsule())
+        // 1.3.0.006：透明玻璃——底铺 .thickMaterial（重磨砂，底下内容糊成色块、
+        // 字认不出来），上面罩 iOS 26+ 的 .glassEffect(.regular)（Liquid Glass
+        // 的折射和亮边）。26 以下只有磨砂底（capsuleGlass 里 #available 包着）。
+        .background(.thickMaterial, in: Capsule())
+        .capsuleGlass()
         .shadow(color: .black.opacity(0.15), radius: 12, x: 0, y: 4)
-        .gesture(
+        // 1.3.0.006：滑动手势改成 .highPriorityGesture()。005 的普通 .gesture()
+        // 会被三个 Button 的点按手势抢走触摸，真机上左右滑切页滑不动。高优先手势
+        // 让拖动先于 Button 点按被认出来：点按（没位移）时拖动认不出来、Button 照样
+        // 能点；左右滑（位移超 12pt）时拖动先认出来、切页。阈值不变。
+        .highPriorityGesture(
             DragGesture(minimumDistance: 12)
                 .onEnded { value in
                     // 只认横滑（横向位移够大、且比纵向大）；竖滑不管。
@@ -205,5 +242,19 @@ private struct FilesTabBar: View {
                     }
                 }
         )
+    }
+}
+
+/// 胶囊玻璃（1.3.0.006，第 46 条）：iOS 26+ 才罩 .glassEffect(.regular)
+/// （Liquid Glass，26+ API）；26 以下什么都不加，只留底下的 .thickMaterial
+/// 磨砂底（磨砂本身 iOS 15+ 就有，部署目标 iOS 16 能用）。
+private extension View {
+    @ViewBuilder
+    func capsuleGlass() -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular, in: Capsule())
+        } else {
+            self
+        }
     }
 }
