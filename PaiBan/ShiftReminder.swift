@@ -40,6 +40,40 @@ enum ShiftReminder {
         await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
     }
 
+    /// 正在等用户点系统权限弹窗时，不重复弹（启动 Task 与后台同步可能同时调进来）。
+    private static var permissionRequestInFlight = false
+
+    /// 提醒开着但权限还没定：直接弹系统原生权限弹窗（第 35 条，2026-11-26）；
+    /// 拿到就排未来 7 天；被拒（或之前已被拒）就把开关关掉、取消已排的，
+    /// 开关不再显示开着。只弹一次：系统行为——用户点了允许/不允许后不会再弹；
+    /// 被拒后去设置页开关的引导（去系统设置里开）。
+    /// App 启动（Store.startup，经 refreshAll）与进设置页时调。
+    /// AppStore 是 @MainActor，读 store 的班次要走主线程。
+    @MainActor
+    static func ensurePermissionAndSchedule(store: AppStore) async -> Bool {
+        guard isEnabled else { return false }
+        let status = await authorizationStatus()
+        if status == .authorized {
+            await reschedule(store: store)
+            return true
+        }
+        if status == .notDetermined {
+            // 已有弹窗在等用户点了：这次不重复弹，等那边的结果（那边拿到就排）。
+            guard !permissionRequestInFlight else { return false }
+            permissionRequestInFlight = true
+            let granted = await requestPermission()
+            permissionRequestInFlight = false
+            if granted {
+                await reschedule(store: store)
+                return true
+            }
+        }
+        // 被拒：开关不能显示开着，关掉并取消已排的。
+        isEnabled = false
+        disable()
+        return false
+    }
+
     /// 打开提醒：请求权限 → 排未来 7 天的班前 30 分钟通知。
     /// 权限被拒返回 false（调用方把开关关掉并提示去系统设置）。
     /// AppStore 是 @MainActor，读 store 的班次要走主线程。

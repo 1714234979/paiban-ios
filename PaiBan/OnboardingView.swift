@@ -147,6 +147,8 @@ struct OnboardingView: View {
                 Text("方式 A 是最标准的 8 天循环。班组数跟着方式走（五班三倒 5 个班，三班二倒 3 个班）。")
                     .foregroundColor(.secondary)
                 // 1.2.7.002：全部方式按分类列出（四班三倒 5 种 + 新 15 种）；六班三倒序列未核实，继续留「即将推出」。
+                // 第 32 条：行信息与设置页对齐（小时/班、周均小时、备注），不然 12 天/4 天的
+                // 只看名字和循环天数不好分辨——引导里四班三倒 5 种本来就全列着，缺的是这些。
                 ForEach(RotationModes.categories, id: \.title) { cat in
                     Text(cat.title)
                         .font(.subheadline).bold()
@@ -163,9 +165,14 @@ struct OnboardingView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(mode.name)
                                         .foregroundColor(.primary)
-                                    Text("\(mode.cycleDays) 天一循环 · \(mode.sequence)")
+                                    Text("\(mode.cycleDays) 天一循环 · \(mode.sequence) · \(mode.shiftHours) 小时/班 · 周均 \(mode.weeklyHours) 小时")
                                         .font(.caption)
                                         .foregroundColor(.secondary)
+                                    if let note = mode.note {
+                                        Text(note)
+                                            .font(.caption)
+                                            .foregroundColor(.secondary)
+                                    }
                                     if mode.isPayTBD {
                                         Text("工资口径待定（金额暂不算）")
                                             .font(.caption)
@@ -202,6 +209,18 @@ struct OnboardingView: View {
                     .background(Color(.secondarySystemBackground))
                     .cornerRadius(10)
                 }
+
+                // 第 32 条：选中方式的循环示意（和设置页同一套 CyclePreviewView），
+                // 选完一眼就能看到这方式每天上什么班，不用凭名字猜。
+                if let mode = RotationModes.mode(id: modeId) {
+                    Text("循环示意 · \(team)班 \(mode.name)")
+                        .font(.subheadline).bold()
+                        .padding(.top, 4)
+                    CyclePreviewView(mode: mode, team: team, baseDate: baseDate)
+                        .padding(10)
+                        .background(Color(.secondarySystemBackground))
+                        .cornerRadius(10)
+                }
             }
 
             Text("你在哪个班？")
@@ -219,6 +238,11 @@ struct OnboardingView: View {
                     Text("\(team)班在基准日上 \(RotationModes.shiftName(for: mode.cycles[team]?.first ?? "D"))；基准日是循环第 1 天。")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                    if mode.id == "2-a" || mode.id == "3-3-a" || mode.id == "4-6-a" {
+                        Text("基准日请选周一（按下周一起算，周六日休息）。")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
             Text("日=日班 08–16，中=中班 16–24，早=早班 00–08，休=休息")

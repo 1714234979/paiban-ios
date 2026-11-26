@@ -191,7 +191,9 @@ private struct AppPagePreview: View {
         return store
     }
 
-    /// 演示全年天数（2026 年，B 班 8 天轮本地算；11-02、11-03 按真记录记年休假）。
+    /// 演示全年天数（2026 年，B 班 8 天轮本地算；11-02、11-03 按真记录记年休假；
+    /// 11-17 → 中班、11-28 → 日班两条真调班记录也带上，不然 11 月出勤少算 1 班、
+    /// 预估会偏高（演示数 405.51，真数 396.02；2026-11-26 画廊验出后补））。
     static func demoYearDays() -> [DaySchedule] {
         var yearDays: [DaySchedule] = []
         for m in 1...12 {
@@ -202,6 +204,16 @@ private struct AppPagePreview: View {
             if d.date == "2026-11-02" || d.date == "2026-11-03" {
                 d.onLeave = true
                 d.leaveType = "年休假"
+            }
+            if d.date == "2026-11-17" {
+                d.shift = "中班"
+                d.overridden = true
+                d.note = "临时调班"
+            }
+            if d.date == "2026-11-28" {
+                d.shift = "日班"
+                d.overridden = true
+                d.note = "临时调班"
             }
             return d
         }

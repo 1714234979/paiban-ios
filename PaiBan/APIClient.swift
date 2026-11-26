@@ -704,9 +704,9 @@ final class APIClient {
                           query: ["start": start, "days": String(days)])
     }
 
-    /// POST /api/v1/me/swap —— 调班（1.2.7.001 第 25 条重做：只改自己的日历）：
-    /// 选一天把那天的班改成 myShift（新版）；不传 myShift 时走旧版（替班日变休息，
-    /// 需 partner/partnerShift）。note 只是跟谁换的备注，不联动对方。
+    /// POST /api/v1/me/swap —— 调班（1.2.9.001 第 31 条：空间那套，配对互换）：
+    /// 替班日我休息、partner 替我上 partnerShift（对方那天最终的班）；
+    /// 只写我自己的记录，不动对方账号。myShift 保留仅作兼容（新客户端不传）。
     /// paybackDate 为空 = 待还班（以后再补填），给了就同时写还班日（我上 paybackMyShift）。
     /// 成功返回 {coverDate, paybackDate}。
     func postSwap(date: String, myShift: String?, partner: String? = nil, partnerShift: String? = nil,

@@ -218,6 +218,11 @@ final class AppStore: ObservableObject {
             applyCache(cache)
             isLoggedIn = true
             isStarting = false
+            // 1.2.9.001（第 35 条）：打开软件就检查提醒权限——开着但还没定，
+            // 直接弹系统原生权限弹窗（只弹一次）；拿到了就按缓存的排班把未来 7 天排上。
+            // 不等后台同步（网络慢/断网时也不耽误弹）；后台同步的 refreshAll 里还会再调一次，
+            // 权限已定就只重排，不重复弹。
+            Task { await ShiftReminder.ensurePermissionAndSchedule(store: self) }
             Task { await backgroundSyncAfterLaunch() }
             return
         }
@@ -542,10 +547,10 @@ final class AppStore: ObservableObject {
         persistCache()
         // 1.2.7.001：节假日同步（服务端更新时间变了就拉新数据，只刷新日历标注）。
         await checkHolidaysUpdate()
-        // 1.2.7.001：排班变了，班次推送提醒重新排（未来 7 天）。
-        if ShiftReminder.isEnabled {
-            await ShiftReminder.reschedule(store: self)
-        }
+        // 1.2.9.001（第 35 条）：排班变了，班次推送提醒重新排（未来 7 天）。
+        // 提醒开着但权限还是未决定，就先弹系统权限请求（只弹一次），拿到了再排；
+        // 被拒就把开关关掉——开关不能看着开、实际一条都没排。
+        await ShiftReminder.ensurePermissionAndSchedule(store: self)
         // 1.1.4：重装恢复——登录后把账号的完整数据从云端拉回来（后台静默，不拖登录）。
         restoreFullDataFromCloud()
     }
@@ -581,17 +586,74 @@ final class AppStore: ObservableObject {
     /// 但只算一次、记进 localMonthCache——1.1.2 每调一次就重算一次（每格 ~30 天 × DateFormatter），
     /// 滑页时每页调 3 次、每次重绘全调，是掉帧的主因。真数据到了走 monthCache 覆盖，
     /// 预取照常发（localMonthCache 不影响 monthCache 的预取判断）。
+    /// 看别的班：本地月上再叠我自己的调班记录里 partner==这个班的那几条
+    /// （overlayPartnerRecords），对方那天按调班后显示；叠加每次现算、不进缓存，
+    /// 我的调班记录到了（prefetch 成功、日历重拍快照）就自动带上。
     func monthFor(year: Int, month: Int) -> MonthSchedule {
         let key = monthCacheKey(team: viewTeam, year: year, month: month)
         if let cached = monthCache[key] { return cached }
         if let local = localMonthCache[key] {
-            if viewTeam == myTeam { prefetchMonth(year: year, month: month) }
-            return local
+            prefetchMonth(year: year, month: month)
+            return viewTeam == myTeam ? local : overlayPartnerRecords(local, year: year, month: month)
         }
         let local = ScheduleCalculator.localMonth(team: viewTeam, year: year, month: month, rotation: rotation)
         localMonthCache[key] = local
-        if viewTeam == myTeam { prefetchMonth(year: year, month: month) }
-        return local
+        prefetchMonth(year: year, month: month)
+        return viewTeam == myTeam ? local : overlayPartnerRecords(local, year: year, month: month)
+    }
+
+    /// 看别的班的日历：本地 8 天一轮的基础上，叠上我自己的调班记录里 partner==这个班的那几条
+    /// （对方那天最终上的班 = 记录里的 partnerShift；对方那天是替我上的，记 partner=我这边的班、
+    /// partnerShift=我这天最终的班）。请假顶岗的记录也在同一份 overrides 里，一起叠上。
+    /// 只读我自己的数据，不动对方账号（老爷 2026-11-26 08:59 定）。
+    private func overlayPartnerRecords(_ month: MonthSchedule, year: Int, month monthNum: Int) -> MonthSchedule {
+        guard viewTeam != myTeam, var days = month.days else { return month }
+        let records = (swapsCache[payCacheKey(year: year, month: monthNum)] ?? [])
+            .filter { $0.partner == viewTeam && $0.partnerShift != nil }
+        guard !records.isEmpty else { return month }
+        for rec in records {
+            guard let i = days.firstIndex(where: { $0.date == rec.date }) else { continue }
+            var d = days[i]
+            let newShift = rec.partnerShift ?? d.shift
+            let parts = newShift == "休息" ? [] : ShiftStyle.parts(of: newShift)
+            d.shift = newShift
+            d.overridden = true
+            d.partner = myTeam
+            d.partnerShift = rec.shift
+            d.coverDate = rec.coverDate
+            d.paybackDate = rec.paybackDate
+            d.note = rec.note
+            d.isDouble = parts.count == 2
+            d.isWork = !parts.isEmpty
+            d.totalHours = parts.count * 8
+            d.timeLabel = parts.isEmpty ? nil : parts.map { ShiftStyle.timeRange(for: $0) }.joined(separator: " + ")
+            d.start = parts.isEmpty ? nil : Self.shiftStart(of: parts.first!)
+            d.end = parts.isEmpty ? nil : Self.shiftEnd(of: parts.last!)
+            days[i] = d
+        }
+        var m = month
+        m.days = days
+        return m
+    }
+
+    /// 单班的上班时间（与 ScheduleCalculator.timeStart/timeEnd 同表，overlay 用）。
+    private static func shiftStart(of shift: String) -> String? {
+        switch shift {
+        case "日班": return "08:00"
+        case "中班": return "16:00"
+        case "早班": return "00:00"
+        default: return nil
+        }
+    }
+
+    /// 单班的下班时间（与 ScheduleCalculator.timeStart/timeEnd 同表，overlay 用）。
+    private static func shiftEnd(of shift: String) -> String? {
+        switch shift {
+        case "日班": return "16:00"
+        case "中班": return "24:00"
+        case "早班": return "08:00"
+        default: return nil
+        }
     }
 
     /// 取某月真数据，失败重试 3 次（退避 0.5/1 秒）。取消（滑走了）不重试，直接抛。
@@ -922,7 +984,7 @@ final class AppStore: ObservableObject {
         }
     }
 
-    // MARK: 调班互换（空间那套，1.1.3）
+    // MARK: 调班互换（空间那套，1.2.9.001 第 31 条）
 
     /// 四班同取：从 start 起连续 N 天、四个班组的日程（调班候选卡片与还班日列表用）。
     /// 当天详情打开调班/请假流程时现取（数据小、一次取够当月窗口），不做长期缓存。
@@ -930,15 +992,15 @@ final class AppStore: ObservableObject {
         try await api.fetchTeamsRange(start: start, days: days)
     }
 
-    /// 互换调班：替班日我休息、对方上我的班；paybackDate 为空 = 待还班。
+    /// 提交调班（1.2.9.001 第 31 条：空间那套，配对互换）：
+    /// 替班日我休息、partner 替我上 partnerShift（对方那天最终的班）；
+    /// paybackDate 为空 = 待还班，给了就同时写还班日（我上 paybackMyShift，对方休息）。
+    /// 只写我自己的记录，不动对方账号。
     /// 与乐观更新的那几路不同，这里等服务端回话再报成功——连班禁令由服务端最终裁定，
     /// 失败要把服务端的中文错误原样显示出来，不能先报“已保存”再悄悄回滚。
-    /// 提交调班（1.2.7.001 第 25 条：只改自己的日历）。
-    /// myShift = 这天要改成的班；note 只是跟谁换的备注，不联动对方；
-    /// paybackDate 为空 = 待还班，给了就同时写还班日（我上 paybackMyShift）。
-    func submitSwap(date: String, myShift: String, note: String?,
+    func submitSwap(date: String, partner: String, partnerShift: String, note: String?,
                     paybackDate: String?, paybackMyShift: String?) async throws -> SwapSaveResult {
-        let result = try await api.postSwap(date: date, myShift: myShift,
+        let result = try await api.postSwap(date: date, myShift: nil, partner: partner, partnerShift: partnerShift,
                                             note: note, paybackDate: paybackDate, paybackMyShift: paybackMyShift)
         // 先把替班日（+还班日）的服务端最新状态直接补进日历缓存，日历立刻变；
         // 整月刷新随后跑一遍，把统计和记录列表也对上。
@@ -950,7 +1012,8 @@ final class AppStore: ObservableObject {
         return result
     }
 
-    /// 给待还班的调班补填还班日。
+    /// 给待还班的调班补填还班日（1.2.9.001 第 31 条）：
+    /// myShift = 还班日那天我最终上的班（我自己那天的班 + 那次调班里我被替掉的班并成的组合班）。
     func fillSwapPayback(coverDate: String, paybackDate: String, myShift: String) async throws {
         try await api.postSwapPayback(coverDate: coverDate, paybackDate: paybackDate, myShift: myShift)
         await refreshDayOnCalendar(date: coverDate)

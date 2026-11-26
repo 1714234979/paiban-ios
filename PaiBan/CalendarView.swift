@@ -304,7 +304,7 @@ struct CalendarView: View {
                 ProgressView("正在加载…")
                     .padding(.top, 8)
             } else if store.viewTeam != store.myTeam {
-                Text("看的是 \(store.viewTeam)班的基础排班（8 天一轮），调班/请假只在自己班上显示。")
+                Text("看的是 \(store.viewTeam)班的排班（基础 8 天一轮；我和这个班调过、顶过岗的日子按调班后显示）。调班/请假只能改自己班的日历。")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
@@ -522,10 +522,9 @@ struct MonthPageView: View {
         // 关键：行数从快照 snapDays 里算（days.count / 7），快照在滑动中一动不动，
         // 所以行距在动画中途绝不变；快照 + 防抖换月 + 裁剪三件不变。
         // 周几行已抽到 TabView 外面固定不动，这里只画日期网格。
-        // 订阅 payInputsVersion：工资输入到齐时三薪标要出现，日历得重画
-        //（之前没订阅，输入到了也不重画，三薪标要等别的状态变了才冒出来）。
-        // 三薪标仍走 live 的 tripleDates（只是 pill 里一行小字，不动网格结构），
-        // 网格本身（snapDays）是快照，滑动中不动。
+        // 订阅 payInputsVersion：工资输入到齐时底部统计（三薪 X 天 / 加班 X 天）要重算，
+        // 日历得重画（之前没订阅，输入到了也不重画，统计要等别的状态变了才冒出来）。
+        // 三薪标本身（第 33 条）只按法定表，不依赖工资输入；网格本身（snapDays）是快照，滑动中不动。
         let _ = store.payInputsVersion
         let days = snapLoaded ? snapDays : gridDays
         // 格子总数恒等于 行数×7（上月补 + 本月 + 下月补正好拼满整周），行数从快照算。
@@ -578,10 +577,12 @@ struct MonthPageView: View {
         }
     }
 
-    /// 本月三薪日（工资算法里 tripleDays 的那几天）：本地算、带缓存；
-    /// 输入没到齐算不出时为空（先不标，等输入到了重画）。只在看自己班时有。
+    /// 本月三薪日（第 33 条，2026-11-26）：只按法定节假日表标，不管本班上班还是休息——
+    /// 2027-01-01 元旦 B班休息也要标「三薪」。不走工资算法的 tripleDates
+    ///（那份只含实际上班的法定日，是工资口径，底部「三薪 X 天」仍用它，不动）。
+    /// 法定表是全队的事实，看哪个班都标；也不依赖工资输入，输入没到齐也照常标。
     private var tripleDates: Set<String> {
-        store.triplePayInfo(year: year, month: month)?.tripleDates ?? []
+        Set(monthData.days.map(\.date).filter { PayCalc.isStatutoryDay($0) })
     }
 
     private var monthData: MonthSchedule {

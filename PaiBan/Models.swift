@@ -209,6 +209,15 @@ enum ShiftStyle {
         shift == "早中班" || shift == "日中班" || shift == "早日班"
     }
 
+    /// 组合班里去掉对方自己那天的班（还班日算「我替他上的那个班」用：
+    /// 对方最终上的班 partnerShift，去掉对方自己那天的班 = 我替他上的班）。
+    /// 与服务端 core.subtractShift 同口径。
+    static func subtract(combo: String, own: String) -> String {
+        let ownParts = Set(parts(of: own).filter { $0 != "休息" })
+        let parts = parts(of: combo).filter { $0 != "休息" && !ownParts.contains($0) }
+        return combined(parts)
+    }
+
     /// 所有可调成的班次（含双班）。
     static let allShifts = ["日班", "中班", "早班", "休息", "早中班", "日中班"]
 

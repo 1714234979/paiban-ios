@@ -306,7 +306,9 @@ struct RotationSettingsView: View {
 
 /// 循环示意（图二风格，紧凑）：横排卡片，每格一天 + 班次色块，箭头串联，
 /// 底下「第 N+1 天回到第 1 天」。12 天分两行（横向滚动），8 天 / 4 天一行。
-private struct CyclePreviewView: View {
+/// 循环示意（横排卡片 + 箭头 +「第 N+1 天回到第 1 天」）：设置页与新用户引导共用
+///（第 32 条：引导里也要能看到每种方式的循环，不然 12 天/4 天的不好分辨）。
+struct CyclePreviewView: View {
     var mode: RotationMode
     var team: String
     var baseDate: Date

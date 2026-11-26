@@ -3,10 +3,11 @@ import SwiftUI
 /// 某天的详情（点日历弹出的 sheet）：班次、时间、双班、请假、节假日、调班，
 /// 以及调班 / 请假 / 取消的操作。连班禁令在界面上写明，服务端拒绝时原样显示中文错误。
 ///
-/// 调班（1.2.7.001 第 25 条重做）：调班只改自己的日历——选一天把那天的班改成
-/// 要换的班（备注里写跟谁换的，只是个备注，不联动对方），再挑一天还班
-/// （还班日也可以先空着，以后再定）；保存前预览自己的日历前后变化；
-/// 删替班日连还班日一起删。位置不变，仍在当天详情这个二级菜单里。
+/// 调班（1.2.9.001 第 31 条：空间那套，配对互换）：选一个班替我上这天
+/// （我这天休息，对方那天变成组合班），再挑一天还班（还班日也可以先空着，以后再定）；
+/// 保存前预览两边（替班日我和对方、还班日我和对方）；删一边两边一起删。
+/// 只写我自己的记录，不动对方账号（老爷 2026-11-26 08:59 定）。位置不变，
+/// 仍在当天详情这个二级菜单里。
 /// 只读门禁（老爷 2026-11-24 04:49/04:50 定）：切到别的班看日历是纯只读，
 /// 调班/请假/记加班入口全部不出现；能改的班 = 设置页设定的班组（跟着设置走，不是写死 B 班）。
 /// 手动排班时：点一天直接设当天班次（日/中/早/休），不用走调班。
@@ -94,16 +95,18 @@ struct DayDetailView: View {
         }
     }
 
-    // MARK: 调班流程状态（1.2.7.001 第 25 条：只改自己的日历）
+    // MARK: 调班流程状态（1.2.9.001 第 31 条：空间那套，配对互换）
 
     @State private var showSwapFlow = false
-    /// 这天要改成的班（日班/中班/早班/休息，和现在这天的班不一样）。
-    @State private var swapNewShift: String?
+    /// 替我上这天班的班组（A/C/D，我自己的班除外）。
+    @State private var swapPartner: String?
+    /// 对方替我上完这天后、对方那天最终上的班（我这天的班 + 对方自己那天的班并成的组合班）。
+    @State private var swapPartnerShift: String?
     @State private var swapPayback: String?
-    /// 还班日那天我上的班（日班/中班/早班，由我自己选）。
+    /// 还班日那天我最终上的班（我自己那天的班 + 我替对方上的班并成的组合班），选还班日时算出来。
     @State private var swapPaybackShift: String?
     @State private var swapLater = false
-    /// 跟谁换的备注（只是一个备注，不联动对方的日历）。
+    /// 备注（可选）。
     @State private var swapNote = ""
     @State private var swapSaving = false
 
@@ -190,6 +193,9 @@ struct DayDetailView: View {
             .onChange(of: formOpen) { open in
                 sheetDetent = open ? .large : .medium
             }
+            // 打开当天详情就取一次四班派生日程：「其他班次」卡片按调班后的显示，
+            // 不用等点开调班/请假才读（loadTeamsRange 自带去重，重复调只跑一次）。
+            .task { await loadTeamsRange() }
         }
     }
 
@@ -283,7 +289,8 @@ struct DayDetailView: View {
         if day.onLeave == true { return "请假" }
         let inputs = store.estimateInputs(for: day.date)
         let est = PayCalc.todayEstimate(shift: day.shift, baseSalary: inputs.baseSalary, dateString: day.date, earlyRate: inputs.earlyRate, midRate: inputs.midRate, mealRate: inputs.mealRate, dailyBonusShare: inputs.dailyBonusShare, overtimeShifts: inputs.overtimeShifts)
-        if est.isRest { return "今日休息" }
+        // 第 33 条：休息日逢法定节假日也标「（三薪）」（只标，不算钱；工资口径不动）。
+        if est.isRest { return PayCalc.isStatutoryDay(day.date) ? "今日休息（三薪）" : "今日休息" }
         let suffix = est.isTriple ? "（三薪）" : (est.isOvertime ? "（加班）" : "")
         return "预估 " + MoneyUtil.money(est.total) + suffix
     }
@@ -308,14 +315,18 @@ struct DayDetailView: View {
         .cornerRadius(AppStyle.cardRadius)
     }
 
-    /// 其他三个班组在选中这天的班次（基础轮换，按当前倒班方式算）。
+    /// 其他三个班组在选中这天的班次。优先用四班派生日程（teamsRange：我的调班记录
+    /// 里 partner==对方的那条会改对方那天的班）；没读到就退回基础轮换。
     /// 排除正在看的班组（shownDay.team 是正在看的日历班组；它的班次已在「实际班次」里）。
     private var otherTeams: [(team: String, shift: String)] {
         let shownTeam = shownDay.team ?? store.myTeam
         let date = DateUtil.date(from: shownDay.date) ?? Date()
         return TeamInfo.allTeams
             .filter { $0 != shownTeam }
-            .map { team in (team, ScheduleCalculator.baseShift(team: team, date: date, rotation: store.rotation)) }
+            .map { team in
+                if let d = teamDay(team, shownDay.date) { return (team, d.shift) }
+                return (team, ScheduleCalculator.baseShift(team: team, date: date, rotation: store.rotation))
+            }
     }
 
     /// 一个班组的 chip：班组名 + 班次。班次色是底色、白字；
@@ -341,16 +352,6 @@ struct DayDetailView: View {
     /// 暖黄底（对比度够），padding 12、圆角 12，和详情卡同一尺寸语言。
     /// 当前方式的禁令组（1.2.7.002：12h 方式用 12 小时那套，绝不能复用 8 小时那两条）。
     private var banSet: String { store.rotation.mode?.banSet ?? "8h" }
-
-    /// 当前方式的工作班次名（从循环表里取，去重；调班/还班的候选用）。
-    private var modeShiftNames: [String] {
-        guard let mode = store.rotation.mode else { return ["日班", "中班", "早班"] }
-        var seen: [String] = []
-        for cycle in mode.cycles.values {
-            for s in cycle where s != "休息" && !seen.contains(s) { seen.append(s) }
-        }
-        return seen.isEmpty ? ["日班", "中班", "早班"] : seen
-    }
 
     /// 12h 方式连上天数上限（与服务端 MAX_CONSECUTIVE_12H 一致）。
     private var maxConsecutive12h: Int? {
@@ -549,19 +550,25 @@ struct DayDetailView: View {
         return ""
     }
 
-    /// 已有调班的状态卡：这天改成的班、备注（跟谁换的）、还班日/待还班，
-    /// 以及补填还班日、转请假入口。只改自己的日历，不联动对方。
+    /// 已有调班的状态卡（1.2.9.001 第 31 条：配对互换）：
+    /// 替班日我休息、对方班替我上对方最终的班；还班日我上组合班、对方休息。
+    /// 只改我自己的数据，不动对方账号。旧记录（没有 partner 的，如 11-17/11-28）照老样子显示。
     private var swapStatusCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             if let cover = shownDay.coverDate {
                 Text("这是还班日，还的是 \(cover) 那次调班。")
                     .font(.subheadline)
-                Text("我这天上 \(shownDay.shift)。")
+                Text("我这天上 \(shownDay.shift)\(shownDay.partner.map { "，\($0)班这天休息" } ?? "")。")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             } else {
-                Text("已调班：我这天改成 \(shownDay.shift)\(shownDay.note.map { "（\($0)）" } ?? "")。")
-                    .font(.subheadline)
+                if let partner = shownDay.partner, let pShift = shownDay.partnerShift {
+                    Text("已调班：我这天休息，\(partner)班替我上 \(pShift)\(shownDay.note.map { "（\($0)）" } ?? "")。")
+                        .font(.subheadline)
+                } else {
+                    Text("已调班：我这天改成 \(shownDay.shift)\(shownDay.note.map { "（\($0)）" } ?? "")。")
+                        .font(.subheadline)
+                }
                 if let payback = shownDay.paybackDate {
                     Text("还班日：\(payback)\(paybackShiftText(payback))。")
                         .font(.subheadline)
@@ -733,137 +740,70 @@ struct DayDetailView: View {
 
     // MARK: 调班流程（空间那套）
 
-    /// 把这天换成某个班行不行（只按我自己的日程算）：新班不能和现在这天一样；
-    /// 中班接次日早班不行、早班接前一天中班不行；早班+日班同天不行。
-    /// 这是“替换整天班次”，不是“再加一个班”，所以不看我这天已有的班（直接换掉）。
-    private func evalReplaceShift(ownDay: DaySchedule?, prevDay: DaySchedule?, nextDay: DaySchedule?, newShift: String) -> (eligible: Bool, reason: String?) {
-        guard let ownDay else { return (false, "排班还没读出来") }
-        if ownDay.onLeave == true { return (false, "这天请假") }
-        if newShift == ownDay.shift { return (false, "要换的班和现在这天的班一样") }
-        // 12h：按 12h 禁令验（一天一个班、白夜不相邻、夜班不连、48 小时、连上上限）。
-        if banSet == "12h" {
-            if let reason = validate12h(newShift: newShift, dateStr: ownDay.date) {
-                return (false, reason)
-            }
-            return (true, nil)
-        }
-        // 6h：只查一天不能上两个相同的班（换整天不会重复，直接过）。
-        if banSet == "6h" { return (true, nil) }
-        // 8h（原有逻辑）。
-        let newComps = ShiftStyle.parts(of: newShift)
-        if newComps.contains("早班") && newComps.contains("日班") {
-            return (false, "早班和日班不能一起上：0 点直接上到 16 点，不允许")
-        }
-        if newComps.contains("中班") {
-            if let next = nextDay, ShiftStyle.parts(of: next.shift).contains("早班") {
-                return (false, "次日是早班：中班 24:00 下班直接接次日早班，不允许")
-            }
-        }
-        if newComps.contains("早班") {
-            if let prev = prevDay, ShiftStyle.parts(of: prev.shift).contains("中班") {
-                return (false, "前一天是中班：24:00 下班直接接这天早班，不允许")
-            }
-        }
-        return (true, nil)
-    }
-
-    /// 第 1 步的候选：把这天改成日班/中班/早班/休息，各自按我自己的日程行不行。
-    private var swapShiftOptions: [(shift: String, eligible: Bool, reason: String?)] {
-        let prev = myPrevDay(shownDay.date)
-        let next = myNextDay(shownDay.date)
-        return (modeShiftNames + ["休息"]).map { s in
-            let r = evalReplaceShift(ownDay: shownDay, prevDay: prev, nextDay: next, newShift: s)
-            return (s, r.eligible, r.reason)
-        }
-    }
-
-    /// 第 2 步的还班日候选：当月每一天（除替班日），那天我能再上哪个班。
-    /// 只按我自己的日程算（evalCover：那天已有班 + 要加的班，禁令全算上）。
-    /// options 是那天能加的班（班次 → 加完变成的班）；一个都没有就是那天还不了。
-    private var paybackCandidates: [(date: String, weekday: String, myShift: String, options: [(shift: String, result: String)], reason: String?)] {
+    /// 还班日候选（1.2.9.001 第 31 条）：还班日那天我上的班 = 我自己那天的班 + 要还的那个班
+    /// （addedShift：新调班是要还的班 = 这天我上的班；补填待还班是那次调班里我被替掉的班）。
+    /// 要还的班是定的，每天最多一个结果，不用再选加哪个班；result 就是还班日那天我最终上的班。
+    private func paybackCandidates(addedShift: String) -> [(date: String, weekday: String, myShift: String, result: String?, reason: String?)] {
         let comps = DateUtil.yearMonth(of: DateUtil.date(from: shownDay.date) ?? Date())
         let dim = DateUtil.daysInMonth(year: comps.year, month: comps.month)
-        var out: [(date: String, weekday: String, myShift: String, options: [(shift: String, result: String)], reason: String?)] = []
+        var out: [(date: String, weekday: String, myShift: String, result: String?, reason: String?)] = []
         for d in 1...dim {
             guard let dateObj = DateUtil.calendar.date(from: DateComponents(year: comps.year, month: comps.month, day: d)) else { continue }
             let dateStr = DateUtil.string(from: dateObj)
             if dateStr == shownDay.date { continue }
             guard let myDay = myDayOn(dateStr) else { continue }
             if myDay.onLeave == true {
-                out.append((dateStr, DateUtil.weekdayCN(of: dateObj), myDay.shift, [], "这天请假"))
+                out.append((dateStr, DateUtil.weekdayCN(of: dateObj), myDay.shift, nil, "这天请假"))
                 continue
             }
             if myDay.partner != nil {
-                out.append((dateStr, DateUtil.weekdayCN(of: dateObj), myDay.shift, [], "我这天已有调班记录"))
+                out.append((dateStr, DateUtil.weekdayCN(of: dateObj), myDay.shift, nil, "我这天已有调班记录"))
                 continue
             }
             let prev = myPrevDay(dateStr)
             let next = myNextDay(dateStr)
-            var options: [(shift: String, result: String)] = []
-            for s in modeShiftNames {
-                let ev = evalCover(ownDay: myDay, prevDay: prev, nextDay: next, addedShift: s)
-                if ev.eligible, let result = ev.result { options.append((s, result)) }
-            }
-            out.append((dateStr, DateUtil.weekdayCN(of: dateObj), myDay.shift, options, options.isEmpty ? "这天加不了班（禁令）" : nil))
+            let ev = evalCover(ownDay: myDay, prevDay: prev, nextDay: next, addedShift: addedShift)
+            out.append((dateStr, DateUtil.weekdayCN(of: dateObj), myDay.shift, ev.result, ev.eligible ? nil : (ev.reason ?? "这天加不了班（禁令）")))
         }
         return out
     }
 
-    /// 某天还班能加的班（还班日那天我上的班的选项）。
-    private func paybackShiftOptions(date: String) -> [(shift: String, result: String)] {
-        paybackCandidates.first { $0.date == date }?.options ?? []
-    }
-
-    /// 选中还班日后，我那天变成的班。
-    private var selectedPaybackResult: String? {
-        guard let payback = swapPayback, let shift = swapPaybackShift else { return nil }
-        return paybackShiftOptions(date: payback).first { $0.shift == shift }?.result
-    }
-
-    /// 调班（1.2.7.001 第 25 条）：只改自己的日历。
-    /// 第 1 步：把这天改成哪个班（日/中/早/休，按我自己的日程校验）；
-    /// 第 2 步：还班日（本月任意一天 + 那天我上的班，也可以先不填）；
-    /// 备注写跟谁换的（只是一个备注，不联动对方）；保存前预览自己的日历。
+    /// 调班（1.2.9.001 第 31 条：空间那套，配对互换）。
+    /// 第 1 步：选哪个班替我上这天（我这天休息，对方那天变成组合班）；
+    /// 第 2 步：选还班日（本月任意一天，也可以先不填，待还班）；
+    /// 第 3 步：预览两边（替班日我和对方、还班日我和对方），保存。
+    /// 只写我自己的记录，不动对方账号（老爷 2026-11-26 08:59 定）。
     private var swapFlow: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("调班")
+            Text("调班（和别的班换）")
                 .font(.headline)
             if shownDay.onLeave == true {
                 Text("这天已请假，要调班先取消请假。")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
-            } else {
-                Text("给 \(shownDay.date) 调班：我这天是 \(shownDay.shift)（\(ShiftStyle.timeRange(for: shownDay.shift))）。调班只改自己的日历——把这天改成要换的班，再挑一天还班；还班日也可以先空着，以后再定。")
+            } else if shownDay.shift == "休息" {
+                Text("这天我休息，没有班可调。")
                     .font(.subheadline)
-                Text("第 1 步 · 把这天改成哪个班")
+                    .foregroundColor(.secondary)
+            } else {
+                Text("我这天上 \(shownDay.shift)（\(ShiftStyle.timeRange(for: shownDay.shift))），调班后我这天休息。选一个班替我上这天的班：")
+                    .font(.subheadline)
+                Text("第 1 步 · 哪个班替我上这天")
                     .font(.subheadline).bold()
-                ForEach(swapShiftOptions, id: \.shift) { opt in
-                    Button {
-                        swapNewShift = opt.shift
-                        swapPayback = nil
-                        swapPaybackShift = nil
-                        swapLater = false
-                        errorText = nil
-                    } label: {
-                        HStack {
-                            Text(opt.shift)
-                                .font(.headline)
-                            Spacer()
-                            Text(opt.eligible ? "可以" : (opt.reason ?? "不行"))
-                                .font(.subheadline)
-                                .foregroundColor(opt.eligible ? .green : .secondary)
+                if teamsRange == nil && teamsLoading {
+                    ProgressView("正在读其他班组排班…")
+                } else {
+                    ForEach(swapPartnerCandidates, id: \.team) { c in
+                        candidateCard(team: c.team, ev: c.ev, selected: swapPartner == c.team, resultLabel: "调完他这天") {
+                            swapPartner = c.team
+                            swapPartnerShift = c.ev.result
+                            errorText = nil
                         }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(12)
-                        .background(swapNewShift == opt.shift ? Color.accentColor.opacity(0.12) : Color(.systemBackground))
-                        .cornerRadius(10)
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(swapNewShift == opt.shift ? Color.accentColor : Color.clear, lineWidth: 1.5))
-                        .opacity(opt.eligible ? 1 : 0.6)
                     }
-                    .buttonStyle(.plain)
-                    .disabled(!opt.eligible)
                 }
-                if let newShift = swapNewShift {
+                if let partner = swapPartner, let pShift = swapPartnerShift {
+                    Text("\(partner)班替我上这天：他那天上 \(pShift)（\(ShiftStyle.timeRange(for: pShift))）；我这天休息。")
+                        .font(.subheadline)
                     Text("第 2 步 · 还班日（本月任意一天，也可以以后再定）")
                         .font(.subheadline).bold()
                     Button {
@@ -875,7 +815,7 @@ struct DayDetailView: View {
                             Text("还班日先不填 · 以后再定")
                                 .font(.subheadline).bold()
                                 .foregroundColor(.primary)
-                            Text("先把这天改了，这条记成「待还班」；过几天再到当天详情里补填还班日，一直不还就转为请假。")
+                            Text("先把这天调了，这条记成「待还班」；过几天再到当天详情里补填还班日，一直不还就转为请假。")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -888,28 +828,19 @@ struct DayDetailView: View {
                     .buttonStyle(.plain)
                     ScrollView {
                         VStack(spacing: 0) {
-                            ForEach(paybackCandidates, id: \.date) { r in
-                                paybackRow(r)
+                            ForEach(paybackCandidates(addedShift: shownDay.shift), id: \.date) { r in
+                                paybackRow(r, isSelected: swapPayback == r.date) {
+                                    swapLater = false
+                                    swapPayback = r.date
+                                    swapPaybackShift = r.result
+                                }
                             }
                         }
                     }
                     .frame(maxHeight: 320)
-                    // 选了还班日：那天我上哪个班（只显示那天能加的班）。
-                    if let payback = swapPayback, !paybackShiftOptions(date: payback).isEmpty {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Text("还班日 \(payback) 那天我上")
-                                .font(.subheadline).bold()
-                            Picker("还班日那天我上", selection: $swapPaybackShift) {
-                                ForEach(paybackShiftOptions(date: payback), id: \.shift) { opt in
-                                    Text("\(opt.shift)（加完 \(opt.result)）").tag(opt.shift as String?)
-                                }
-                            }
-                            .pickerStyle(.segmented)
-                        }
-                    }
-                    // 预览自己的日历：保存前先看清楚替班日与还班日各变成什么。
-                    swapPreview(newShift: newShift)
-                    TextField("备注（可选，跟谁换的）", text: $swapNote)
+                    // 预览两边：保存前先看清楚替班日与还班日各变成什么。
+                    swapPreview(partner: partner, partnerShift: pShift)
+                    TextField("备注（可选）", text: $swapNote)
                         .textFieldStyle(.roundedBorder)
                     Button {
                         Task { await submitSwap() }
@@ -922,13 +853,14 @@ struct DayDetailView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .frame(maxWidth: .infinity)
-                    .disabled(swapSaving || swapNewShift == nil || (!swapLater && (swapPayback == nil || swapPaybackShift == nil)))
+                    .disabled(swapSaving || (!swapLater && swapPayback == nil))
                 }
             }
         }
         .padding(AppStyle.cardPadding)
         .background(Color(.secondarySystemBackground))
         .cornerRadius(AppStyle.cardRadius)
+        .task { await loadTeamsRange() }
     }
 
     private func candidateCard(team: String, ev: CoverEval, selected: Bool, resultLabel: String, onPick: @escaping () -> Void) -> some View {
@@ -970,13 +902,9 @@ struct DayDetailView: View {
         .disabled(!ev.eligible)
     }
 
-    private func paybackRow(_ r: (date: String, weekday: String, myShift: String, options: [(shift: String, result: String)], reason: String?)) -> some View {
-        Button {
-            swapLater = false
-            swapPayback = r.date
-            // 默认选第一个能加的班（用户可以在下面改）。
-            swapPaybackShift = r.options.first?.shift
-        } label: {
+    /// 还班日的一行：那天我本来上什么、还班后变成什么（要还的班是定的，只有一个结果）。
+    private func paybackRow(_ r: (date: String, weekday: String, myShift: String, result: String?, reason: String?), isSelected: Bool, onSelect: @escaping () -> Void) -> some View {
+        Button(action: onSelect) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(r.date) \(r.weekday)")
@@ -984,43 +912,43 @@ struct DayDetailView: View {
                     Text("我本来 \(r.myShift)")
                         .font(.caption)
                         .foregroundColor(.secondary)
-                    if r.options.isEmpty {
-                        Text(r.reason ?? "不行")
+                    if let result = r.result {
+                        Text("还班后我上 \(result)（\(ShiftStyle.timeRange(for: result))）")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     } else {
-                        Text("能加：\(r.options.map { "\($0.shift)（加完 \($0.result)）" }.joined(separator: " / "))")
+                        Text(r.reason ?? "不行")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
                 }
                 Spacer()
-                Text(r.options.isEmpty ? "不行" : "可以")
+                Text(r.result == nil ? "不行" : "可以")
                     .font(.caption).bold()
-                    .foregroundColor(r.options.isEmpty ? .secondary : .green)
+                    .foregroundColor(r.result == nil ? .secondary : .green)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.vertical, 8)
             .padding(.horizontal, 12)
-            .background(swapPayback == r.date ? Color.accentColor.opacity(0.12) : Color.clear)
+            .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
             .cornerRadius(8)
         }
         .buttonStyle(.plain)
-        .disabled(r.options.isEmpty)
+        .disabled(r.result == nil)
     }
 
-    /// 保存前预览（只预览自己的日历前后变化，不预览对方）。
-    private func swapPreview(newShift: String) -> some View {
+    /// 保存前预览（两边都预览：替班日我和对方、还班日我和对方）。
+    private func swapPreview(partner: String, partnerShift: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("保存前预览")
                 .font(.subheadline).bold()
-            Text("替班日 \(shownDay.date)：\(shownDay.shift) → \(newShift)（\(ShiftStyle.timeRange(for: newShift))）。")
+            Text("替班日 \(shownDay.date)：我 \(shownDay.shift) → 休息；\(partner)班替我上 \(partnerShift)（\(ShiftStyle.timeRange(for: partnerShift))）。")
                 .font(.subheadline)
             if swapLater {
                 Text("还班日：还没定。先这样保存，这条记成「待还班」；以后在当天详情里补填还班日，一直不还就转为请假（这天按请假算）。")
                     .font(.subheadline)
-            } else if let payback = swapPayback, let pbShift = swapPaybackShift, let result = selectedPaybackResult {
-                Text("还班日 \(payback)：我本来 \(myDayOn(payback)?.shift ?? "")，那天上 \(pbShift)，变成 \(result)（\(ShiftStyle.timeRange(for: pbShift))）。")
+            } else if let payback = swapPayback, let pbShift = swapPaybackShift {
+                Text("还班日 \(payback)：我 \(myDayOn(payback)?.shift ?? "") → \(pbShift)（\(ShiftStyle.timeRange(for: pbShift))）；\(partner)班那天休息。")
                     .font(.subheadline)
             } else {
                 Text("还班日：还没选。选一天当还班日，或者点「还班日先不填」。")
@@ -1033,67 +961,52 @@ struct DayDetailView: View {
         .cornerRadius(10)
     }
 
-    /// 补填还班日（1.2.7.001 第 25 条）：只看自己的日程。
-    /// 选一天 + 那天我上的班（只显示那天能加的班）。
+    /// 待还班那次调班里、我被替掉的班（还班日要还的就是这个班）：
+    /// 对方那天最终上的班 partnerShift，去掉对方自己那天的班。
+    /// 对方自己那天的班取派生日的 baseShift（对方没有自己的调班记录时就是他的班；
+    /// 对方要是有自己的记录，这里的数可能不准，服务端提交时还会再验、报错会原样显示）。
+    private var coveredShift: String? {
+        guard let partner = shownDay.partner, let pShift = shownDay.partnerShift else { return nil }
+        let own = teamDay(partner, shownDay.date)?.baseShift
+            ?? ScheduleCalculator.baseShift(team: partner, date: DateUtil.date(from: shownDay.date) ?? Date(), rotation: store.rotation)
+        return ShiftStyle.subtract(combo: pShift, own: own)
+    }
+
+    /// 补填还班日（1.2.9.001 第 31 条）：只选一天。
+    /// 那天我上的班是定的——我自己那天的班 + 那次调班里我被替掉的班，并成组合班，不用再选。
     private var fillPaybackFlow: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("补填还班日")
                 .font(.headline)
-            Text("给 \(shownDay.date) 那次调班补一个还班日（本月任意一天）：那天我上哪个班，由我自己选。")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-            ScrollView {
-                VStack(spacing: 0) {
-                    ForEach(paybackCandidates, id: \.date) { r in
-                        Button {
-                            fillPayback = r.date
-                            fillPaybackShift = r.options.first?.shift
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("\(r.date) \(r.weekday)")
-                                        .font(.subheadline)
-                                    Text("我本来 \(r.myShift)")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    if r.options.isEmpty {
-                                        Text(r.reason ?? "不行")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    } else {
-                                        Text("能加：\(r.options.map { "\($0.shift)（加完 \($0.result)）" }.joined(separator: " / "))")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                }
-                                Spacer()
-                                Text(r.options.isEmpty ? "不行" : "可以")
-                                    .font(.caption).bold()
-                                    .foregroundColor(r.options.isEmpty ? .secondary : .green)
-                            }
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 8)
-                            .padding(.horizontal, 12)
-                            .background(fillPayback == r.date ? Color.accentColor.opacity(0.12) : Color.clear)
-                            .cornerRadius(8)
-                        }
-                        .buttonStyle(.plain)
-                        .disabled(r.options.isEmpty)
-                    }
-                }
+            if let partner = shownDay.partner, let covered = coveredShift {
+                Text("给 \(shownDay.date) 那次调班补一个还班日（本月任意一天）：那天我替 \(partner)班上他那天的班（那次调班里我被替掉的是 \(covered)）。")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+            } else {
+                Text("给 \(shownDay.date) 那次调班补一个还班日（本月任意一天）。")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
             }
-            .frame(maxHeight: 320)
-            if let payback = fillPayback, !paybackShiftOptions(date: payback).isEmpty {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("还班日 \(payback) 那天我上")
-                        .font(.subheadline).bold()
-                    Picker("还班日那天我上", selection: $fillPaybackShift) {
-                        ForEach(paybackShiftOptions(date: payback), id: \.shift) { opt in
-                            Text("\(opt.shift)（加完 \(opt.result)）").tag(opt.shift as String?)
+            if let covered = coveredShift {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(paybackCandidates(addedShift: covered), id: \.date) { r in
+                            paybackRow(r, isSelected: fillPayback == r.date) {
+                                fillPayback = r.date
+                                fillPaybackShift = r.result
+                            }
                         }
                     }
-                    .pickerStyle(.segmented)
                 }
+                .frame(maxHeight: 320)
+                if let payback = fillPayback, let result = fillPaybackShift {
+                    Text("还班日 \(payback)：我那天上 \(result)（\(ShiftStyle.timeRange(for: result))）。")
+                        .font(.subheadline)
+                }
+            } else {
+                Text("这条调班记录不完整（没有对方班组），补不上还班日。")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
             }
             Button {
                 Task { await submitFillPayback() }
@@ -1107,6 +1020,7 @@ struct DayDetailView: View {
         .padding(AppStyle.cardPadding)
         .background(Color(.secondarySystemBackground))
         .cornerRadius(AppStyle.cardRadius)
+        .task { await loadTeamsRange() }
     }
 
     // MARK: 请假
@@ -1197,14 +1111,24 @@ struct DayDetailView: View {
     }
 
     /// 请假顶岗的候选：除我班外的三个班，各自替我上我这天的班行不行。
-    private var leaveCoverCandidates: [(team: String, ev: CoverEval)] {
-        let myShift = shownDay.shift
-        return TeamInfo.allTeams.filter { $0 != store.myTeam }.map { team in
+    /// 哪个班能替我上这天（调班第 1 步与请假顶岗共用）：对方那天是派生出来的
+    /// （teamsRange：我的调班记录已算进去），加上我这天的班（addedShift）后变成什么、行不行。
+    private func coverCandidates(addedShift: String) -> [(team: String, ev: CoverEval)] {
+        TeamInfo.allTeams.filter { $0 != store.myTeam }.map { team in
             let own = teamDay(team, shownDay.date)
             let prev = prevDayOf(team: team, date: shownDay.date)
             let next = nextDayOf(team: team, date: shownDay.date)
-            return (team, evalCover(ownDay: own, prevDay: prev, nextDay: next, addedShift: myShift))
+            return (team, evalCover(ownDay: own, prevDay: prev, nextDay: next, addedShift: addedShift))
         }
+    }
+
+    private var leaveCoverCandidates: [(team: String, ev: CoverEval)] {
+        coverCandidates(addedShift: shownDay.shift)
+    }
+
+    /// 调班第 1 步的候选：哪个班替我上这天（我这天休息，对方那天变成组合班）。
+    private var swapPartnerCandidates: [(team: String, ev: CoverEval)] {
+        coverCandidates(addedShift: shownDay.shift)
     }
 
     private var leaveRangeForm: some View {
@@ -1281,7 +1205,7 @@ struct DayDetailView: View {
     // MARK: 提交
 
     private func submitSwap() async {
-        guard let newShift = swapNewShift else { return }
+        guard let partner = swapPartner, let pShift = swapPartnerShift else { return }
         errorText = nil
         doneMessage = nil
         swapSaving = true
@@ -1289,12 +1213,13 @@ struct DayDetailView: View {
         do {
             let payback = swapLater ? nil : swapPayback
             let pbShift = swapLater ? nil : swapPaybackShift
-            _ = try await store.submitSwap(date: shownDay.date, myShift: newShift,
+            _ = try await store.submitSwap(date: shownDay.date, partner: partner, partnerShift: pShift,
                                            note: swapNote.isEmpty ? nil : swapNote,
                                            paybackDate: payback, paybackMyShift: pbShift)
             doneMessage = payback == nil ? "调班已保存（待还班，以后再补还班日）" : "调班已保存"
             showSwapFlow = false
-            swapNewShift = nil
+            swapPartner = nil
+            swapPartnerShift = nil
             swapPayback = nil
             swapPaybackShift = nil
             swapLater = false
