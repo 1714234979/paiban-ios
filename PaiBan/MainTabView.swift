@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit
 
 /// 主界面：三个 Tab（排班 / 工资 / 设置），各带自己的 NavigationStack。
 /// 今日 Tab 已删；工资页标题叫「预估工资」。
@@ -21,6 +20,13 @@ import UIKit
 /// 三个 NavigationStack 都活着（各页导航状态不丢），只显示选中的那一个，
 /// 底下只留悬浮胶囊这一条栏。震动改共享一个震动器，点按和滑动都要震。
 /// 胶囊尺寸：左右留边再收窄（栏做长一点）、底部空隙再加大（往上靠一点点）。
+///
+/// 1.3.0.004（第 46 条再修，老爷 2026-11-26 发音乐 App 视频亲口纠）：
+/// 003 的胶囊还是太宽、太高，看着像回到了以前那条。照视频（Apple Music 的
+/// 悬浮胶囊底栏）改：底栏位置跟视频里一样，浮在底边上面那个高度——胶囊底离
+/// 屏幕底边约 23pt（003 是 50pt，往下挪约 27pt）；三个标签，胶囊按三个标签
+/// 的宽度做，适当做短一点（限宽 300pt 居中），不照视频四个标签的宽度做。
+/// 震动不要了，点按和滑动都不震（003 的共享震动器整段删掉）。
 struct MainTabView: View {
     @EnvironmentObject private var store: AppStore
 
@@ -81,8 +87,9 @@ struct MainTabView: View {
                 .opacity(store.selectedTab == 2 ? 1 : 0)
                 .allowsHitTesting(store.selectedTab == 2)
         }
-        // 悬浮胶囊玻璃栏：左右留边再收窄（栏做长一点）、底部空隙再加大（往上靠一点点）；
-        // safeAreaInset 照样占位，内容不会被栏挡住。
+        // 悬浮胶囊玻璃栏：按三个标签的宽度做短一点（限宽 300pt 居中），
+        // 位置照视频——胶囊底离屏幕底边约 23pt（003 是 50pt，往下挪约 27pt，
+        // 用 offset 下移，safeAreaInset 照样占位，内容不会被栏挡住）。
         .safeAreaInset(edge: .bottom) {
             GlassTabBar(
                 items: tabItems,
@@ -90,8 +97,9 @@ struct MainTabView: View {
                 onSwipeLeft: { switchTab(step: 1) },
                 onSwipeRight: { switchTab(step: -1) }
             )
-            .padding(.horizontal, 12)
+            .frame(maxWidth: 300)
             .padding(.bottom, 16)
+            .offset(y: 27)
         }
         // 没登录时点小组件进来的深链：登录后进主界面再跳（store.handleDeepLink 先记下来）。
         .task {
@@ -115,28 +123,15 @@ struct MainTabView: View {
               let index = tabs.firstIndex(of: store.selectedTab) else { return }
         let next = tabs[(index + step + tabs.count) % tabs.count]
         guard next != store.selectedTab else { return }
-        Haptics.tabSwitch()
         withAnimation(.easeInOut(duration: 0.2)) {
             store.selectedTab = next
         }
     }
 }
 
-/// 震动（1.3.0.001，第 46 条；1.3.0.003 改共享震动器）：
-/// 点胶囊切换页面要震，栏上左右滑切换页面也要震，都是轻震。
-/// iOS 16 部署目标，用 UIKit 的 UIImpactFeedbackGenerator（sensoryFeedback 要 iOS 17）。
-/// 共享一个震动器：每次新建一个、震完就扔，Taptic Engine 没热起来、震动发不出来；
-/// 常驻一个，prepare() 后再震，点按和滑动都稳。
-private enum Haptics {
-    private static let generator = UIImpactFeedbackGenerator(style: .light)
-    static func tabSwitch() {
-        generator.prepare()
-        generator.impactOccurred()
-    }
-}
-
 /// 悬浮胶囊切换栏（1.3.0.002，第 46 条修订）：圆角胶囊 + 系统玻璃底，浮在内容上面。
-/// 不贴底、不满宽、没有顶部分隔线；点按钮切换；在栏上左右滑动也能切换（来回都行），滑动时震一下。
+/// 不贴底、不满宽、没有顶部分隔线；点按钮切换；在栏上左右滑动也能切换（来回都行）。
+/// 1.3.0.004 起不震动了（老爷亲口定：震动不要），点按和滑动都只切页、不震。
 /// 选中态走 AccentColor 资产（浅色深 navy、深色亮蓝，1.2.8.002 已改好）；
 /// 未选中态用 secondary，跟着深浅色走。
 private struct GlassTabBar: View {
@@ -150,7 +145,6 @@ private struct GlassTabBar: View {
             ForEach(items, id: \.tag) { item in
                 Button {
                     guard item.tag != selectedTab else { return }
-                    Haptics.tabSwitch()
                     withAnimation(.easeInOut(duration: 0.2)) {
                         selectedTab = item.tag
                     }
