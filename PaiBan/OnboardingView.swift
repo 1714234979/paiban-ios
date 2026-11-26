@@ -473,6 +473,8 @@ struct PayGuideView: View {
             HStack {
                 Text("入职时间")
                 Spacer()
+                // 38 条：同设置页——这行太挤，年份的值会被压折成两行；藏掉和「年」/「月」
+                // 重复的「年份」/「月份」标签、只留值，再加 fixedSize，横着一行显示。
                 Picker("年份", selection: $hireYear) {
                     ForEach(1990...Calendar.current.component(.year, from: Date()), id: \.self) { y in
                         // 36 条：同设置页——Text("\(y)") 是 LocalizedStringKey，2018 会变 2,018；verbatim 拼纯数字。
@@ -480,6 +482,8 @@ struct PayGuideView: View {
                     }
                 }
                 .pickerStyle(.menu)
+                .labelsHidden()
+                .fixedSize(horizontal: true, vertical: false)
                 Text("年")
                 Picker("月份", selection: $hireMonth) {
                     ForEach(1...12, id: \.self) { m in
@@ -487,6 +491,8 @@ struct PayGuideView: View {
                     }
                 }
                 .pickerStyle(.menu)
+                .labelsHidden()
+                .fixedSize(horizontal: true, vertical: false)
                 Text("月")
             }
             HStack {

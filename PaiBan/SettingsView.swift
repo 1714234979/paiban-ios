@@ -760,6 +760,10 @@ struct PaySettingsView: View {
                 HStack {
                     Text("入职时间")
                     Spacer()
+                    // 38 条：这行太挤（入职时间 + 年份 Picker + 年 + 月份 Picker + 月），
+                    // 年份的值被压到只剩两位数宽、折成「20」/「18」两行。Picker 的「年份」/
+                    // 「月份」标签和后面的「年」/「月」重复，藏掉标签、只留值（2018 年 10 月），
+                    // 再加 fixedSize 让按钮按理想宽度显示、不参与压缩，年份就横着一行了。
                     Picker("年份", selection: $hireYear) {
                         ForEach(1990...Calendar.current.component(.year, from: Date()), id: \.self) { y in
                             // 36 条：Text("\(y)") 是 LocalizedStringKey，整数按本地格式分组，
@@ -768,6 +772,8 @@ struct PaySettingsView: View {
                         }
                     }
                     .pickerStyle(.menu)
+                    .labelsHidden()
+                    .fixedSize(horizontal: true, vertical: false)
                     Text("年")
                     Picker("月份", selection: $hireMonth) {
                         ForEach(1...12, id: \.self) { m in
@@ -775,6 +781,8 @@ struct PaySettingsView: View {
                         }
                     }
                     .pickerStyle(.menu)
+                    .labelsHidden()
+                    .fixedSize(horizontal: true, vertical: false)
                     Text("月")
                 }
                 HStack {
@@ -1040,6 +1048,12 @@ struct UsageGuideView: View {
 struct ChangelogView: View {
     var body: some View {
         Form {
+            Section {
+                changelog(version: "1.2.9.003（内测）", items: [
+                    "入职时间年份不再带逗号：工资设置 → 入职时间的年份滚轮以前显示 2,012、2,018（带千分位逗号），现在显示 2012、2018 这种纯数字；日历显示设置预览和分享班表里的年份也一起改了。金额里的千分位逗号不受影响",
+                    "入职时间年份不再折行：工资设置 → 入职时间的年份以前窄得折成「20」/「18」两行竖着显示，现在横着一行显示（入职时间 2018 年 10 月）；工资引导里入职时间那一行也一起改了",
+                ])
+            }
             Section {
                 changelog(version: "1.2.9.002（内测）", items: [
                     "入职时间年份不再带逗号：工资设置 → 入职时间的年份滚轮以前显示 2,012、2,018（带千分位逗号），现在显示 2012、2018 这种纯数字；日历显示设置预览和分享班表里的年份也一起改了。金额里的千分位逗号不受影响",

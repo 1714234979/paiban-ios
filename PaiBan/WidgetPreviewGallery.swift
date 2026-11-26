@@ -256,12 +256,15 @@ private struct AppPagePreview: View {
 /// 滚轮里 2016–2020 都是纯数字即算过——2012 与 2018 是同一批标签。
 private struct HireYearGalleryPreview: View {
     @State private var hireYear = 2018
+    @State private var hireMonth = 10
     private var years: [Int] { Array(1990...Calendar.current.component(.year, from: Date())) }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section {
+                    // 38 条：和工资设置页真行同结构（年份 + 月份两个 Picker 都在），
+                    // 验拥挤那行里年份是不是横着一行纯数字。
                     HStack {
                         Text("入职时间")
                         Spacer()
@@ -271,12 +274,23 @@ private struct HireYearGalleryPreview: View {
                             }
                         }
                         .pickerStyle(.menu)
+                        .labelsHidden()
+                        .fixedSize(horizontal: true, vertical: false)
                         Text("年")
+                        Picker("月份", selection: $hireMonth) {
+                            ForEach(1...12, id: \.self) { m in
+                                Text(verbatim: "\(m)").tag(m)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .fixedSize(horizontal: true, vertical: false)
+                        Text("月")
                     }
                 } header: {
-                    Text("工资设置 → 入职时间（第 36 条）")
+                    Text("工资设置 → 入职时间（第 36、38 条）")
                 } footer: {
-                    Text("年份显示纯数字（2012、2018），不带千分位逗号。")
+                    Text("年份显示纯数字（2012、2018），不带千分位逗号；横着一行，不折行。")
                 }
                 Section("年份滚轮") {
                     Picker("年份", selection: $hireYear) {
