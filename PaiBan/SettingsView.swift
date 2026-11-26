@@ -346,7 +346,12 @@ struct SettingsView: View {
             let wasOn = reminderOn
             let ok = await ShiftReminder.ensurePermissionAndSchedule(store: store)
             reminderOn = ShiftReminder.isEnabled
-            if wasOn && !ok { showReminderDeniedAlert = true }
+            // 只有真正被拒才弹提示：画廊模式跳过请求时状态还是未决定，
+            // 另有弹窗在等用户点时也一样，别当成被拒。
+            if wasOn && !ok {
+                let status = await ShiftReminder.authorizationStatus()
+                if status == .denied { showReminderDeniedAlert = true }
+            }
         }
     }
 
