@@ -52,10 +52,9 @@ struct CalendarView: View {
                 recordsSection
             }
             .padding(.horizontal, 16)
-            // 1.3.0.007：底栏回到满宽栏（safeAreaInset 挂底边，008 改成液态玻璃），
-            // 栏本来就占位、内容在栏上面结束，120pt（004–006 为悬浮胶囊留的）不用了，
-            // 改回 24pt。
-            .padding(.bottom, 24)
+            // 1.3.0.009：底栏改回悬浮胶囊（overlay，006 那版），三页底部留白改回 120pt
+            // （004–006 为悬浮胶囊留的）——滑到底时最后的内容完整露在胶囊上面。
+            .padding(.bottom, 120)
         }
         .background(Color(.systemGroupedBackground))
         .toolbar {

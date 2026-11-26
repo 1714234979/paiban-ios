@@ -104,6 +104,19 @@ import SwiftUI
 /// 滑动还是 006 的 .highPriorityGesture()，不震动，三页 24pt 底部留白不变。
 /// 更新弹窗修（007 的 installedChannel）和刷新率适配（006 的 RefreshRateBoost）都在，
 /// 008 只改底栏这一项。
+///
+/// 1.3.0.009（第 46 条再修，老爷 2026-11-26 18:25 亲口纠：「我要胶囊的那种啊
+/// 然后加液态玻璃」）：008 理解错了——他要的是**悬浮胶囊**（不是满宽栏），上面
+/// 加液态玻璃。006 那个胶囊的底层（磨砂+玻璃）他是认的（17:33 他亲口说「底层是
+/// 对的」），错的是上层那个选中小药丸（浅色圆角底块、把玻璃盖死了）。这次按 006
+/// 的胶囊、去掉选中小药丸：悬浮胶囊（底离屏幕底边约 23pt、限宽 300pt 居中、内容
+/// 从胶囊下面滑过去的 overlay 布局），胶囊用 .regularMaterial 打底 + iOS 26+
+/// .glassEffect(.regular, in: Capsule())（006 那个 capsuleGlass 原样）；选中态
+/// 绝对不要选中小药丸、不要选中底块——选中就是蓝色、没选中就是灰色，只变颜色，
+/// 什么都不盖在玻璃上。滑动还是 006 的 .highPriorityGesture()，不震动；三页
+/// 底部留白回到 006 的 120pt（悬浮胶囊是 overlay，内容滑到底要离胶囊够远）。
+/// 更新弹窗修（007 的 installedChannel）和刷新率适配（006 的 RefreshRateBoost）都在，
+/// 009 只改底栏这一项。
 struct MainTabView: View {
     @EnvironmentObject private var store: AppStore
 
@@ -150,31 +163,36 @@ struct MainTabView: View {
     var body: some View {
         // 不用 TabView：原生 Tab 栏在 iOS 27 上藏不掉，底下会多露一条旧底栏，
         // 还会抢点按和震动。手动切 Tab：三页都活着，只显示选中的那一页。
-        // 1.3.0.008：底栏改成液态玻璃满宽栏（GlassTabBar：regularMaterial 打底 +
-        // iOS 26+ .glassEffect(.regular) 矩形罩面），safeAreaInset 挂在底边，
-        // 内容在栏上面结束；不要悬浮胶囊、不要选中底块。
-        ZStack {
-            tabPage(tag: 0)
-                .opacity(store.selectedTab == 0 ? 1 : 0)
-                .allowsHitTesting(store.selectedTab == 0)
-            if store.payAccess {
-                tabPage(tag: 1)
-                    .opacity(store.selectedTab == 1 ? 1 : 0)
-                    .allowsHitTesting(store.selectedTab == 1)
+        // 1.3.0.009：底栏改回悬浮胶囊（006 那版，去掉选中小药丸）——overlay 悬浮：
+        // 玻璃要看得见，底下必须有内容滑过去；VStack 底部固定时内容永远到不了胶囊
+        // 下面，胶囊底下只有一色的页面底色，磨砂+玻璃糊一色底色就跟不透明实色一个样。
+        // overlay 时内容竖滚会从胶囊底下经过，玻璃把字糊成色块、看不清字，同时
+        // 看上去是玻璃。底边干净靠三页各自的 120pt 底部留白（滑到底时最后的内容
+        // 完整露在胶囊上面、不到屏幕最底边）。
+        ZStack(alignment: .bottom) {
+            ZStack {
+                tabPage(tag: 0)
+                    .opacity(store.selectedTab == 0 ? 1 : 0)
+                    .allowsHitTesting(store.selectedTab == 0)
+                if store.payAccess {
+                    tabPage(tag: 1)
+                        .opacity(store.selectedTab == 1 ? 1 : 0)
+                        .allowsHitTesting(store.selectedTab == 1)
+                }
+                tabPage(tag: 2)
+                    .opacity(store.selectedTab == 2 ? 1 : 0)
+                    .allowsHitTesting(store.selectedTab == 2)
             }
-            tabPage(tag: 2)
-                .opacity(store.selectedTab == 2 ? 1 : 0)
-                .allowsHitTesting(store.selectedTab == 2)
-        }
-        .background(Color(.systemGroupedBackground))
-        .safeAreaInset(edge: .bottom) {
-            GlassTabBar(
+            GlassCapsuleTabBar(
                 items: tabItems,
                 selectedTab: $store.selectedTab,
                 onSwipeLeft: { switchTab(step: 1) },
                 onSwipeRight: { switchTab(step: -1) }
             )
+            .frame(maxWidth: 300)
+            .padding(.bottom, 23)
         }
+        .background(Color(.systemGroupedBackground))
         // 没登录时点小组件进来的深链：登录后进主界面再跳（store.handleDeepLink 先记下来）。
         .task {
             if let tab = store.pendingDeepLinkTab {
@@ -203,17 +221,18 @@ struct MainTabView: View {
     }
 }
 
-/// 自定义玻璃切换栏（1.3.0.008，第 46 条，老爷亲口定：直接按液态玻璃重写）：
-/// 满宽一条液态玻璃栏，贴着屏幕底边；底铺 .regularMaterial（中度磨砂，滚到下面的
-/// 内容糊成色块、字读不出来），上面罩 iOS 26+ 的 .glassEffect(.regular, in: Rectangle())
-/// （Liquid Glass 的折射和亮边，满宽矩形、不是胶囊）；顶上一条细 Divider 分隔线；
-/// 三个按钮就是图标 21pt + 文字 10pt，选中 AccentColor 蓝色、没选中 secondary，
-/// 只变颜色、没有选中底块、不盖玻璃。点按钮切换；在栏上左右滑动也能切换（来回都行）。
-/// 滑动手势用 006 的 .highPriorityGesture()（001 的普通 .gesture() 会被 Button
-/// 的点按手势抢走、真机上滑不动，005 已证实）；不震动（老爷亲口定，001 的震动
-/// 不要加回来）。选中态走 AccentColor 资产（浅色深 navy、深色亮蓝，1.2.8.002 已改好）。
-/// 26 以下的手机只有磨砂底、没有 Liquid Glass 罩面（barGlass 里 #available 包着）。
-private struct GlassTabBar: View {
+/// 悬浮胶囊切换栏（1.3.0.009，按 006 的胶囊、去掉选中小药丸，第 46 条，老爷
+/// 2026-11-26 18:25 亲口定：「我要胶囊的那种啊然后加液态玻璃」）：
+/// 透明玻璃胶囊：底铺 .regularMaterial（中度磨砂，把底下内容糊成色块、字认不出来），
+/// 上面再罩 iOS 26+ 的 .glassEffect(.regular, in: Capsule())（Liquid Glass 的折射
+/// 和亮边，看上去还是玻璃、不是 005 那种实色死板）；26 以下只有磨砂底。浮在内容
+/// 上面；不贴底、不满宽、没有顶部分隔线。选中态绝对不要选中小药丸、不要选中底块——
+/// 选中就是蓝色、没选中就是灰色，只变颜色，什么都不盖在玻璃上（006 错的就是上层
+/// 那个浅色圆角底块、把玻璃盖死了，老爷 17:33 亲口说「底层是对的，上层是错的」）。
+/// 点按钮切换；在栏上左右滑动也能切换（来回都行）。滑动手势用 .highPriorityGesture()
+/// （005 的普通 .gesture() 会被 Button 的点按手势抢走、真机上滑不动）。
+/// 不震动（老爷亲口定：震动不要），点按和滑动都只切页、不震。
+private struct GlassCapsuleTabBar: View {
     let items: [(tag: Int, title: String, icon: String)]
     @Binding var selectedTab: Int
     let onSwipeLeft: () -> Void
@@ -235,22 +254,27 @@ private struct GlassTabBar: View {
                             .font(.system(size: 10))
                     }
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 7)
-                    .foregroundColor(item.tag == selectedTab ? Color.accentColor : .secondary)
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 4)
+                    // 1.3.0.009：没有选中底块——选中就是蓝色、没选中就是灰色，只变颜色，
+                    // 什么都不盖在玻璃上。006 那个浅色圆角底块（跟着选中的那个走）整段删掉。
+                    .foregroundColor(item.tag == selectedTab ? .blue : .secondary)
                 }
                 .buttonStyle(.plain)
             }
         }
-        // 1.3.0.008：液态玻璃——底铺 .regularMaterial（中度磨砂，滚到下面的内容糊成
-        // 色块、字读不出来），上面罩 iOS 26+ 的 .glassEffect(.regular, in: Rectangle())
-        // （Liquid Glass 的折射和亮边，满宽矩形、不是胶囊）。001 的 .ultraThinMaterial
-        // 太素、没有液态玻璃味儿，老爷 18:14 发 007 实机截图亲口否了（「又回到之前了」）。
-        // 26 以下只有磨砂底（barGlass 里 #available 包着）。
-        .background(.regularMaterial, ignoresSafeAreaEdges: .bottom)
-        .barGlass()
-        .overlay(alignment: .top) {
-            Divider()
-        }
+        .padding(.horizontal, 10)
+        // 1.3.0.009：透明玻璃——底铺 .regularMaterial（中度磨砂，底下内容糊成色块、
+        // 字认不出来；.thickMaterial 太实、画廊里看着像 005 的不透明实色胶囊），
+        // 上面罩 iOS 26+ 的 .glassEffect(.regular, in: Capsule())（Liquid Glass
+        // 的折射和亮边）。26 以下只有磨砂底（capsuleGlass 里 #available 包着）。
+        .background(.regularMaterial, in: Capsule())
+        .capsuleGlass()
+        .shadow(color: .black.opacity(0.15), radius: 12, x: 0, y: 4)
+        // 1.3.0.009：滑动手势用 .highPriorityGesture()（006 的修法）。005 的普通
+        // .gesture() 会被三个 Button 的点按手势抢走触摸，真机上左右滑切页滑不动。
+        // 高优先手势让拖动先于 Button 点按被认出来：点按（没位移）时拖动认不出来、
+        // Button 照样能点；左右滑（位移超 12pt）时拖动先认出来、切页。阈值不变。
         .highPriorityGesture(
             DragGesture(minimumDistance: 12)
                 .onEnded { value in
@@ -267,14 +291,14 @@ private struct GlassTabBar: View {
     }
 }
 
-/// 底栏液态玻璃（1.3.0.008，第 46 条）：iOS 26+ 才罩 .glassEffect(.regular, in: Rectangle())
-/// （Liquid Glass，26+ API，满宽矩形）；26 以下什么都不加，只留底下的 .regularMaterial
-/// 磨砂底（磨砂本身 iOS 15+ 就有，部署目标 iOS 16 能用）。006 的 capsuleGlass 原样换形状。
+/// 胶囊玻璃（1.3.0.009，第 46 条，006 原样）：iOS 26+ 才罩 .glassEffect(.regular,
+/// in: Capsule())（Liquid Glass，26+ API）；26 以下什么都不加，只留底下的
+/// .regularMaterial 磨砂底（磨砂本身 iOS 15+ 就有，部署目标 iOS 16 能用）。
 private extension View {
     @ViewBuilder
-    func barGlass() -> some View {
+    func capsuleGlass() -> some View {
         if #available(iOS 26.0, *) {
-            self.glassEffect(.regular, in: Rectangle())
+            self.glassEffect(.regular, in: Capsule())
         } else {
             self
         }
