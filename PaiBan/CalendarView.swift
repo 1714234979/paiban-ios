@@ -582,7 +582,7 @@ struct MonthPageView: View {
     ///（那份只含实际上班的法定日，是工资口径，底部「三薪 X 天」仍用它，不动）。
     /// 法定表是全队的事实，看哪个班都标；也不依赖工资输入，输入没到齐也照常标。
     private var tripleDates: Set<String> {
-        Set(monthData.days.map(\.date).filter { PayCalc.isStatutoryDay($0) })
+        Set((monthData.days ?? []).map(\.date).filter { PayCalc.isStatutoryDay($0) })
     }
 
     private var monthData: MonthSchedule {

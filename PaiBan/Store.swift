@@ -222,7 +222,7 @@ final class AppStore: ObservableObject {
             // 直接弹系统原生权限弹窗（只弹一次）；拿到了就按缓存的排班把未来 7 天排上。
             // 不等后台同步（网络慢/断网时也不耽误弹）；后台同步的 refreshAll 里还会再调一次，
             // 权限已定就只重排，不重复弹。
-            Task { await ShiftReminder.ensurePermissionAndSchedule(store: self) }
+            Task { _ = await ShiftReminder.ensurePermissionAndSchedule(store: self) }
             Task { await backgroundSyncAfterLaunch() }
             return
         }
@@ -550,7 +550,7 @@ final class AppStore: ObservableObject {
         // 1.2.9.001（第 35 条）：排班变了，班次推送提醒重新排（未来 7 天）。
         // 提醒开着但权限还是未决定，就先弹系统权限请求（只弹一次），拿到了再排；
         // 被拒就把开关关掉——开关不能看着开、实际一条都没排。
-        await ShiftReminder.ensurePermissionAndSchedule(store: self)
+        _ = await ShiftReminder.ensurePermissionAndSchedule(store: self)
         // 1.1.4：重装恢复——登录后把账号的完整数据从云端拉回来（后台静默，不拖登录）。
         restoreFullDataFromCloud()
     }
