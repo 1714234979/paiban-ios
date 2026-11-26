@@ -117,6 +117,20 @@ import SwiftUI
 /// 底部留白回到 006 的 120pt（悬浮胶囊是 overlay，内容滑到底要离胶囊够远）。
 /// 更新弹窗修（007 的 installedChannel）和刷新率适配（006 的 RefreshRateBoost）都在，
 /// 009 只改底栏这一项。
+///
+/// 1.3.0.010（第 46 条再修，老爷 2026-11-26 18:34 发 009 实机截图亲口说：
+/// 「没有液态玻璃，我真的要生气了」——截图上胶囊是**实心白色**，一点玻璃感都没有）：
+/// 先找根因再动手。根因：009 胶囊同时挂了 .background(.regularMaterial) 和
+/// .glassEffect()——磨砂底太实、把玻璃折射全盖死了，胶囊成了实心白药丸。006 他说
+/// 「底层是对的」只是胶囊形状/位置对，玻璃折射从来就没透出来过（006 和 009 是同一套
+/// 结构，磨砂底一直在）。修法：磨砂底整个拿掉，背景 clear，**只留
+/// .glassEffect(.regular, in: Capsule())**，让玻璃直接去折射后面的内容；26 以下
+/// fallback 用 .ultraThinMaterial（只在老系统上，26+ 不走这条）。其余不动：
+/// 悬浮胶囊（底离屏幕底边约 23pt、限宽 300pt 居中、overlay 布局）、选中只变颜色
+/// （蓝色/灰色、没有小药丸）、滑动还是 006 的 .highPriorityGesture()、不震动、
+/// 三页 120pt 底部留白、更新弹窗修和刷新率适配都在，010 只改底栏玻璃这一项。
+/// 发版前必须验明白：对着彩色内容（排班页日历）看，胶囊里必须能看到底下内容糊掉的
+/// 影子和折射亮边，实心白就是没修好、不能发。
 struct MainTabView: View {
     @EnvironmentObject private var store: AppStore
 
@@ -221,11 +235,13 @@ struct MainTabView: View {
     }
 }
 
-/// 悬浮胶囊切换栏（1.3.0.009，按 006 的胶囊、去掉选中小药丸，第 46 条，老爷
-/// 2026-11-26 18:25 亲口定：「我要胶囊的那种啊然后加液态玻璃」）：
-/// 透明玻璃胶囊：底铺 .regularMaterial（中度磨砂，把底下内容糊成色块、字认不出来），
-/// 上面再罩 iOS 26+ 的 .glassEffect(.regular, in: Capsule())（Liquid Glass 的折射
-/// 和亮边，看上去还是玻璃、不是 005 那种实色死板）；26 以下只有磨砂底。浮在内容
+/// 悬浮胶囊切换栏（1.3.0.010，按 006 的胶囊、去掉选中小药丸，第 46 条，老爷
+/// 2026-11-26 18:25 亲口定：「我要胶囊的那种啊然后加液态玻璃」；010 根因修：
+/// 009 的实心白胶囊是因为同时挂了 .background(.regularMaterial) 和 .glassEffect()，
+/// 磨砂底太实、把玻璃折射全盖死了——这次磨砂底整个拿掉，背景 clear，
+/// 只留 .glassEffect(.regular, in: Capsule())，让玻璃直接折射后面的内容）：
+/// 透明玻璃胶囊：iOS 26+ 只罩 .glassEffect(.regular, in: Capsule())（Liquid Glass
+/// 的折射和亮边）；26 以下 fallback 用 .ultraThinMaterial 磨砂底。浮在内容
 /// 上面；不贴底、不满宽、没有顶部分隔线。选中态绝对不要选中小药丸、不要选中底块——
 /// 选中就是蓝色、没选中就是灰色，只变颜色，什么都不盖在玻璃上（006 错的就是上层
 /// 那个浅色圆角底块、把玻璃盖死了，老爷 17:33 亲口说「底层是对的，上层是错的」）。
@@ -264,11 +280,11 @@ private struct GlassCapsuleTabBar: View {
             }
         }
         .padding(.horizontal, 10)
-        // 1.3.0.009：透明玻璃——底铺 .regularMaterial（中度磨砂，底下内容糊成色块、
-        // 字认不出来；.thickMaterial 太实、画廊里看着像 005 的不透明实色胶囊），
-        // 上面罩 iOS 26+ 的 .glassEffect(.regular, in: Capsule())（Liquid Glass
-        // 的折射和亮边）。26 以下只有磨砂底（capsuleGlass 里 #available 包着）。
-        .background(.regularMaterial, in: Capsule())
+        // 1.3.0.010：液态玻璃根因修——009 的实心白胶囊就是这行害的：
+        // .background(.regularMaterial) 和 .glassEffect() 同时挂着，磨砂底太实、
+        // 把玻璃折射全盖死了。这次磨砂底整个拿掉，背景 clear，
+        // 只留下面那个 .capsuleGlass()（26+ 是 .glassEffect(.regular, in: Capsule())，
+        // 26 以下 fallback 用 .ultraThinMaterial）。
         .capsuleGlass()
         .shadow(color: .black.opacity(0.15), radius: 12, x: 0, y: 4)
         // 1.3.0.009：滑动手势用 .highPriorityGesture()（006 的修法）。005 的普通
@@ -291,16 +307,18 @@ private struct GlassCapsuleTabBar: View {
     }
 }
 
-/// 胶囊玻璃（1.3.0.009，第 46 条，006 原样）：iOS 26+ 才罩 .glassEffect(.regular,
-/// in: Capsule())（Liquid Glass，26+ API）；26 以下什么都不加，只留底下的
-/// .regularMaterial 磨砂底（磨砂本身 iOS 15+ 就有，部署目标 iOS 16 能用）。
+/// 胶囊玻璃（1.3.0.010，第 46 条）：iOS 26+ 只罩 .glassEffect(.regular,
+/// in: Capsule())（Liquid Glass，26+ API），背景 clear、不铺任何磨砂——
+/// 009 的教训：磨砂底（.regularMaterial）和玻璃同时挂着，磨砂太实、把玻璃折射
+/// 全盖死，胶囊成实心白药丸；26 以下 fallback 用 .ultraThinMaterial 磨砂底
+/// （磨砂本身 iOS 15+ 就有，部署目标 iOS 16 能用；只在老系统上，26+ 不走这条）。
 private extension View {
     @ViewBuilder
     func capsuleGlass() -> some View {
         if #available(iOS 26.0, *) {
             self.glassEffect(.regular, in: Capsule())
         } else {
-            self
+            self.background(.ultraThinMaterial, in: Capsule())
         }
     }
 }
