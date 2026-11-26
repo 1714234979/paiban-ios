@@ -104,11 +104,13 @@ struct TodayWidgetView: View {
                         .monospacedDigit()
                 }
                 if let money = moneyLine {
+                    // 钱那行最长是三薪日「已挣 ¥X · 预估 ¥X（三薪）」：0.7 缩不下会截成「预估 ¥3...」，
+                    // 0.5 才够（窄屏小号 + 三薪后缀 + 字号放大都 cover），仍是一行，不另加行。
                     Text(money)
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.7)
+                        .minimumScaleFactor(0.5)
                         .padding(.top, 2)
                 }
             } else if let tomorrow = tomorrowSummary {

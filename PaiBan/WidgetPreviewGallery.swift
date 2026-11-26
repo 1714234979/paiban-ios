@@ -2,7 +2,7 @@
 import SwiftUI
 
 /// 小组件截图画廊：只在 DEBUG 包里编进（Release 包没有，不会发出去）。
-/// 模拟器启动参数：--widget-preview <today|week|pay|month|lock-circular|lock-rectangular|app-calendar-dark|app-pay-dark|app-settings-dark|app-calendar-light|app-pay-light|app-settings-light|app-daydetail-dark|app-daydetail-light|app-payguide-dark|app-payguide-light|app-hireyear-light>
+/// 模拟器启动参数：--widget-preview <today|today-narrow|week|pay|month|lock-circular|lock-rectangular|app-calendar-dark|app-pay-dark|app-settings-dark|app-calendar-light|app-pay-light|app-settings-light|app-daydetail-dark|app-daydetail-light|app-payguide-dark|app-payguide-light|app-hireyear-light>
 /// 演示数据：2026-11-24 周二、B 班早班 00:00–08:00，05:23 上班中。
 /// 班次按真 8 天轮算（ScheduleCalculator），工资按基本工资 2420 口径——
 /// 不是真人实时数据，是给老爷看样子用的；真机装上后小组件读 App 里自己的排班/工资。
@@ -16,7 +16,7 @@ struct WidgetPreviewGallery: View {
             // App 页面截图（1.2.8.001）：排班 / 工资 / 设置三页 × 深 / 浅，渲染真页面。
             AppPagePreview(kind: kind)
         } else {
-            let snap = Self.demoSnapshot()
+            let snap = kind == "today-narrow" ? Self.demoSnapshotNarrow() : Self.demoSnapshot()
             let entry = Self.demoEntry(snapshot: snap)
             ZStack {
                 Color(.systemGroupedBackground).ignoresSafeArea()
@@ -55,6 +55,12 @@ struct WidgetPreviewGallery: View {
                 .frame(width: 152, height: 68)
                 .background(Color.black)
                 .cornerRadius(16)
+        case "today-narrow":
+            // 窄屏小号（155×155，最小的小号尺寸）：验钱那行最长的情况完整显示。
+            TodayWidgetView(entry: entry, snapshot: snapshot)
+                .frame(width: 155, height: 155)
+                .background(Color(.systemBackground))
+                .cornerRadius(22)
         default: // "today"
             TodayWidgetView(entry: entry, snapshot: snapshot)
                 .frame(width: 184, height: 184)
@@ -102,6 +108,18 @@ struct WidgetPreviewGallery: View {
                 taxShare: 46.36 / 21, bonusShare: 4300 / 21, dailyRate: 2420 / 21.75,
                 kinds: [.normal], fractionExtra: 0, fractionKind: .normal)
         )
+    }
+
+    /// 窄屏验钱那行：同一天、同一时刻，只把输入改成三薪日（分摊 0 + 三薪加成，
+    /// 钱那行带「（三薪）」后缀，是小号上最长的一行）。不是真数据——11 月 24 日
+    /// 本来是正常早班，只借它验窄屏下这行缩不缩得下、截不截断。
+    private static func demoSnapshotNarrow() -> WidgetSnapshot {
+        var snap = demoSnapshot()
+        snap.todayInputs = PayCalc.DayEstimateInputs(
+            baseShare: 2420 / 21, extraShare: 180 / 21, contribShare: 1014.61 / 21,
+            taxShare: 46.36 / 21, bonusShare: 0, dailyRate: 2420 / 21.75,
+            kinds: [.triple], fractionExtra: 0, fractionKind: .normal)
+        return snap
     }
 
     /// 演示 entry：2026-11-24 05:23:11，上班中（倒计时到 08:00）。
