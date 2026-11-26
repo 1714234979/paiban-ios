@@ -52,9 +52,6 @@ struct CalendarView: View {
                 recordsSection
             }
             .padding(.horizontal, 16)
-            // 1.3.0.014：底栏换回 001 式满宽栏（safeAreaInset 挂底边，栏本身占位），
-            // 底部留白 120pt → 24pt（007 同款）——内容在栏上面结束，不用再留 120pt。
-            .padding(.bottom, 24)
         }
         // 1.3.0.013：滚动指示条常显（老爷 19:24 说「没有滑动框」）——.visible 没用，
         // 画廊实拍证明它根本不画出来，改走自绘滑块 AlwaysVisibleScrollIndicator。

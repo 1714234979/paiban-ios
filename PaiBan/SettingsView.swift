@@ -296,8 +296,6 @@ struct SettingsView: View {
                 }
             }
         }
-        // 1.3.0.014：底栏换回 001 式满宽栏（safeAreaInset 挂底边，栏本身占位），
-        // List 底部那 120pt 垫底整段删掉（007 同款）——内容在栏上面结束。
         .modifier(AlwaysVisibleScrollIndicator())
         .navigationTitle("设置")
         .alert("检查更新", isPresented: updateNoticeBinding) {
@@ -1017,21 +1015,6 @@ struct AboutView: View {
                     }
                 }
             }
-            // 1.3.0.013：液态玻璃测试页入口（第 46 条）——底栏玻璃连着五版在他真机上
-            // 都显不出来，这页是诊断用的对照试验：彩色底上并排两颗胶囊，A 是 SwiftUI
-            // .glassEffect，B 是 UIKit 磨砂玻璃，看哪个透出后面的彩色。
-            Section("液态玻璃测试") {
-                NavigationLink {
-                    GlassTestView()
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("液态玻璃测试")
-                        Text("彩色底上对比两种玻璃胶囊，看哪个透出后面的颜色")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
             Section("当前版本") {
                 HStack {
                     Text("版本")
@@ -1096,6 +1079,9 @@ struct ChangelogView: View {
     var body: some View {
         Form {
             Section {
+                changelog(version: "1.3.0.015（内测）", items: [
+                    "底栏回归最开始的样子：液态玻璃这条线不做了，直接用 1.3.0 正式版那套系统自带的底栏（图标加文字就是系统默认那套），001–014 的自定义底栏（悬浮胶囊、满宽毛玻璃栏）全撤了，液态玻璃测试页也删了。三页底部留白改回原生底栏对应的值，不用再留 24pt / 120pt。其他功能都在：更新弹窗修法、滚动指示条常显、刷新率适配、公积金自填",
+                ])
                 changelog(version: "1.3.0.014（内测）", items: [
                     "底栏按老爷说的办法重做：直接用第一版 1.3.0.001 那条满宽毛玻璃栏（玻璃是对的），把顶上盖着玻璃的那条分隔线拿掉，三个标签（图标加文字）直接坐在玻璃上，中间什么都不隔；整条栏往上挪一点、离屏幕底边留 8pt，不贴底。满宽栏本来就占位，三页底部留白改回 24pt。栏上左右滑切页还在，不震动",
                     "更新弹窗也修了：012 那次打开 App 不弹更新提示，是启动那一下服务器还没解析好、检查直接跳过了，之后也没人重试；现在查之前先解析一次服务器，主界面稳了 2 秒后再查一次补上",

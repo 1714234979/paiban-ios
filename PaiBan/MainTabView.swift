@@ -1,325 +1,65 @@
 import SwiftUI
-import UIKit
+
+/// 1.3.0.015（第 46 条终点，老爷 2026-11-26 20:36 亲口定：「回归最开始的样子吧，
+/// 别做液态玻璃了」；20:38 又补：「直接用液态玻璃之前的那个版本吧」+「除了液态玻璃，
+/// 新功能全都加上」）。
+///
+/// 底栏直接用液态玻璃之前的那个版本——1.3.0 正式版（build 34）那套原生 TabView：
+/// 系统自带的底栏，图标 + 文字就是系统默认那套，不再做任何自定义底栏。
+/// 001–014 的自定义底栏（悬浮胶囊、满宽毛玻璃栏、.glassEffect、BlurView）全部撤掉，
+/// 液态玻璃测试页也一起删掉。底栏左右滑切页接不上原生 TabView——不硬接、不为它
+/// 再造一个自定义栏（老爷亲口允的）。
+///
+/// 留着的新功能（001 之后加的、跟玻璃没关系的，一个不落）：
+/// 更新弹窗修法（012 内测线读公开 beta.ios + 014 双保险：查之前现解析服务器、
+/// 主界面稳 2 秒后再查一次）、013 自绘滚动指示条（AlwaysVisibleScrollIndicator，
+/// 在本文件最下面）、006 刷新率适配（PaiBanApp.swift 的 RefreshRateBoost，10–120Hz）、
+/// 公积金自填（第 47 条，1.3.0.001 加的，Models / PayCalc / 弹窗都在）。
+/// 三页底部留白改回原生底栏对应的值——原生栏自己占位，不用再留 24pt / 120pt。
+///
 
 /// 主界面：三个 Tab（排班 / 工资 / 设置），各带自己的 NavigationStack。
 /// 今日 Tab 已删；工资页标题叫「预估工资」。
-///
-/// 1.3.0.001（第 46 条）：底部切换栏改成自定义玻璃栏——原生 Tab 栏藏掉，
-/// 底下放一条毛玻璃栏（ultraThinMaterial，透出底下内容）；点栏上的按钮切换，
-/// 在栏上左右滑动也能切换（来回都行），滑动时震一下（和钉钉一样）。
-/// 滑动只认栏上这一块，不动内容区，所以不跟排班页切月那套左右滑页打架。
-///
-/// 1.3.0.002（第 46 条修订，老爷 2026-11-26 亲口纠）：毛玻璃不是他要的玻璃，
-/// 改成悬浮胶囊 + 系统 Liquid Glass——栏不贴底、不满宽、没有顶部分隔线，
-/// 圆角胶囊浮在内容上面，离底边和左右都留一截空隙（像钉钉那个）。
-/// 玻璃用 iOS 26+ 的 .glassEffect()（系统最新的 Liquid Glass，透明度跟系统走，
-/// iOS 27 上就是它）；部署目标 iOS 16，26 以下 fallback 回 ultraThinMaterial。
-///
-/// 1.3.0.003（第 46 条再修，老爷 2026-11-26 亲口纠）：002 的旧底栏没藏住，
-/// 底下还露着原来那条（.toolbar(.hidden, for: .tabBar) 在 iOS 27 上不生效），
-/// 点旧栏会震、点胶囊不震，滑动也没震动。改法：不用 TabView 了，改手动切 Tab，
-/// 三个 NavigationStack 都活着（各页导航状态不丢），只显示选中的那一个，
-/// 底下只留悬浮胶囊这一条栏。震动改共享一个震动器，点按和滑动都要震。
-/// 胶囊尺寸：左右留边再收窄（栏做长一点）、底部空隙再加大（往上靠一点点）。
-///
-/// 1.3.0.004（第 46 条再修，老爷 2026-11-26 发音乐 App 视频亲口纠）：
-/// 003 的胶囊还是太宽、太高，看着像回到了以前那条。照视频（Apple Music 的
-/// 悬浮胶囊底栏）改：底栏位置跟视频里一样，浮在底边上面那个高度——胶囊底离
-/// 屏幕底边约 23pt（003 是 50pt，往下挪约 27pt）；三个标签，胶囊按三个标签
-/// 的宽度做，适当做短一点（限宽 300pt 居中），不照视频四个标签的宽度做。
-/// 震动不要了，点按和滑动都不震（003 的共享震动器整段删掉）。
-///
-/// 1.3.0.005（第 46 条再修，老爷 2026-11-26 发文件 App 视频 + 工资页截图亲口纠，
-/// 「还不对，按照视频里的那个弄，别糊弄我了」）：004 还是不对——工资页奖金那几行
-/// 透过玻璃胶囊露出来、重在一起；屏幕最底边（胶囊下面到屏幕底边那块）也被划了红线。
-/// 根子是胶囊是半透明 Liquid Glass，内容滚到下面会透出来。照视频（iOS 文件 App 的
-/// 悬浮胶囊底栏：最近项目/共享/浏览）重做：胶囊改成**不透明**实色（systemBackground，
-/// 深浅色系统自己适配），内容滚到下面直接被挡住、不会透出来；选中那个有浅色圆角底块
-/// （systemGray5 圆角矩形，matchedGeometryEffect 平滑滑动）+ 蓝色图标文字，未选中
-/// 是 secondary。位置、宽度、滑动切页都不变（底离屏幕底边约 23pt，限宽 300pt 居中，
-/// 栏上左右滑切换，不震动）。底部留白 100 → 120pt，三页滑到底最底下的内容离胶囊更远。
-/// 底边那块再修：overlay 悬浮时滚起来内容还是会进到胶囊下面那条（屏幕最底边被截断），
-/// 改成 VStack 底部固定——三页内容区在胶囊上面结束，内容永远滑不到胶囊下面，
-/// 胶囊下面到屏幕底边那块只剩干净的页面底色；胶囊样子不变，还是悬浮胶囊。
-/// 同版再修底栏盖内容：safeAreaInset 在 NavigationStack 里传不进去，三页
-/// 滑到底最底下的内容都被胶囊盖住（排班统计卡、设置「关于」）。改成 overlay
-/// 纯悬浮 + 各页自己留 100pt 底部留白，胶囊顶离内容底边约 41pt，够露出来。
-///
-/// 1.3.0.006（第 46 条再修，老爷 2026-11-26 在真机上试了 005 亲口纠：
-/// 「ui 还是有问题，而且不能滑动，不是透明玻璃效果」；同版又加刷新率适配，第 34 条）：
-/// ① 不能滑动：005 里底栏上左右滑切页在真机上滑不动。根子是手势挂法：DragGesture
-/// 用普通 .gesture() 挂在装了三个 Button 的 HStack 上，Button 的点按手势会先抢
-/// 住触摸、父级的拖动手势拿不到事件（SwiftUI 里子视图手势优先于父级普通手势）。
-/// 改法：改成 .highPriorityGesture()，让拖动手势优先于 Button 的点按——点按
-/// （没位移）时拖动认不出来、Button 照样能点；左右滑（位移超 12pt）时拖动先认
-/// 出来、切页。手势阈值不变（横滑 >40pt 且大于纵向）。
-/// ② 不是透明玻璃：005 的不透明实色胶囊他不要，要透明玻璃效果（像音乐 / 文件 App
-/// 视频里那种 Liquid Glass，磨砂、半透明、透出底下内容的模糊影子）。但 004 被否
-/// 是因为玻璃太透、工资页的字透过胶囊清清楚楚能读出来。所以这次玻璃要透、但透出
-/// 来的是糊的、字读不出来：胶囊底先铺一层 .regularMaterial（中度磨砂，把底下
-/// 内容糊成色块、字认不出来；.thickMaterial 太实、看着像 005 的不透明实色），
-/// 上面再罩 iOS 26+ 的 .glassEffect(.regular)（Liquid Glass 的折射和亮边，
-/// （.glassEffect 是 26+ API，#available 包着）。其余不动：选中底块+蓝色、未选中
-/// 灰色、底离屏幕底边约 23pt、限宽 300pt 居中、不震动。底栏改回 overlay 悬浮：
-/// 画廊里两种磨砂看着没区别——VStack 底部固定时内容到不了胶囊下面、底下只有一色
-/// 底色，玻璃糊一色底色就跟不透明实色一个样；overlay 时内容竖滚会从胶囊底下经过，
-/// 玻璃才看得见。底边干净靠三页各自的 120pt 底部留白（滑到底时内容完整露在
-/// 胶囊上面、不到屏幕最底边）。
-/// ③ 刷新率适配（第 34 条，老爷说刷新率太低、要 140Hz）：先说硬件事实——iPhone
-/// ProMotion 自适应刷新封顶就是 120Hz（他那台 iPhone 17 Pro Max 也是），140Hz
-/// 在 iOS 硬件上做不到。根因：代码里没有任何帧率设置（没 CADisplayLink、没
-/// preferredFrameRateRange、没 Timer），SwiftUI 默认跟 ProMotion 走，但没有显式
-/// 声明帧率范围，系统在部分场景下只给 60Hz。改法：App 启动时建一个 CADisplayLink，
-/// preferredFrameRateRange 设成 10–120Hz（preferred 120），显式告诉系统这 App
-/// 要用满自适应刷新；静止时系统自己会降频省电（minimum 10Hz），不用管。
-/// （实现在 PaiBanApp.swift 的 RefreshRateBoost，空转、只声明范围、不干活。）
-///
-/// 1.3.0.007（第 46 条再修，老爷 2026-11-26 亲口定：底栏按「最开始做的那个」
-/// 1.3.0.001 那版来）：002–006 的悬浮胶囊来回改了五版他都不满意，006 那版他
-/// 17:31 发真机截图又纠了一次（「底层是对的，上层是错的」——胶囊底的磨砂+玻璃
-/// 是对的，上面选中的那个浅色圆角底块是实色、把玻璃盖死了）；现在他直接定了：
-/// 回到 001 那版——**满宽毛玻璃栏，不要悬浮胶囊、不要选中底块**。做法：底栏按
-/// 001 的 GlassTabBar 原样重做（满宽一条，贴着屏幕底边，底是 .ultraThinMaterial
-/// 最薄那档毛玻璃、透出底下内容，顶上一条细 Divider；三个按钮就是图标 21pt +
-/// 文字 10pt，选中 AccentColor 蓝色、没选中 secondary，干净、没有选中底块）。
-/// 挂法还是 001 那套：safeAreaInset(edge: .bottom) 挂在底边，内容在栏上面结束。
-/// 手动切 Tab 不变（不用 TabView——原生 Tab 栏在 iOS 27 上藏不掉，003 已证实），
-/// 三个 NavigationStack 都活着、只显示选中的那一个，深链与 payAccess 回跳保留。
-/// 滑动手势用 006 的 .highPriorityGesture()（001 的普通 .gesture() 会被 Button
-/// 点按抢走、真机上滑不动，005 已证实）；不震动（老爷亲口定，001 的震动不要加回来）。
-/// 三页的 120pt 底部留白（004–006 为悬浮胶囊留的）改回 24pt——safeAreaInset 的栏
-/// 本来就占位，内容在栏上面结束，不用再留 120pt；设置页 List 那 120pt safeAreaInset
-/// 直接删掉。刷新率适配（006 的 RefreshRateBoost）和更新弹窗修（007 的
-/// installedChannel）都在 007 里，一个包发。
-///
-/// 1.3.0.008（第 46 条再修，老爷 2026-11-26 18:14 发 007 实机截图亲口纠：
-/// 「又回到之前了」，让直接重新编写、写成液态玻璃的）：007 那个 001 版他不认——
-/// 看着像玻璃之前的老样子，不是他要的液态玻璃；001 的 ultraThinMaterial 太素了，
-/// 没有液态玻璃那个味儿。这次直接按他要的写，不再绕回 001：**液态玻璃 + 全宽底栏**。
-/// 做法：底栏还是满宽一条、贴着屏幕底边、顶上一条细 Divider，没有胶囊、没有选中
-/// 小药丸；底先铺一层 .regularMaterial（中度磨砂，006 证实过：底下内容糊成色块、
-/// 字读不出来，透亮但不透字），上面罩 iOS 26+ 的 .glassEffect(.regular, in: Rectangle())
-/// （Liquid Glass 的折射和亮边，满宽矩形、不是胶囊——006 的 capsuleGlass 原样换形状）。
-/// 三个按钮还是图标 21pt + 文字 10pt，选中 AccentColor 蓝色、没选中 secondary，
-/// 只变颜色、没有选中底块、不盖玻璃。挂法还是 safeAreaInset(edge: .bottom)，
-/// 滑动还是 006 的 .highPriorityGesture()，不震动，三页 24pt 底部留白不变。
-/// 更新弹窗修（007 的 installedChannel）和刷新率适配（006 的 RefreshRateBoost）都在，
-/// 008 只改底栏这一项。
-///
-/// 1.3.0.009（第 46 条再修，老爷 2026-11-26 18:25 亲口纠：「我要胶囊的那种啊
-/// 然后加液态玻璃」）：008 理解错了——他要的是**悬浮胶囊**（不是满宽栏），上面
-/// 加液态玻璃。006 那个胶囊的底层（磨砂+玻璃）他是认的（17:33 他亲口说「底层是
-/// 对的」），错的是上层那个选中小药丸（浅色圆角底块、把玻璃盖死了）。这次按 006
-/// 的胶囊、去掉选中小药丸：悬浮胶囊（底离屏幕底边约 23pt、限宽 300pt 居中、内容
-/// 从胶囊下面滑过去的 overlay 布局），胶囊用 .regularMaterial 打底 + iOS 26+
-/// .glassEffect(.regular, in: Capsule())（006 那个 capsuleGlass 原样）；选中态
-/// 绝对不要选中小药丸、不要选中底块——选中就是蓝色、没选中就是灰色，只变颜色，
-/// 什么都不盖在玻璃上。滑动还是 006 的 .highPriorityGesture()，不震动；三页
-/// 底部留白回到 006 的 120pt（悬浮胶囊是 overlay，内容滑到底要离胶囊够远）。
-/// 更新弹窗修（007 的 installedChannel）和刷新率适配（006 的 RefreshRateBoost）都在，
-/// 009 只改底栏这一项。
-///
-/// 1.3.0.010（第 46 条再修，老爷 2026-11-26 18:34 发 009 实机截图亲口说：
-/// 「没有液态玻璃，我真的要生气了」——截图上胶囊是**实心白色**，一点玻璃感都没有）：
-/// 先找根因再动手。根因：009 胶囊同时挂了 .background(.regularMaterial) 和
-/// .glassEffect()——磨砂底太实、把玻璃折射全盖死了，胶囊成了实心白药丸。006 他说
-/// 「底层是对的」只是胶囊形状/位置对，玻璃折射从来就没透出来过（006 和 009 是同一套
-/// 结构，磨砂底一直在）。修法：磨砂底整个拿掉，背景 clear，**只留
-/// .glassEffect(.regular, in: Capsule())**，让玻璃直接去折射后面的内容；26 以下
-/// fallback 用 .ultraThinMaterial（只在老系统上，26+ 不走这条）。其余不动：
-/// 悬浮胶囊（底离屏幕底边约 23pt、限宽 300pt 居中、overlay 布局）、选中只变颜色
-/// （蓝色/灰色、没有小药丸）、滑动还是 006 的 .highPriorityGesture()、不震动、
-/// 三页 120pt 底部留白、更新弹窗修和刷新率适配都在，010 只改底栏玻璃这一项。
-/// 发版前必须验明白：对着彩色内容（排班页日历）看，胶囊里必须能看到底下内容糊掉的
-/// 影子和折射亮边，实心白就是没修好、不能发。
-///
-/// 1.3.0.011（第 46 条再修，老爷 2026-11-26 18:51 发 010 实机截图亲口说：
-/// 「还是不行」——胶囊还是实心白，一点玻璃感都没有）：010 的修法修错了地方。
-/// 这次先把根因彻底查明白（代码层面核过）：
-/// ① #available(iOS 26.0, *) 分支是对的——运行时系统版本判断，老爷 iOS 27 一定走
-/// glassEffect 那条，.ultraThinMaterial fallback 在他手机上物理上不可能被走，
-/// fallback 不是原因；② 没有不透明祖先挡折射——MainTabView 里唯一的 .background
-/// 是最外层 ZStack 背后的 Color(.systemGroupedBackground)（最底层），胶囊和页面
-/// 内容之间没有任何实色层，玻璃采样的是页面本身；③ 真正的白，是 .glassEffect
-/// (.regular) 自带的磨砂色调——.regular 是标准 frosted 玻璃、带白霜，采样又是
-/// 设置页那种均匀浅灰底（#F2F2F7），霜 + 浅底 = 看起来就是实心白，折射无物可折。
-/// 证据：010 拿掉了唯一的实色磨砂底，外观和 009 一模一样——如果磨砂底是元凶，
-/// 010 早该变样了。④ 次要风险：.shadow() 挂在 .glassEffect() 之后——阴影把玻璃
-/// 包进一次额外的合成，玻璃靠实时采样背后内容成像，多一次压平可能把效果闷掉；
-/// 苹果自己的玻璃栏不另加阴影，玻璃自带亮边和纵深。
-/// 修法：.glassEffect(.clear, in: Capsule())——.clear 是无色调、最透的那档玻璃，
-/// 折射和亮边在浅底上也看得见（.regular 的霜就是那层白）；.shadow() 整段拿掉，
-/// 让玻璃自己供纵深；再加一条日志标记（AppLogger，记 iOS 版本 + 走的玻璃路径，
-/// 随反馈 24 小时日志可验——证明 glassEffect 路径在他真机上确实跑了）。
-/// 其余不动：悬浮胶囊（底离屏幕底边约 23pt、限宽 300pt 居中、overlay 布局）、
-/// 选中只变颜色（蓝色/灰色、没有小药丸）、滑动还是 006 的 .highPriorityGesture()、
-/// 不震动、三页 120pt 底部留白、更新弹窗修和刷新率适配都在，011 只改底栏玻璃这一项。
-/// 为什么这次一定能显出来（代码层面站得住）：.clear 和 .regular 的差别是 API
-/// 文档定的——.clear 无色调、最透，.regular 带霜；同一块浅底上 .regular 显白、
-/// .clear 显透 + 折射亮边；阴影那次额外合成也没了；分支正确、中间无实色遮挡都
-/// 已核过。剩下唯一的变量是底色本身均匀浅灰——.clear 玻璃靠亮边和边缘折射也能
-/// 在均匀底上显出液态感（文件 App 的胶囊就是这么做的）。
-///
-/// 1.3.0.012（第 46 条再修，老爷 2026-11-26 19:06 发视频 + 截图亲口说：
-/// 「仔细看视频，还有，不弹窗，现在还是不行再改」——两件都得修）：
-/// ① 不弹窗（重点）：老爷现在是 010，011 早发了，打开 App 更新弹窗一次都没弹过，
-/// 只能自己去文件 App 里翻 IPA 手动装（011 的包 19:04 已下到文件 App 里）。
-/// 根因（代码 + 线上实测核过）：007 的 installedChannel 只修了「问哪条线」，
-/// 没修认证依赖——服务端只在「登录后带认证 + 是内测人员」时才把 latestVersion
-/// 换成内测版号；版本请求一旦没带上有效 session（启动时序、切线路、7 天 session
-/// 过期、短信登录没 Keychain 密码兜底），服务端照旧回正式版 1.3.0，比装的
-/// 1.3.0.010 旧，isNewer 直接 false，弹窗永远不弹。线上实测：不带认证调
-/// /api/v1/version?platform=ios&channel=beta 回的是 latestVersion 1.3.0、
-/// channel stable，但 beta.ios.version 1.3.0.011 就在回包里公开躺着——App
-/// 的 VersionInfo 从来没解 beta 这个字段。修法：内测用户直接读公开的 beta.ios
-/// 版号/链接比（UpdateChecker.offeredVersion），弹窗不再依赖认证；正式用户
-/// 照旧比 latestVersion。另修一个次生毛病：Store 原来拿检查结果直接覆盖
-/// pendingUpdate，查失败返回 nil 就把排队等着弹的提示清了——切回前台时一次
-/// 瞬断就把弹窗吞了；现在只在「确实没新版」时清，查失败保留已有的提示。
-/// 触发点不变（冷启动 startup 里查 + 切回前台 scenePhase .active 再查），
-/// 不加节流（「稍后」当天不弹是用户自己点的，照旧）。
-/// ② 液态玻璃还是不行：视频里文件 App 底下那个悬浮胶囊（最近项目/共享/浏览）
-/// 就是真正的液态玻璃胶囊——半透明、浮着、能透出后面的文件图标和文字。我们的
-/// 胶囊还是实心白。011 的裸 .clear 玻璃 + 去阴影还是不显，原因看视频就明白了：
-/// 真玻璃胶囊不只有一层透明玻璃，它有三样东西——淡淡的白调（跟底色拉开一点）、
-/// 柔和的投影（浮起来的纵深）、发亮的细边（玻璃的边）。011 只罩了一层裸 .clear，
-/// 均匀浅灰底上近乎隐形，用户看到的就是一片白。所以这次三样都补上：
-/// .clear 玻璃加一点白 tint（.white.opacity(0.22)，跟底色拉开、底下内容照样
-/// 透出来糊掉折射）、柔和阴影加回来（文件 App 的胶囊明明有投影，011 拿掉阴影
-/// 是猜错了；只加柔和的一档，opacity 0.10 / radius 10）、再描一条发亮的细边
-/// （白 0.6 / 0.5pt）。滚动时玻璃照样折射底下经过的内容。011 埋的日志标记还在，
-/// onAppear 那条确认会写（胶囊常驻、主界面出现就记一次，AppLogger 追加写盘）。
-/// 其余不动：悬浮胶囊（底离屏幕底边约 23pt、限宽 300pt 居中、overlay 布局）、
-/// 选中只变颜色（蓝色/灰色、没有小药丸）、滑动还是 006 的 .highPriorityGesture()、
-/// 不震动、三页 120pt 底部留白、刷新率适配都在，012 只改弹窗 + 底栏玻璃这两项。
-/// 1.3.0.013（第 46 条再修，老爷 2026-11-26 19:23 发 012 实机截图亲口说：
-/// 「还是没有，我真的生气了」——他已经手动装上 012，胶囊还是实心白，一点玻璃
-/// 都没有）：这是第五次了（006、009、010、011、012），玻璃从来就没在他真机上
-/// 显出来过。这次不许再换个参数就发一版，换个做法——先证明玻璃到底能不能在咱
-/// 这个工程里跑出来，再按结论出包：
-/// 第一步（测试页，GlassTestView.swift，入口：设置 → 关于 → 液态玻璃测试）：
-/// 彩色底（红黄蓝绿紫橙大色块、上下滚）上面并排两颗胶囊——A 是 SwiftUI
-/// .glassEffect(.clear)（012 那套），B 是 UIKit UIVisualEffectView 磨砂玻璃。
-/// 结论只有他真机上看测试页才能下；但底栏不能再等：五版 .glassEffect() 参数换遍了
-/// 全是实心白、代码层级也核过没遮挡，这条路在咱这个工程里就是不通的证据已经够了——
-/// 底栏直接换 B 的做法。画廊实拍（run 45811123307）也佐证了：新底栏胶囊是磨砂浅灰
-/// （在糊底色、带投影和亮边），不是之前那种纯白实心——UIVisualEffectView 的糊是真在跑。
-/// 第二步（底栏）：胶囊底换成 UIKit UIVisualEffectView（UIViewRepresentable 包
-/// 一层，BlurView，style .systemThinMaterial，配淡淡白 tint + 发亮细边 + 柔和
-/// 投影）。那是久经考验的磨砂玻璃：实时糊掉底下经过的内容、透出色块，一定看得
-/// 出来是玻璃——先让老爷看到玻璃，再谈是不是液态玻璃。iOS 16+ 就有，不用
-/// #available。onAppear 日志标记改记 UIVisualEffectView 路径，随反馈可验。
-/// 其余不动：悬浮胶囊（底离屏幕底边约 23pt、限宽 300pt 居中、overlay 布局）、
-/// 选中只变颜色（蓝色/灰色、没有小药丸）、滑动切页（阈值 40→24pt，更好滑，
-/// 再加 .contentShape(Capsule()) 让胶囊整块都吃手势）、不震动、三页 120pt
-/// 底部留白、更新弹窗修（012）和刷新率适配都在，013 只改底栏玻璃 + 滑动这两项。
-/// 同版再修「没有滑动框」（老爷 19:24 补问，附设置页截图）：① 三页的滚动指示条
-/// 改走自绘滑块 AlwaysVisibleScrollIndicator（.scrollIndicators(.visible) 没用，
-/// 画廊实拍证明它根本不画出来），滚到哪、滑块就跟到哪，一直看得见；
-/// ② 底栏左右滑切页阈值放宽（见上）。两处都在 013 里，见 SettingsView /
-/// CalendarView / PayView。
-/// 1.3.0.014（第 46 条再修，老爷 2026-11-26 20:06 发 013 实机截图亲口说：
-/// 「还是不行，而且没有弹窗，你第一版的是自己做出来了，不过被挡住了，下层那个就是，
-/// 你自己翻一下不行吗？」——013 的 UIKit 磨砂胶囊在他真机上还是实心白，弹窗也没弹；
-/// 20:17 他又亲口补了方向：「你直接用 001 的包，然后把上层的那个去掉，下层加上字，
-/// 然后向上挪一点就行了」）：不按自己的思路绕，按他四句做——① 直接用 001 的底栏
-/// （build 35，第一版，自己做出来的、玻璃是对的那版：满宽一条，底是 SwiftUI
-/// .ultraThinMaterial 毛玻璃，字直接坐在玻璃上）；② 上层那个拿掉——001 顶上那条
-/// Divider overlay（盖在玻璃上面的那层）整段删掉；③ 字加在下层玻璃上——三个标签
-/// （图标+字）直接放在 ultraThinMaterial 上，中间不隔任何底块/底色/小药丸；
-/// ④ 整体向上挪 8pt——栏底离屏幕底边留 8pt，不贴底、微微浮起来。挂法是 001 同款
-/// safeAreaInset 挂底边（不用 TabView——原生 Tab 栏在 iOS 27 上藏不掉，003 已证实；
-/// 手动切 Tab，三页都活着）；外层 ZStack 上那层 .background(Color
-/// (.systemGroupedBackground)) 也拿掉——005 加上的（fc8b8d3），002/004 没有它时
-/// 玻璃是通的，加上之后 006–013 全灭；三页自己都铺了 systemGroupedBackground，
-/// 外层这层是多余的。三页底部留白 120pt → 24pt（007 同款）。滑动还是 006 的
-/// .highPriorityGesture()（阈值 24pt），不震动；自绘滚动指示条（013）和刷新率适配
-/// （006）都在。弹窗也在 014 里修（见 ContentView / Store：主界面稳了 2 秒后再查
-/// 一次，查之前先确认服务器地址已解析——012 那次冷启动的检查可能赶在开屏/切页
-/// 动画里、或者解析服务器那一下还没稳，弹窗没弹出来又没重试）。
 struct MainTabView: View {
     @EnvironmentObject private var store: AppStore
 
-    /// 能切到的 Tab：工资 Tab 只有有工资权限的人才有（1.2.7.001，第 23 条），
-    /// 没权限的人只有排班 / 设置两个 Tab。tag 和原来一样：排班 0、工资 1、设置 2。
-    private var availableTabs: [Int] {
-        store.payAccess ? [0, 1, 2] : [0, 2]
-    }
-
-    private var tabItems: [(tag: Int, title: String, icon: String)] {
-        [
-            (0, "排班", "calendar"),
-            (1, "工资", "yensign.circle"),
-            (2, "设置", "gearshape"),
-        ].filter { availableTabs.contains($0.tag) }
-    }
-
-    /// 每页的 NavigationStack。手动切 Tab 时三页都留在层级里（导航状态不丢），
-    /// 只显示选中的那一页。
-    @ViewBuilder
-    private func tabPage(tag: Int) -> some View {
-        switch tag {
-        case 0:
+    var body: some View {
+        TabView(selection: $store.selectedTab) {
             NavigationStack {
                 CalendarView()
                     .navigationTitle("排班")
                     .navigationBarTitleDisplayMode(.inline)
             }
-        case 1:
+            .tabItem {
+                Label("排班", systemImage: "calendar")
+            }
+            .tag(0)
+
             // 工资 Tab：只有有工资权限的人才显示（1.2.7.001，第 23 条）。
             // 没权限的人只有排班 / 设置两个 Tab；年休假跟着工资走，也一并隐藏。
-            NavigationStack {
-                PayView()
-                    .navigationTitle("预估工资")
-                    .navigationBarTitleDisplayMode(.inline)
+            if store.payAccess {
+                NavigationStack {
+                    PayView()
+                        .navigationTitle("预估工资")
+                        .navigationBarTitleDisplayMode(.inline)
+                }
+                .tabItem {
+                    Label("工资", systemImage: "yensign.circle")
+                }
+                .tag(1)
             }
-        default:
+
             NavigationStack {
                 SettingsView()
             }
-        }
-    }
-
-    var body: some View {
-        // 不用 TabView：原生 Tab 栏在 iOS 27 上藏不掉，底下会多露一条旧底栏，
-        // 还会抢点按和震动。手动切 Tab：三页都活着，只显示选中的那一页。
-        // 1.3.0.014（第 46 条，老爷 2026-11-26 20:17 亲口定）：
-        // 「直接用 001 的包，然后把上层的那个去掉，下层加上字，然后向上挪一点就行了」。
-        // 001 那版（build 35）是自己做出来的、玻璃是对的；006–013 的悬浮胶囊来回改了
-        // 八版，玻璃在他真机上一次都没显出来（全是实心白）。按老爷四句做：
-        // ① 用 001 的底栏原样——满宽一条，底是 .ultraThinMaterial 毛玻璃（SwiftUI
-        // 自己的磨砂，透出底下内容），不贴胶囊、不罩 .glassEffect、不用 UIKit BlurView；
-        // ② 上层那个拿掉——001 顶上那条 Divider overlay（.overlay(alignment: .top)
-        // { Divider() }，盖在玻璃上面的那层）整段删掉；③ 字加在下层玻璃上——三个标签
-        // （图标+字）直接坐在 ultraThinMaterial 上，中间不隔任何底块/底色/小药丸
-        // （006 那个浅色圆角底块就是这么把玻璃盖死的）；④ 整体向上挪 8pt——栏底离
-        // 屏幕底边留 8pt，不贴底、微微浮起来。挂法是 001 同款 safeAreaInset 挂底边，
-        // 内容在栏上面结束；三页底部留白 120pt → 24pt（007 同款）。
-        // 外层 ZStack 上那层 .background(Color(.systemGroupedBackground)) 也拿掉——
-        // 005 加上的（fc8b8d3），002/004 没有它时玻璃是通的，加上之后 006–013 全灭；
-        // 三页自己都铺了 systemGroupedBackground，外层这层是多余的，拿掉页面外观一点不变。
-        ZStack {
-            tabPage(tag: 0)
-                .opacity(store.selectedTab == 0 ? 1 : 0)
-                .allowsHitTesting(store.selectedTab == 0)
-            if store.payAccess {
-                tabPage(tag: 1)
-                    .opacity(store.selectedTab == 1 ? 1 : 0)
-                    .allowsHitTesting(store.selectedTab == 1)
+            .tabItem {
+                Label("设置", systemImage: "gearshape")
             }
-            tabPage(tag: 2)
-                .opacity(store.selectedTab == 2 ? 1 : 0)
-                .allowsHitTesting(store.selectedTab == 2)
+            .tag(2)
         }
-        .safeAreaInset(edge: .bottom) {
-            GlassTabBar(
-                items: tabItems,
-                selectedTab: $store.selectedTab,
-                onSwipeLeft: { switchTab(step: 1) },
-                onSwipeRight: { switchTab(step: -1) }
-            )
-            .padding(.bottom, 8)
-        }
+        .tint(Color.accentColor)
+        // 1.2.8.002：Tab 选中态走自适应强调色（浅色深 navy、深色亮蓝），
+        // 别让系统默认去猜；未选中态在 PaiBanApp.init 里用 UITabBar 外观定。
         // 没登录时点小组件进来的深链：登录后进主界面再跳（store.handleDeepLink 先记下来）。
         .task {
             if let tab = store.pendingDeepLinkTab {
@@ -333,116 +73,6 @@ struct MainTabView: View {
                 store.selectedTab = 0
             }
         }
-    }
-
-    /// 滑动切 Tab：左滑 → 下一个，右滑 → 上一个；到头绕回另一边（来回都能滑）。
-    private func switchTab(step: Int) {
-        let tabs = availableTabs
-        guard tabs.count > 1,
-              let index = tabs.firstIndex(of: store.selectedTab) else { return }
-        let next = tabs[(index + step + tabs.count) % tabs.count]
-        guard next != store.selectedTab else { return }
-        withAnimation(.easeInOut(duration: 0.2)) {
-            store.selectedTab = next
-        }
-    }
-}
-
-/// 满宽玻璃切换栏（1.3.0.014，第 46 条；老爷 2026-11-26 20:17 亲口定：
-/// 「直接用 001 的包，然后把上层的那个去掉，下层加上字，然后向上挪一点就行了」）。
-/// 001 那版（build 35）是自己做出来的、玻璃是对的：满宽一条，底是 SwiftUI
-/// .ultraThinMaterial 毛玻璃（最薄那档，透出底下内容）；三个标签（图标 21pt +
-/// 文字 10pt）直接坐在玻璃上，选中 AccentColor 蓝色、没选中 secondary，只变颜色。
-/// 按老爷四句：① 用 001 的底栏原样（满宽毛玻璃，不贴胶囊、不罩 .glassEffect、
-/// 不用 UIKit BlurView）；② 上层那个拿掉——001 顶上那条 Divider overlay
-/// （.overlay(alignment: .top) { Divider() }，盖在玻璃上面的那层）整段删掉；
-/// ③ 字加在下层玻璃上——图标+字直接放在 ultraThinMaterial 上，中间不隔任何
-/// 底块、底色、小药丸（006 那个浅色圆角底块就是这么把玻璃盖死的）；
-/// ④ 整体向上挪 8pt——调用处 .padding(.bottom, 8)，栏底离屏幕底边留 8pt，
-/// 不贴底、微微浮起来。点按钮切换；在栏上左右滑动也能切换（来回都行）。
-/// 滑动手势用 006 的 .highPriorityGesture()（001 的普通 .gesture() 会被 Button
-/// 的点按手势抢走、真机上滑不动）；阈值 24pt（013 放宽的，短滑也切）。
-/// 不震动（老爷亲口定），点按和滑动都只切页、不震。
-/// 挂法：MainTabView 里 safeAreaInset(edge: .bottom) 挂底边（001 同款），
-/// 内容在栏上面结束；三页底部留白 24pt。
-private struct GlassTabBar: View {
-    let items: [(tag: Int, title: String, icon: String)]
-    @Binding var selectedTab: Int
-    let onSwipeLeft: () -> Void
-    let onSwipeRight: () -> Void
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ForEach(items, id: \.tag) { item in
-                Button {
-                    guard item.tag != selectedTab else { return }
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        selectedTab = item.tag
-                    }
-                } label: {
-                    VStack(spacing: 3) {
-                        Image(systemName: item.icon)
-                            .font(.system(size: 21))
-                        Text(item.title)
-                            .font(.system(size: 10))
-                    }
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 7)
-                    // 字直接坐在下层玻璃上：选中就是蓝色、没选中就是灰色，只变颜色，
-                    // 中间不隔任何底块/底色/小药丸，什么都不盖在玻璃上。
-                    .foregroundColor(item.tag == selectedTab ? Color.accentColor : .secondary)
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        // 下层就是玻璃：001 原样，.ultraThinMaterial 毛玻璃（最薄那档，透出底下内容）。
-        // 上层那个拿掉：001 顶上的 Divider overlay 整段删了，不盖玻璃。
-        .background(.ultraThinMaterial, ignoresSafeAreaEdges: .bottom)
-        // 日志标记——证明 001 式玻璃路径在他真机上确实跑了，随反馈 24 小时日志可验。
-        .onAppear {
-            let v = ProcessInfo.processInfo.operatingSystemVersion
-            AppLogger.shared.log("TabBar glass: iOS \(v.majorVersion).\(v.minorVersion).\(v.patchVersion), 001-style ultraThinMaterial, no Divider, lifted 8pt", tag: "UI")
-        }
-        // 滑动手势用 006 的 .highPriorityGesture()：001 的普通 .gesture() 会被三个
-        // Button 的点按手势抢走触摸，真机上左右滑切页滑不动；高优先手势让拖动先于
-        // Button 点按被认出来，点按（没位移）时拖动认不出来、Button 照样能点。
-        // 阈值 24pt（013 放宽的，短滑也切页）。
-        .highPriorityGesture(
-            DragGesture(minimumDistance: 12)
-                .onEnded { value in
-                    // 只认横滑（横向位移够大、且比纵向大）；竖滑不管。
-                    guard abs(value.translation.width) > 24,
-                          abs(value.translation.width) > abs(value.translation.height) else { return }
-                    if value.translation.width < 0 {
-                        onSwipeLeft()
-                    } else {
-                        onSwipeRight()
-                    }
-                }
-        )
-    }
-}
-
-/// UIKit 磨砂玻璃（1.3.0.013，第 46 条）：UIVisualEffectView 的 UIViewRepresentable
-/// 包装。SwiftUI 的 .glassEffect() 在咱这个工程里连着五版（006/009/010/011/012）
-/// 都显不出来（实心白），参数换遍了、层级核过没遮挡——这条路在咱这儿就是不通，
-/// 改走 UIKit 这条久经考验的路：系统磨砂玻璃实时糊掉底下经过的内容、透出色块，
-/// 一定看得出来是玻璃（先让老爷看到玻璃，再谈是不是液态玻璃）。style 用
-/// .systemThinMaterial（最透那档磨砂，底下彩色糊得看得见）；淡淡白 tint + 发亮
-/// 细边 + 柔和投影在调用处（跟文件 App 的胶囊一个做法）。iOS 16+ 就有，不用
-/// #available。测试页 B 胶囊用它（底栏 014 已换回 001 式 ultraThinMaterial，不再用 BlurView）。
-struct BlurView: UIViewRepresentable {
-    var style: UIBlurEffect.Style
-
-    func makeUIView(context: Context) -> UIVisualEffectView {
-        let view = UIVisualEffectView(effect: UIBlurEffect(style: style))
-        view.layer.cornerRadius = 28
-        view.clipsToBounds = true
-        return view
-    }
-
-    func updateUIView(_ uiView: UIVisualEffectView, context: Context) {
-        uiView.effect = UIBlurEffect(style: style)
     }
 }
 
