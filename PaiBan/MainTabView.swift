@@ -178,7 +178,7 @@ struct MainTabView: View {
 }
 
 /// 悬浮胶囊切换栏（1.3.0.006，照 iOS 文件 App 视频重做，第 46 条）：
-/// 透明玻璃胶囊：底铺 .thickMaterial（重磨砂，把底下内容糊成色块、字认不出来），
+/// 透明玻璃胶囊：底铺 .regularMaterial（中度磨砂，把底下内容糊成色块、字认不出来），
 /// 上面再罩 iOS 26+ 的 .glassEffect(.regular)（Liquid Glass 的折射和亮边，
 /// 看上去还是玻璃、不是 005 那种实色死板）；26 以下只有磨砂底。浮在内容上面；
 /// 不贴底、不满宽、没有顶部分隔线。选中那个有浅色圆角底块（systemGray5 圆角矩形，
@@ -253,7 +253,7 @@ private struct FilesTabBar: View {
 }
 
 /// 胶囊玻璃（1.3.0.006，第 46 条）：iOS 26+ 才罩 .glassEffect(.regular)
-/// （Liquid Glass，26+ API）；26 以下什么都不加，只留底下的 .thickMaterial
+/// （Liquid Glass，26+ API）；26 以下什么都不加，只留底下的 .regularMaterial
 /// 磨砂底（磨砂本身 iOS 15+ 就有，部署目标 iOS 16 能用）。
 private extension View {
     @ViewBuilder
