@@ -36,8 +36,10 @@ import SwiftUI
 /// 深浅色系统自己适配），内容滚到下面直接被挡住、不会透出来；选中那个有浅色圆角底块
 /// （systemGray5 圆角矩形，matchedGeometryEffect 平滑滑动）+ 蓝色图标文字，未选中
 /// 是 secondary。位置、宽度、滑动切页都不变（底离屏幕底边约 23pt，限宽 300pt 居中，
-/// 栏上左右滑切换，不震动）。底部留白 100 → 120pt，三页滑到底最底下的内容离胶囊更远，
-/// 胶囊下面到屏幕底边那块只剩干净的页面底色。
+/// 栏上左右滑切换，不震动）。底部留白 100 → 120pt，三页滑到底最底下的内容离胶囊更远。
+/// 底边那块再修：overlay 悬浮时滚起来内容还是会进到胶囊下面那条（屏幕最底边被截断），
+/// 改成 VStack 底部固定——三页内容区在胶囊上面结束，内容永远滑不到胶囊下面，
+/// 胶囊下面到屏幕底边那块只剩干净的页面底色；胶囊样子不变，还是悬浮胶囊。
 /// 同版再修底栏盖内容：safeAreaInset 在 NavigationStack 里传不进去，三页
 /// 滑到底最底下的内容都被胶囊盖住（排班统计卡、设置「关于」）。改成 overlay
 /// 纯悬浮 + 各页自己留 100pt 底部留白，胶囊顶离内容底边约 41pt，够露出来。
@@ -86,26 +88,25 @@ struct MainTabView: View {
 
     var body: some View {
         // 不用 TabView：原生 Tab 栏在 iOS 27 上藏不掉，底下会多露一条旧底栏，
-        // 还会抢点按和震动。手动切 Tab：三页都活着，只显示选中的那一页，
-        // 底下只留悬浮胶囊这一条栏。
-        ZStack {
-            tabPage(tag: 0)
-                .opacity(store.selectedTab == 0 ? 1 : 0)
-                .allowsHitTesting(store.selectedTab == 0)
-            if store.payAccess {
-                tabPage(tag: 1)
-                    .opacity(store.selectedTab == 1 ? 1 : 0)
-                    .allowsHitTesting(store.selectedTab == 1)
+        // 还会抢点按和震动。手动切 Tab：三页都活着，只显示选中的那一页。
+        // 1.3.0.005：底栏不再用 overlay 悬浮，改成 VStack 底部固定——三页内容区
+        // 在胶囊上面结束，内容永远滑不到胶囊下面、更不会露到屏幕最底边那块
+        // （老爷划了红线）；胶囊样子不变，还是悬浮胶囊（圆角、不透明实色、
+        // 限宽 300pt、底离屏幕底边约 23pt），只是内容区不再往它下面伸。
+        VStack(spacing: 0) {
+            ZStack {
+                tabPage(tag: 0)
+                    .opacity(store.selectedTab == 0 ? 1 : 0)
+                    .allowsHitTesting(store.selectedTab == 0)
+                if store.payAccess {
+                    tabPage(tag: 1)
+                        .opacity(store.selectedTab == 1 ? 1 : 0)
+                        .allowsHitTesting(store.selectedTab == 1)
+                }
+                tabPage(tag: 2)
+                    .opacity(store.selectedTab == 2 ? 1 : 0)
+                    .allowsHitTesting(store.selectedTab == 2)
             }
-            tabPage(tag: 2)
-                .opacity(store.selectedTab == 2 ? 1 : 0)
-                .allowsHitTesting(store.selectedTab == 2)
-        }
-        // 悬浮胶囊栏（1.3.0.005，照文件 App 视频）：不透明实色胶囊，选中那个有
-        // 浅色圆角底块 + 蓝色图标文字。位置照视频——胶囊底离屏幕底边约 23pt，
-        // 限宽 300pt 居中。overlay 纯悬浮（只管样子、不占位），底部留白由各页
-        // 自己留（排班/工资 ScrollView padding.bottom 120，设置 List safeAreaInset 120）。
-        .overlay(alignment: .bottom) {
             FilesTabBar(
                 items: tabItems,
                 selectedTab: $store.selectedTab,
@@ -115,6 +116,7 @@ struct MainTabView: View {
             .frame(maxWidth: 300)
             .padding(.bottom, 23)
         }
+        .background(Color(.systemGroupedBackground))
         // 没登录时点小组件进来的深链：登录后进主界面再跳（store.handleDeepLink 先记下来）。
         .task {
             if let tab = store.pendingDeepLinkTab {
