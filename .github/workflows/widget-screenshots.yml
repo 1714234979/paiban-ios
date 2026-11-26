@@ -52,7 +52,7 @@ jobs:
       - name: Take widget screenshots
         run: |
           mkdir -p widget-shots
-          for kind in today week pay month lock-circular lock-rectangular app-calendar-dark app-pay-dark app-settings-dark app-calendar-light app-pay-light app-settings-light app-daydetail-dark app-daydetail-light; do
+          for kind in today week pay month lock-circular lock-rectangular app-calendar-dark app-pay-dark app-settings-dark app-calendar-light app-pay-light app-settings-light app-daydetail-dark app-daydetail-light app-hireyear-light app-payguide-dark app-payguide-light; do
             xcrun simctl terminate booted com.paiban.app || true
             xcrun simctl launch booted com.paiban.app --widget-preview "$kind"
             sleep 4
