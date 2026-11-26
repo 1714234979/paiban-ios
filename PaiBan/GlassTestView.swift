@@ -28,7 +28,7 @@ struct GlassTestView: View {
                 }
                 .padding(.bottom, 240)
             }
-            .scrollIndicators(.visible)
+            .modifier(AlwaysVisibleScrollIndicator())
 
             VStack(spacing: 18) {
                 VStack(spacing: 4) {

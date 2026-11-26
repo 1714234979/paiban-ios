@@ -200,9 +200,10 @@ import UIKit
 /// 第一步（测试页，GlassTestView.swift，入口：设置 → 关于 → 液态玻璃测试）：
 /// 彩色底（红黄蓝绿紫橙大色块、上下滚）上面并排两颗胶囊——A 是 SwiftUI
 /// .glassEffect(.clear)（012 那套），B 是 UIKit UIVisualEffectView 磨砂玻璃。
-/// 结论只有他真机上看测试页才能下（咱这边没有模拟器、画廊也跑不起来）；但底栏
-/// 不能再等：五版 .glassEffect() 参数换遍了全是实心白、代码层级也核过没遮挡，
-/// 这条路在咱这个工程里就是不通的证据已经够了——底栏直接换 B 的做法。
+/// 结论只有他真机上看测试页才能下；但底栏不能再等：五版 .glassEffect() 参数换遍了
+/// 全是实心白、代码层级也核过没遮挡，这条路在咱这个工程里就是不通的证据已经够了——
+/// 底栏直接换 B 的做法。画廊实拍（run 45811123307）也佐证了：新底栏胶囊是磨砂浅灰
+/// （在糊底色、带投影和亮边），不是之前那种纯白实心——UIVisualEffectView 的糊是真在跑。
 /// 第二步（底栏）：胶囊底换成 UIKit UIVisualEffectView（UIViewRepresentable 包
 /// 一层，BlurView，style .systemThinMaterial，配淡淡白 tint + 发亮细边 + 柔和
 /// 投影）。那是久经考验的磨砂玻璃：实时糊掉底下经过的内容、透出色块，一定看得
@@ -213,7 +214,8 @@ import UIKit
 /// 再加 .contentShape(Capsule()) 让胶囊整块都吃手势）、不震动、三页 120pt
 /// 底部留白、更新弹窗修（012）和刷新率适配都在，013 只改底栏玻璃 + 滑动这两项。
 /// 同版再修「没有滑动框」（老爷 19:24 补问，附设置页截图）：① 三页的滚动指示条
-/// 加 .scrollIndicators(.visible)，滚的时候右边那条灰线一直看得见、不淡出；
+/// 改走自绘滑块 AlwaysVisibleScrollIndicator（.scrollIndicators(.visible) 没用，
+/// 画廊实拍证明它根本不画出来），滚到哪、滑块就跟到哪，一直看得见；
 /// ② 底栏左右滑切页阈值放宽（见上）。两处都在 013 里，见 SettingsView /
 /// CalendarView / PayView。
 struct MainTabView: View {
@@ -429,5 +431,56 @@ struct BlurView: UIViewRepresentable {
 
     func updateUIView(_ uiView: UIVisualEffectView, context: Context) {
         uiView.effect = UIBlurEffect(style: style)
+    }
+}
+
+/// 常显滚动指示条（1.3.0.013，第 46 条；老爷 19:24 说「没有滑动框」）。
+/// 教训：.scrollIndicators(.visible) 在这个工程里没用——画廊实拍（run 45811123307）
+/// 三页右边缘全高都是均匀底色，指示条根本没画出来（List 和 ScrollView 静止时都不显）。
+/// 所以自己画一条：iOS 17+ 用 onScrollGeometryChange 读滚动几何（contentOffset /
+/// contentSize / containerSize），按比例算滑块位置和长度，叠在右边缘、一直看得见；
+/// 原生指示条同时藏掉（.scrollIndicators(.hidden)），免得两条重影。iOS 16 没有
+/// onScrollGeometryChange，退回 .scrollIndicators(.visible) 尽力而为。
+/// 滑块：宽 4pt、圆角 2、Color.primary 35%（深浅模式自适应），离右边缘 2pt；
+/// 长度 = 视口² / 内容高（最短 44pt）；位置 = 滚动进度 ×（视口高 − 滑块长）。
+/// 内容不够一屏（不用滚）时不显示。只跟竖滚，不管横滑。
+private struct ScrollGeo: Equatable {
+    var offsetY: CGFloat = 0
+    var contentHeight: CGFloat = 0
+    var viewportHeight: CGFloat = 0
+}
+
+struct AlwaysVisibleScrollIndicator: ViewModifier {
+    @State private var geo = ScrollGeo()
+
+    func body(content: Content) -> some View {
+        if #available(iOS 17, *) {
+            content
+                .scrollIndicators(.hidden)
+                .onScrollGeometryChange(for: ScrollGeo.self) { g in
+                    ScrollGeo(offsetY: g.contentOffset.y,
+                              contentHeight: g.contentSize.height,
+                              viewportHeight: g.containerSize.height)
+                } action: { _, new in geo = new }
+                .overlay(alignment: .topTrailing) { thumb }
+        } else {
+            content.scrollIndicators(.visible)
+        }
+    }
+
+    /// 右边缘的滑块。内容不够滚时不画；长度和位置都按滚动几何实时算。
+    @ViewBuilder
+    private var thumb: some View {
+        if geo.contentHeight > geo.viewportHeight + 1, geo.viewportHeight > 0 {
+            let thumbH = max(44, geo.viewportHeight * geo.viewportHeight / geo.contentHeight)
+            let clampedH = min(thumbH, geo.viewportHeight)
+            let maxOffset = max(1, geo.contentHeight - geo.viewportHeight)
+            let progress = min(1, max(0, geo.offsetY / maxOffset))
+            RoundedRectangle(cornerRadius: 2)
+                .fill(Color.primary.opacity(0.35))
+                .frame(width: 4, height: clampedH)
+                .padding(.trailing, 2)
+                .offset(y: progress * max(0, geo.viewportHeight - clampedH))
+        }
     }
 }

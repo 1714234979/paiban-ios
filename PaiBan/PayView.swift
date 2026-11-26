@@ -72,8 +72,9 @@ struct PayView: View {
                             if editingField != nil { dismissEdit() }
                         }
                     }
-                    // 1.3.0.013：滚动指示条常显（老爷 19:24 说「没有滑动框」）。
-                    .scrollIndicators(.visible)
+                    // 1.3.0.013：滚动指示条常显（老爷 19:24 说「没有滑动框」）——.visible 没用，
+                    // 画廊实拍证明它根本不画出来，改走自绘滑块 AlwaysVisibleScrollIndicator。
+                    .modifier(AlwaysVisibleScrollIndicator())
                     .tag(idx)
                 }
             }

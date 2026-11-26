@@ -299,9 +299,10 @@ struct SettingsView: View {
         // 1.3.0.009：底栏改回悬浮胶囊（overlay，006 那版），List 底部留 120pt——胶囊下面
         // 到屏幕底边那块要彻底干净，滑到底「关于我们」离胶囊再远一点；120pt 够它完整露出来。
         // 1.3.0.013：滚动指示条常显——老爷 19:24 说「没有滑动框」，List 滚的时候右边
-        // 那条灰线默认滚完就淡出、几乎看不见；.scrollIndicators(.visible) 让它一直
-        // 看得见，滚到哪一眼就知道。
-        .scrollIndicators(.visible)
+        // 那条灰线默认滚完就淡出、几乎看不见；.scrollIndicators(.visible) 没用（画廊实拍
+        // 证明它根本不画出来），改走自绘滑块 AlwaysVisibleScrollIndicator，一直看得见，
+        // 滚到哪一眼就知道。
+        .modifier(AlwaysVisibleScrollIndicator())
         .safeAreaInset(edge: .bottom) {
             Color.clear.frame(height: 120)
         }
