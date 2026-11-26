@@ -215,6 +215,16 @@ private struct AppPagePreview: View {
                 d.overridden = true
                 d.note = "临时调班"
             }
+            // 改了班次就要把派生字段一起改：aggregateDays 按 isWork 计数，
+            // 只改 shift 不改 isWork 的话 11-17 还是算休息，出勤少 1 班、预估偏高
+            //（405.51 而不是 396.02；2026-11-26 画廊第二轮验出后补）。
+            if d.overridden == true {
+                let parts = d.shift == "休息" ? [] : ShiftStyle.parts(of: d.shift)
+                d.isWork = !parts.isEmpty
+                d.isDouble = parts.count == 2
+                d.totalHours = parts.count * 8
+                d.timeLabel = parts.isEmpty ? nil : parts.map { ShiftStyle.timeRange(for: $0) }.joined(separator: " + ")
+            }
             return d
         }
         return yearDays

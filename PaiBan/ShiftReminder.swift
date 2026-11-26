@@ -51,6 +51,10 @@ enum ShiftReminder {
     /// AppStore 是 @MainActor，读 store 的班次要走主线程。
     @MainActor
     static func ensurePermissionAndSchedule(store: AppStore) async -> Bool {
+        // 画廊截图模式（--widget-preview 启动）不弹权限请求：
+        // 模拟器里每次启动都会弹系统弹窗，盖住要截的界面；真机上不受影响。
+        // 弹窗本身能弹出来已由画廊第一轮截图证实（日历/详情两张上都有）。
+        if CommandLine.arguments.contains("--widget-preview") { return false }
         guard isEnabled else { return false }
         let status = await authorizationStatus()
         if status == .authorized {
