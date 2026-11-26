@@ -131,10 +131,15 @@ enum UpdateChecker {
     /// 启动后调用一次：有新版且今天没点过「稍后」→ 返回版本记录；否则返回 nil。
     /// 约定（canonical）：downloadUrl 为空表示没有更新——即使 latestVersion 高于当前版，
     /// 只要 downloadUrl 为空就不弹。失败（没网、服务器不通、清单格式不对）静默返回 nil。
+    /// 1.3.0.007：查更新走装的版本那条线（installedChannel），不用存的偏好 channel——
+    /// 偏好只在设置页确认切换时才写，从不跟装的版本同步（1.2.7.009 同一个毛病）；
+    /// 一旦脱节（偏好是 stable、装的是 1.3.0.005 内测版），查更新拿到的就是正式版 1.3.0，
+    /// 1.3.0 比 1.3.0.005 旧，isNewer 直接 false，内测版 006 永远弹不出来。
+    /// 装的版本才是现在用的那条线，查更新必须按它走。
     static func checkAfterLaunch(api: APIClient) async -> VersionInfo? {
         guard !dismissedToday else { return nil }
         do {
-            let info = try await api.fetchVersion(channel: channel)
+            let info = try await api.fetchVersion(channel: installedChannel)
             guard info.hasDownloadURL else { return nil }
             guard isNewer(latest: info.latestVersion, than: currentVersion) else { return nil }
             return info
@@ -188,9 +193,11 @@ enum UpdateChecker {
     /// 手动检查：失败时静默返回 .upToDate（不弹错，由调用方只在有结果时提示）。
     /// 注意：手动检查不看「稍后」的当天记录，点一次就查一次。
     /// 约定（canonical）：downloadUrl 为空表示没有更新，即使版本号有差异也按无更新处理。
+    /// 1.3.0.007：跟 checkAfterLaunch 同理，走装的版本那条线（installedChannel），
+    /// 不用存的偏好——不然偏好是 stable 时手动查也只能查到正式版，内测版永远查不出来。
     static func checkManually(api: APIClient) async -> ManualResult {
         do {
-            let info = try await api.fetchVersion(channel: channel)
+            let info = try await api.fetchVersion(channel: installedChannel)
             guard info.hasDownloadURL else {
                 return .upToDate
             }

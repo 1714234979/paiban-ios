@@ -63,9 +63,10 @@ struct PayView: View {
                             monthBreakdown(year: ym.year, month: ym.month)
                             noteCard
                         }
-                        // 1.3.0.005：底部留白 100 → 120——胶囊下面到屏幕底边那块（老爷划了红线）
-                        // 要彻底干净，最底下的内容离胶囊再远一点；120pt 够它完整露出来。
-                        .padding(.bottom, 120)
+                        // 1.3.0.007：底栏按 001 那版重做（满宽毛玻璃栏，safeAreaInset 挂底边），
+                        // 栏本来就占位、内容在栏上面结束，120pt（004–006 为悬浮胶囊留的）不用了，
+                        // 改回 24pt。
+                        .padding(.bottom, 24)
                         // 点编辑框以外的地方就收起（丢弃未保存的改动）。Tap 手势只认轻点，
                         // 拖动（滚动/横滑）不会触发，不跟左右滑切月、上下滚动冲突。
                         .onTapGesture {
