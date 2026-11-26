@@ -90,6 +90,20 @@ import SwiftUI
 /// 本来就占位，内容在栏上面结束，不用再留 120pt；设置页 List 那 120pt safeAreaInset
 /// 直接删掉。刷新率适配（006 的 RefreshRateBoost）和更新弹窗修（007 的
 /// installedChannel）都在 007 里，一个包发。
+///
+/// 1.3.0.008（第 46 条再修，老爷 2026-11-26 18:14 发 007 实机截图亲口纠：
+/// 「又回到之前了」，让直接重新编写、写成液态玻璃的）：007 那个 001 版他不认——
+/// 看着像玻璃之前的老样子，不是他要的液态玻璃；001 的 ultraThinMaterial 太素了，
+/// 没有液态玻璃那个味儿。这次直接按他要的写，不再绕回 001：**液态玻璃 + 全宽底栏**。
+/// 做法：底栏还是满宽一条、贴着屏幕底边、顶上一条细 Divider，没有胶囊、没有选中
+/// 小药丸；底先铺一层 .regularMaterial（中度磨砂，006 证实过：底下内容糊成色块、
+/// 字读不出来，透亮但不透字），上面罩 iOS 26+ 的 .glassEffect(.regular, in: Rectangle())
+/// （Liquid Glass 的折射和亮边，满宽矩形、不是胶囊——006 的 capsuleGlass 原样换形状）。
+/// 三个按钮还是图标 21pt + 文字 10pt，选中 AccentColor 蓝色、没选中 secondary，
+/// 只变颜色、没有选中底块、不盖玻璃。挂法还是 safeAreaInset(edge: .bottom)，
+/// 滑动还是 006 的 .highPriorityGesture()，不震动，三页 24pt 底部留白不变。
+/// 更新弹窗修（007 的 installedChannel）和刷新率适配（006 的 RefreshRateBoost）都在，
+/// 008 只改底栏这一项。
 struct MainTabView: View {
     @EnvironmentObject private var store: AppStore
 
@@ -136,8 +150,9 @@ struct MainTabView: View {
     var body: some View {
         // 不用 TabView：原生 Tab 栏在 iOS 27 上藏不掉，底下会多露一条旧底栏，
         // 还会抢点按和震动。手动切 Tab：三页都活着，只显示选中的那一页。
-        // 1.3.0.007：底栏按 001 那版重做——满宽毛玻璃栏（GlassTabBar），
-        // safeAreaInset 挂在底边，内容在栏上面结束；不要悬浮胶囊、不要选中底块。
+        // 1.3.0.008：底栏改成液态玻璃满宽栏（GlassTabBar：regularMaterial 打底 +
+        // iOS 26+ .glassEffect(.regular) 矩形罩面），safeAreaInset 挂在底边，
+        // 内容在栏上面结束；不要悬浮胶囊、不要选中底块。
         ZStack {
             tabPage(tag: 0)
                 .opacity(store.selectedTab == 0 ? 1 : 0)
@@ -188,14 +203,16 @@ struct MainTabView: View {
     }
 }
 
-/// 自定义玻璃切换栏（1.3.0.001 原版，1.3.0.007 按老爷亲口定原样拿回来，第 46 条）：
-/// 满宽一条毛玻璃栏，贴着屏幕底边；底是 .ultraThinMaterial（最薄那档毛玻璃，
-/// 透出底下内容），顶上一条细 Divider 分隔线；三个按钮就是图标 21pt + 文字 10pt，
-/// 选中 AccentColor 蓝色、没选中 secondary，干净、没有选中底块。
-/// 点按钮切换；在栏上左右滑动也能切换（来回都行）。
+/// 自定义玻璃切换栏（1.3.0.008，第 46 条，老爷亲口定：直接按液态玻璃重写）：
+/// 满宽一条液态玻璃栏，贴着屏幕底边；底铺 .regularMaterial（中度磨砂，滚到下面的
+/// 内容糊成色块、字读不出来），上面罩 iOS 26+ 的 .glassEffect(.regular, in: Rectangle())
+/// （Liquid Glass 的折射和亮边，满宽矩形、不是胶囊）；顶上一条细 Divider 分隔线；
+/// 三个按钮就是图标 21pt + 文字 10pt，选中 AccentColor 蓝色、没选中 secondary，
+/// 只变颜色、没有选中底块、不盖玻璃。点按钮切换；在栏上左右滑动也能切换（来回都行）。
 /// 滑动手势用 006 的 .highPriorityGesture()（001 的普通 .gesture() 会被 Button
 /// 的点按手势抢走、真机上滑不动，005 已证实）；不震动（老爷亲口定，001 的震动
 /// 不要加回来）。选中态走 AccentColor 资产（浅色深 navy、深色亮蓝，1.2.8.002 已改好）。
+/// 26 以下的手机只有磨砂底、没有 Liquid Glass 罩面（barGlass 里 #available 包着）。
 private struct GlassTabBar: View {
     let items: [(tag: Int, title: String, icon: String)]
     @Binding var selectedTab: Int
@@ -224,7 +241,13 @@ private struct GlassTabBar: View {
                 .buttonStyle(.plain)
             }
         }
-        .background(.ultraThinMaterial, ignoresSafeAreaEdges: .bottom)
+        // 1.3.0.008：液态玻璃——底铺 .regularMaterial（中度磨砂，滚到下面的内容糊成
+        // 色块、字读不出来），上面罩 iOS 26+ 的 .glassEffect(.regular, in: Rectangle())
+        // （Liquid Glass 的折射和亮边，满宽矩形、不是胶囊）。001 的 .ultraThinMaterial
+        // 太素、没有液态玻璃味儿，老爷 18:14 发 007 实机截图亲口否了（「又回到之前了」）。
+        // 26 以下只有磨砂底（barGlass 里 #available 包着）。
+        .background(.regularMaterial, ignoresSafeAreaEdges: .bottom)
+        .barGlass()
         .overlay(alignment: .top) {
             Divider()
         }
@@ -241,5 +264,19 @@ private struct GlassTabBar: View {
                     }
                 }
         )
+    }
+}
+
+/// 底栏液态玻璃（1.3.0.008，第 46 条）：iOS 26+ 才罩 .glassEffect(.regular, in: Rectangle())
+/// （Liquid Glass，26+ API，满宽矩形）；26 以下什么都不加，只留底下的 .regularMaterial
+/// 磨砂底（磨砂本身 iOS 15+ 就有，部署目标 iOS 16 能用）。006 的 capsuleGlass 原样换形状。
+private extension View {
+    @ViewBuilder
+    func barGlass() -> some View {
+        if #available(iOS 26.0, *) {
+            self.glassEffect(.regular, in: Rectangle())
+        } else {
+            self
+        }
     }
 }

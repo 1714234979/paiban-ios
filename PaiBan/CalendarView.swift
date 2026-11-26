@@ -52,7 +52,7 @@ struct CalendarView: View {
                 recordsSection
             }
             .padding(.horizontal, 16)
-            // 1.3.0.007：底栏按 001 那版重做（满宽毛玻璃栏，safeAreaInset 挂底边），
+            // 1.3.0.007：底栏回到满宽栏（safeAreaInset 挂底边，008 改成液态玻璃），
             // 栏本来就占位、内容在栏上面结束，120pt（004–006 为悬浮胶囊留的）不用了，
             // 改回 24pt。
             .padding(.bottom, 24)
