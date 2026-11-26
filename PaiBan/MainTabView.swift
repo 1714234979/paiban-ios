@@ -27,6 +27,9 @@ import SwiftUI
 /// 屏幕底边约 23pt（003 是 50pt，往下挪约 27pt）；三个标签，胶囊按三个标签
 /// 的宽度做，适当做短一点（限宽 300pt 居中），不照视频四个标签的宽度做。
 /// 震动不要了，点按和滑动都不震（003 的共享震动器整段删掉）。
+/// 同版再修底栏盖内容：safeAreaInset 在 NavigationStack 里传不进去，三页
+/// 滑到底最底下的内容都被胶囊盖住（排班统计卡、设置「关于」）。改成 overlay
+/// 纯悬浮 + 各页自己留 100pt 底部留白，胶囊顶离内容底边约 41pt，够露出来。
 struct MainTabView: View {
     @EnvironmentObject private var store: AppStore
 
@@ -88,9 +91,13 @@ struct MainTabView: View {
                 .allowsHitTesting(store.selectedTab == 2)
         }
         // 悬浮胶囊玻璃栏：按三个标签的宽度做短一点（限宽 300pt 居中），
-        // 位置照视频——胶囊底离屏幕底边约 23pt（003 是 50pt，往下挪约 27pt，
-        // 用 offset 下移，safeAreaInset 照样占位，内容不会被栏挡住）。
-        .safeAreaInset(edge: .bottom) {
+        // 位置照视频——胶囊底离屏幕底边约 23pt。
+        // 1.3.0.004 修重合：原来用 safeAreaInset 占位，但它在 NavigationStack
+        // 里传不进去，内容照样滑到胶囊底下（排班统计卡、设置「关于」都被盖）。
+        // 改成 overlay 纯悬浮（只管样子、不占位），底部留白改由各页自己留
+        // （排班/工资 ScrollView padding.bottom 100，设置 List safeAreaInset 100），
+        // 胶囊顶离内容底边约 41pt，100pt 够最底下的内容完整露出来。
+        .overlay(alignment: .bottom) {
             GlassTabBar(
                 items: tabItems,
                 selectedTab: $store.selectedTab,
@@ -98,8 +105,7 @@ struct MainTabView: View {
                 onSwipeRight: { switchTab(step: -1) }
             )
             .frame(maxWidth: 300)
-            .padding(.bottom, 16)
-            .offset(y: 27)
+            .padding(.bottom, 23)
         }
         // 没登录时点小组件进来的深链：登录后进主界面再跳（store.handleDeepLink 先记下来）。
         .task {

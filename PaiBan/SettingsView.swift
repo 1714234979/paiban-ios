@@ -296,6 +296,11 @@ struct SettingsView: View {
                 }
             }
         }
+        // 1.3.0.004：List 底部留 100pt——悬浮胶囊顶离内容底边约 41pt，
+        // 不留的话滑到底「关于我们」会被胶囊盖住；100pt 够它完整露出来。
+        .safeAreaInset(edge: .bottom) {
+            Color.clear.frame(height: 100)
+        }
         .navigationTitle("设置")
         .alert("检查更新", isPresented: updateNoticeBinding) {
             Button("知道了", role: .cancel) {
