@@ -55,9 +55,9 @@ import SwiftUI
 /// ② 不是透明玻璃：005 的不透明实色胶囊他不要，要透明玻璃效果（像音乐 / 文件 App
 /// 视频里那种 Liquid Glass，磨砂、半透明、透出底下内容的模糊影子）。但 004 被否
 /// 是因为玻璃太透、工资页的字透过胶囊清清楚楚能读出来。所以这次玻璃要透、但透出
-/// 来的是糊的、字读不出来：胶囊底先铺一层 .thickMaterial（重磨砂，把底下内容糊成
-/// 色块、字认不出来），上面再罩 iOS 26+ 的 .glassEffect(.regular)（Liquid Glass
-/// 的折射和亮边，看上去还是玻璃、不是 005 那种实色死板）；26 以下只有磨砂底
+/// 来的是糊的、字读不出来：胶囊底先铺一层 .regularMaterial（中度磨砂，把底下
+/// 内容糊成色块、字认不出来；.thickMaterial 太实、看着像 005 的不透明实色），
+/// 上面再罩 iOS 26+ 的 .glassEffect(.regular)（Liquid Glass 的折射和亮边，
 /// （.glassEffect 是 26+ API，#available 包着）。其余不动：选中底块+蓝色、未选中
 /// 灰色、底离屏幕底边约 23pt、限宽 300pt 居中、不震动、内容在胶囊上面结束、胶囊
 /// 下面到屏幕底边干净（VStack 底部固定不动）。
@@ -219,10 +219,11 @@ private struct FilesTabBar: View {
             }
         }
         .padding(.horizontal, 10)
-        // 1.3.0.006：透明玻璃——底铺 .thickMaterial（重磨砂，底下内容糊成色块、
-        // 字认不出来），上面罩 iOS 26+ 的 .glassEffect(.regular)（Liquid Glass
-        // 的折射和亮边）。26 以下只有磨砂底（capsuleGlass 里 #available 包着）。
-        .background(.thickMaterial, in: Capsule())
+        // 1.3.0.006：透明玻璃——底铺 .regularMaterial（中度磨砂，底下内容糊成色块、
+        // 字认不出来；.thickMaterial 太实、画廊里看着像 005 的不透明实色胶囊），
+        // 上面罩 iOS 26+ 的 .glassEffect(.regular)（Liquid Glass 的折射和亮边）。
+        // 26 以下只有磨砂底（capsuleGlass 里 #available 包着）。
+        .background(.regularMaterial, in: Capsule())
         .capsuleGlass()
         .shadow(color: .black.opacity(0.15), radius: 12, x: 0, y: 4)
         // 1.3.0.006：滑动手势改成 .highPriorityGesture()。005 的普通 .gesture()
