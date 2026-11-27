@@ -135,6 +135,13 @@ struct DayDetailView: View {
     @State private var overtimeEnd = Calendar.current.date(bySettingHour: 20, minute: 0, second: 0, of: Date()) ?? Date()
     @State private var overtimeNote = ""
 
+    // MARK: 自己改排班（点某天直接改这天的班，走单日覆盖接口）
+
+    @State private var showEditShiftForm = false
+    /// 正在改成的班次（默认当天现在的班次；现在不是这 5 个之一时默认日班）。
+    @State private var editShiftSelection = "日班"
+    @State private var editShiftSaving = false
+
     @State private var errorText: String?
     @State private var doneMessage: String?
 
@@ -143,7 +150,7 @@ struct DayDetailView: View {
     /// 点开调班/请假/记加班任一表单时切到 .large；表单关了再缩回 .medium。
     @State private var sheetDetent: PresentationDetent = .medium
     private var formOpen: Bool {
-        showSwapFlow || showFillPayback || showLeaveForm || showLeaveRangeForm || showOvertimeForm
+        showSwapFlow || showFillPayback || showLeaveForm || showLeaveRangeForm || showOvertimeForm || showEditShiftForm
     }
 
     var body: some View {
@@ -178,6 +185,7 @@ struct DayDetailView: View {
                         if showLeaveForm { leaveForm }
                         if showLeaveRangeForm { leaveRangeForm }
                         if showOvertimeForm { overtimeForm }
+                        if showEditShiftForm { editShiftForm }
                     }
                 }
                 .padding(AppStyle.pagePadding)
@@ -445,9 +453,117 @@ struct DayDetailView: View {
         }
     }
 
+    // MARK: 自己改排班（点某天直接改这天的班，走单日覆盖接口）
+
+    /// 改排班的可选班次：5 个（没有"休息"，想恢复原班次用已有的「删除这次调班」）。
+    private var editShiftOptions: [String] { ["日班", "中班", "早班", "早中班", "日中班"] }
+
+    /// 这天有没有对方班组的调班记录：partner 不为空，或是还班日/替班日
+    /// （paybackDate/coverDate）。有就不能直接改排班，先取消调班再改。
+    /// 普通单边覆盖（partner 为空）可以直接覆盖重改。
+    private var hasPartnerSwap: Bool {
+        if let partner = shownDay.partner, !partner.isEmpty { return true }
+        return shownDay.paybackDate != nil || shownDay.coverDate != nil
+    }
+
+    /// 点「改排班」：请假那天、已有对方班组调班记录那天先拦住（只提示，不开表单）；
+    /// 其余直接开表单，默认选中当天现在的班次。
+    private func openEditShiftForm() {
+        resetFlowStates()
+        if shownDay.onLeave == true {
+            errorText = "这天请假了，先取消请假再改"
+            return
+        }
+        if hasPartnerSwap {
+            errorText = "这天已有调班（对方班组），先取消调班再改"
+            return
+        }
+        editShiftSelection = editShiftOptions.contains(shownDay.shift) ? shownDay.shift : "日班"
+        showEditShiftForm = true
+    }
+
+    /// 改排班表单：5 个班次选项（默认当天现在的班次）+ 确认修改。
+    /// 守规矩：选的和现在一样不让改；等服务端回话再报成功，失败显示服务端原话；
+    /// 成功后刷新当月日历和工资页，详情里「实际班次」跟着变成改后的班。
+    private var editShiftForm: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("改排班")
+                .font(.headline)
+            Text("现在这天是 \(shownDay.shift)。改成：")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            ForEach(editShiftOptions, id: \.self) { shift in
+                editShiftOptionRow(shift)
+            }
+            Text("没有「休息」：想恢复原来的班，用下面的「删除这次调班」。")
+                .font(.caption)
+                .foregroundColor(.secondary)
+            Button {
+                Task { await submitEditShift() }
+            } label: {
+                if editShiftSaving {
+                    ProgressView()
+                } else {
+                    Text("确认修改")
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .frame(maxWidth: .infinity)
+            .disabled(editShiftSaving)
+        }
+        .padding(AppStyle.cardPadding)
+        .background(Color(.secondarySystemBackground))
+        .cornerRadius(AppStyle.cardRadius)
+    }
+
+    private func editShiftOptionRow(_ shift: String) -> some View {
+        Button {
+            editShiftSelection = shift
+            errorText = nil
+        } label: {
+            HStack {
+                Text(shift)
+                    .font(.subheadline).bold()
+                    .foregroundColor(.primary)
+                Text(ShiftStyle.timeRange(for: shift))
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                Spacer()
+                if editShiftSelection == shift {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.accentColor)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(12)
+            .background(editShiftSelection == shift ? Color.accentColor.opacity(0.12) : Color(.systemBackground))
+            .cornerRadius(10)
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(editShiftSelection == shift ? Color.accentColor : Color.clear, lineWidth: 1.5))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func submitEditShift() async {
+        if editShiftSelection == shownDay.shift {
+            errorText = "跟现在这天的班一样，不用改"
+            return
+        }
+        errorText = nil
+        doneMessage = nil
+        editShiftSaving = true
+        defer { editShiftSaving = false }
+        do {
+            try await store.submitDayShift(date: shownDay.date, shift: editShiftSelection)
+            doneMessage = "这天已改成 \(editShiftSelection)"
+            showEditShiftForm = false
+        } catch {
+            errorText = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
     // MARK: 操作入口
 
-    /// 四个操作并排两列（调班 / 请假 / 请一段假 / 记加班），一次只开一个表单；
+    /// 操作并排两列（调班 / 请假 / 请一段假 / 记加班 / 改排班），一次只开一个表单；
     /// 已有调班/请假时，取消类操作单独放一行红色文字按钮。
     /// 1.1.4：原来是 LazyVGrid + .bordered/.borderedProminent，pill 只包文字、
     /// 按内容定宽（「请一段假」4 个字比「调班」宽），左右两列不对齐、看着歪。
@@ -485,6 +601,14 @@ struct DayDetailView: View {
                     }
                     resetFlowStates()
                     showOvertimeForm.toggle()
+                }
+                // 自己改排班：和调班/请假并列。手动排班时不出现——那套已有上面的
+                // 「设当天班次」，走的是本机逐日设定；再叠一个服务端覆盖会打架
+                // （改完 picker 再设会被覆盖记录盖住，看着像没改）。
+                if !store.rotation.isManual {
+                    actionButton("改排班") {
+                        openEditShiftForm()
+                    }
                 }
             }
             // 已有调班/请假/加班时的取消入口（只读日历上不出现）。
@@ -540,6 +664,7 @@ struct DayDetailView: View {
         showLeaveForm = false
         showLeaveRangeForm = false
         showOvertimeForm = false
+        showEditShiftForm = false
         errorText = nil
         doneMessage = nil
     }

@@ -700,6 +700,8 @@ struct PaySettingsView: View {
     @State private var deptPerfText = ""
     @State private var hireYear = 2018
     @State private var hireMonth = 10
+    /// 今年是不是第一次拿工资（2026-11-27 修订版，第 4.4 条）：默认 true。
+    @State private var firstEmploymentInYear = true
     @State private var annualLeaveText = "5"
     @State private var isSavingPay = false
     @State private var saveMessage: String?
@@ -803,6 +805,22 @@ struct PaySettingsView: View {
                 }
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
+                        Text("今年是第一次拿工资吗？")
+                        Text("第一次拿工资：累计减除费用按 5000 × 当年月份数；之前在别处拿过工资、今年年中才入职：按在本单位任职月数算")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    Picker("", selection: $firstEmploymentInYear) {
+                        Text("是，第一次").tag(true)
+                        Text("不是，之前拿过").tag(false)
+                    }
+                    .pickerStyle(.menu)
+                    .labelsHidden()
+                    .fixedSize(horizontal: true, vertical: false)
+                }
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
                         Text("剩余年休假天数")
                         Text("没休完的累计到明年，不清零；休了年假会自动扣")
                             .font(.caption)
@@ -855,6 +873,22 @@ struct PaySettingsView: View {
                 }
                 DatePicker("开始日期", selection: $shortageStartDate, displayedComponents: .date)
                 DatePicker("结束日期", selection: $shortageEndDate, displayedComponents: .date)
+                // 专项附加扣除（第 52 条，2026-11-27）：多选 + 数量/档位，存 paySettings.specialDeductions。
+                NavigationLink {
+                    SpecialDeductionsView()
+                } label: {
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("专项附加扣除")
+                            Text("子女教育、房贷利息、赡养老人这些，每月从应纳税所得额里扣，个税会少交")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Text(specialDeductionSummary)
+                            .foregroundColor(.secondary)
+                    }
+                }
                 Button {
                     Task { await savePaySettings() }
                 } label: {
@@ -901,6 +935,7 @@ struct PaySettingsView: View {
         // 入职时间默认 2018-10（和全局默认一致）；剩余年休假默认 5 天。
         hireYear = settings?.hireYear ?? 2018
         hireMonth = settings?.hireMonth ?? 10
+        firstEmploymentInYear = settings?.firstEmploymentInYear ?? true
         annualLeaveText = settings?.annualLeaveRemaining.map { String($0) } ?? "5"
     }
 
@@ -909,6 +944,12 @@ struct PaySettingsView: View {
             return String(Int(value))
         }
         return String(value)
+    }
+
+    /// 专项附加扣除摘要（第 52 条）：每月扣多少，没填就显示「未填写」。
+    private var specialDeductionSummary: String {
+        let monthly = PayCalc.specialDeductionMonthly(store.user?.paySettings?.specialDeductions)
+        return monthly > 0 ? "每月扣 \(MoneyUtil.money(monthly))" : "未填写"
     }
 
     private func savePaySettings() async {
@@ -936,6 +977,7 @@ struct PaySettingsView: View {
         // 入职时间（只到月份）+ 剩余年休假天数（1.2.6）：整数 0–365，超出不保存并提示。
         settings["hireYear"] = hireYear
         settings["hireMonth"] = hireMonth
+        settings["firstEmploymentInYear"] = firstEmploymentInYear
         if let value = Int(annualLeaveText.trimmingCharacters(in: .whitespaces)) {
             guard value >= 0, value <= 365 else {
                 saveMessage = "剩余年休假天数要在 0–365 之间"
@@ -975,6 +1017,316 @@ struct PaySettingsView: View {
         do {
             try await store.saveProfile(paySettings: settings)
             saveMessage = "已保存，下个月的工资按新设置算"
+            await store.refreshPay()
+        } catch {
+            saveMessage = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+}
+
+/// 专项附加扣除编辑页（第 52 条，2026-11-27；2026-11-27 修订版：DeepSeek 修订）：
+/// 多选 + 数量/档位，填完保存到服务端 paySettings.specialDeductions，工资页个税立刻按新数算。
+/// 房贷利息与住房租金互斥（服务端校验会拦，这里选了一边就自动清掉另一边，不让用户填出
+/// 服务端会报错的组合）。大病医疗填年度自付总额，月度不扣，只汇算时扣。
+/// 职业资格取证当年一次性扣 3600（取证当月才计）；婴幼儿照护每孩分别填每月金额。
+/// 从设置 → 工资设置 → 专项附加扣除进来，也从工资页「有没有专项附加扣除」弹窗的
+/// 「有，去填写」进来；第一次打开且还没问过时，onAppear 里触发一次询问弹窗（见 Store）。
+struct SpecialDeductionsView: View {
+    @EnvironmentObject private var store: AppStore
+
+    @State private var infantCareAmounts: [String] = []
+    @State private var childEduText = ""
+    @State private var continuingEdu = ""
+    @State private var certYear = Calendar.current.component(.year, from: Date())
+    @State private var certMonth = Calendar.current.component(.month, from: Date())
+    @State private var certYearMonthSet = false
+    @State private var medicalSelfPayText = ""
+    @State private var mortgage = false
+    @State private var rent: Double = 0
+    @State private var elderlyText = ""
+    @State private var isSaving = false
+    @State private var saveMessage: String?
+
+    private let rentOptions: [Double] = [0, 800, 1100, 1500]
+
+    /// 当前填的每月扣除总额（实时预览，和工资页用的同一口径；取证当月才含那 3600）。
+    private var monthlyTotal: Double {
+        PayCalc.specialDeductionMonthly(SpecialDeductions(
+            infantCare: infantCareAmounts.map { Int($0.trimmingCharacters(in: .whitespaces)) ?? 0 },
+            childEdu: Int(childEduText.trimmingCharacters(in: .whitespaces)),
+            continuingEdu: continuingEdu,
+            certYearMonth: continuingEdu == "vocational" && certYearMonthSet
+                ? String(format: "%04d-%02d", certYear, certMonth) : nil,
+            medicalSelfPayAnnual: Double(medicalSelfPayText.trimmingCharacters(in: .whitespaces)),
+            mortgage: mortgage, rent: rent,
+            elderly: Double(elderlyText.trimmingCharacters(in: .whitespaces))
+        ))
+    }
+
+    /// 取证年月 Picker 的绑定：用户动手选才记为“已填”，fillFields 程序回填不算。
+    private var certYearBinding: Binding<Int> {
+        Binding(get: { certYear }, set: { certYear = $0; certYearMonthSet = true })
+    }
+    private var certMonthBinding: Binding<Int> {
+        Binding(get: { certMonth }, set: { certMonth = $0; certYearMonthSet = true })
+    }
+
+    var body: some View {
+        Form {
+            Section {
+                HStack {
+                    Text("每月共扣")
+                    Spacer()
+                    Text(MoneyUtil.money(monthlyTotal))
+                        .bold()
+                }
+                Text("个税按累计预扣法算：累计应纳税所得额 = 累计总收入 − 累计五险一金 − 5000 × 已发薪月份数 − 累计专项附加扣除。填的越多，当月扣的税越少。")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            Section("孩子") {
+                // 3岁以下婴幼儿照护（修订版）：每孩分别填每月金额，每孩 0–2000；
+                // 夫妻分摊的填自己那份（一人全额填 2000，平分各填 1000）。
+                ForEach(infantCareAmounts.indices, id: \.self) { i in
+                    HStack {
+                        Text("婴幼儿照护 · 孩子 \(i + 1) 每月金额")
+                        Spacer()
+                        TextField("0", text: $infantCareAmounts[i])
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 100)
+                        Button(role: .destructive) {
+                            infantCareAmounts.remove(at: i)
+                        } label: {
+                            Image(systemName: "minus.circle")
+                        }
+                    }
+                }
+                if infantCareAmounts.count < 5 {
+                    Button("添加孩子") { infantCareAmounts.append("") }
+                }
+                Text("3岁以下婴幼儿照护：每孩每月最多扣 2000；夫妻分摊的填自己那份（一人全额填 2000，平分各填 1000）。没孩子就不用填。")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("子女教育每月金额")
+                        Text("每个孩子 ¥2000/月；夫妻分摊的填自己那份（一人全额填 2000，平分各填 1000）")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    TextField("0", text: $childEduText)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 120)
+                }
+            }
+            Section("继续教育") {
+                Picker("继续教育", selection: $continuingEdu) {
+                    Text("没有").tag("")
+                    Text("学历教育（¥400/月）").tag("degree")
+                    Text("职业资格（取证当年一次性 ¥3600）").tag("vocational")
+                }
+                .pickerStyle(.menu)
+                if continuingEdu == "vocational" {
+                    // 取证年月（修订版）：取证当月一次性扣 3600，其余月 0；没填按 0 算。
+                    HStack {
+                        Text("取证年月")
+                        Spacer()
+                        Picker("年份", selection: certYearBinding) {
+                            ForEach(2020...Calendar.current.component(.year, from: Date()) + 1, id: \.self) { y in
+                                Text(verbatim: "\(y)").tag(y)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .fixedSize(horizontal: true, vertical: false)
+                        Text("年")
+                        Picker("月份", selection: certMonthBinding) {
+                            ForEach(1...12, id: \.self) { m in
+                                Text(verbatim: "\(m)").tag(m)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .fixedSize(horizontal: true, vertical: false)
+                        Text("月")
+                    }
+                    Text("取证当年一次性扣 ¥3600：只在取证那个月扣，其他月 0；没填取证年月按 0 算。")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            Section("大病医疗") {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("年度自付总额")
+                        Text("医保目录范围内年度自付总额；汇算时按（自付−15000）扣，上限 80000；仅汇算使用，不影响每月工资")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    TextField("0", text: $medicalSelfPayText)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 120)
+                }
+                let deductible = PayCalc.medicalAnnualDeduction(SpecialDeductions(
+                    medicalSelfPayAnnual: Double(medicalSelfPayText.trimmingCharacters(in: .whitespaces))))
+                if deductible > 0 {
+                    Text("预计汇算可扣 \(MoneyUtil.money(deductible))（次年汇算时一次性扣）")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            Section("住房") {
+                Toggle("首套房贷利息（¥1000/月）", isOn: $mortgage)
+                    .onChange(of: mortgage) { on in
+                        // 房贷与租金互斥：勾了房贷，租金清零。
+                        if on { rent = 0 }
+                    }
+                Picker("住房租金", selection: $rent) {
+                    ForEach(rentOptions, id: \.self) { v in
+                        Text(v == 0 ? "没有" : "¥\(Int(v))/月").tag(v)
+                    }
+                }
+                .pickerStyle(.menu)
+                .onChange(of: rent) { v in
+                    // 房贷与租金互斥：选了租金，房贷取消。
+                    if v > 0 { mortgage = false }
+                }
+                Text("房贷利息和住房租金只能选一个：有房贷就勾房贷，租房就选租金那档。")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            Section("赡养老人") {
+                HStack {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("每月金额")
+                        Text("独生填 3000；和兄弟姐妹分摊的填自己那份，每人每月不超过 1500")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    TextField("0", text: $elderlyText)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 120)
+                }
+            }
+            Section {
+                Button {
+                    Task { await save() }
+                } label: {
+                    if isSaving {
+                        ProgressView()
+                    } else {
+                        Text("保存专项扣除")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(isSaving)
+                if let saveMessage {
+                    Text(saveMessage)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+        .navigationTitle("专项附加扣除")
+        .onAppear(perform: fillFields)
+        .onChange(of: store.user?.paySettings?.specialDeductions) { _ in fillFields() }
+        // 第一次打开专项扣除且还没问过：弹窗问一次「有没有专项附加扣除」。
+        // （工资页第一次进页时也会问，两边共用同一个“问过”标记，先问到的算数。）
+        // dispatch 到下一轮 runloop 再改 @Published，避免“视图更新中改状态”的警告。
+        .onAppear {
+            if !store.specialDeductionAsked
+                && PayCalc.specialDeductionMonthly(store.user?.paySettings?.specialDeductions) == 0 {
+                DispatchQueue.main.async { store.needsSpecialDeductionAsk = true }
+            }
+        }
+        .alert("有没有专项附加扣除？", isPresented: $store.needsSpecialDeductionAsk) {
+            Button("有，去填写") { store.markSpecialDeductionAsked() }
+            Button("没有", role: .cancel) { store.markSpecialDeductionAsked() }
+        } message: {
+            Text("子女教育、房贷利息、赡养老人这些，每月能从应纳税所得额里扣，个税会少交。有的话填一下，没有就跳过，只问一次。")
+        }
+    }
+
+    private func fillFields() {
+        let sd = store.user?.paySettings?.specialDeductions
+        infantCareAmounts = (sd?.infantCare ?? []).map { String($0) }
+        childEduText = sd?.childEdu.map { String($0) } ?? ""
+        continuingEdu = sd?.continuingEdu ?? ""
+        if let ym = sd?.certYearMonth, ym.count == 7,
+           let y = Int(ym.prefix(4)), let m = Int(ym.suffix(2)) {
+            certYear = y
+            certMonth = m
+            certYearMonthSet = true
+        } else {
+            certYearMonthSet = false
+        }
+        medicalSelfPayText = sd?.medicalSelfPayAnnual.map { $0 == $0.rounded() ? String(Int($0)) : String($0) } ?? ""
+        mortgage = sd?.mortgage ?? false
+        rent = sd?.rent ?? 0
+        elderlyText = sd?.elderly.map { $0 == $0.rounded() ? String(Int($0)) : String($0) } ?? ""
+    }
+
+    private func save() async {
+        saveMessage = nil
+        isSaving = true
+        defer { isSaving = false }
+        // 婴幼儿照护（修订版）：每孩分别填每月金额，每孩 0–2000。
+        var infantCare: [Int] = []
+        for (i, t) in infantCareAmounts.enumerated() {
+            let trimmed = t.trimmingCharacters(in: .whitespaces)
+            let v = trimmed.isEmpty ? 0 : Int(trimmed)
+            guard let v, v >= 0, v <= 2000 else {
+                saveMessage = "婴幼儿照护：孩子 \(i + 1) 每月金额要在 0–2000 之间"
+                return
+            }
+            infantCare.append(v)
+        }
+        let trimmedChildEdu = childEduText.trimmingCharacters(in: .whitespaces)
+        let childEdu = trimmedChildEdu.isEmpty ? 0 : Int(trimmedChildEdu)
+        guard let childEdu, childEdu >= 0, childEdu <= 10000 else {
+            saveMessage = "子女教育每月金额要在 0–10000 之间"
+            return
+        }
+        let trimmedElderly = elderlyText.trimmingCharacters(in: .whitespaces)
+        let elderly = trimmedElderly.isEmpty ? 0 : Double(trimmedElderly)
+        guard let elderly, elderly >= 0, elderly <= 3000 else {
+            saveMessage = "赡养老人每月金额要在 0–3000 之间"
+            return
+        }
+        // 大病医疗（修订版）：填年度自付总额；月度不扣，只汇算用。
+        let trimmedSelfPay = medicalSelfPayText.trimmingCharacters(in: .whitespaces)
+        let medicalSelfPay = trimmedSelfPay.isEmpty ? 0 : Double(trimmedSelfPay)
+        guard let medicalSelfPay, medicalSelfPay >= 0, medicalSelfPay <= 1000000 else {
+            saveMessage = "大病医疗年度自付总额要在 0–1000000 之间"
+            return
+        }
+        // 房贷与租金互斥：界面上已经互斥清掉了，这里再兜底一次，房贷优先。
+        let finalRent: Double = mortgage ? 0 : rent
+        // 职业资格没填取证年月：按 0 处理，保存照常，只提示一句。
+        let certWarning: String? = (continuingEdu == "vocational" && !certYearMonthSet)
+            ? "取证年月没填，职业资格这个月按 0 算；填上取证年月后，取证当月一次性扣 3600" : nil
+        var dict: [String: Any] = [
+            "infantCare": infantCare,
+            "childEdu": childEdu,
+            "continuingEdu": continuingEdu,
+            "medicalSelfPayAnnual": medicalSelfPay,
+            "mortgage": mortgage,
+            "rent": finalRent,
+            "elderly": elderly,
+        ]
+        if continuingEdu == "vocational" && certYearMonthSet {
+            dict["certYearMonth"] = String(format: "%04d-%02d", certYear, certMonth)
+        }
+        do {
+            try await store.saveProfile(paySettings: ["specialDeductions": dict])
+            saveMessage = "已保存，下个月的工资按新设置算" + (certWarning.map { "；\($0)" } ?? "")
             await store.refreshPay()
         } catch {
             saveMessage = (error as? APIError)?.message ?? error.localizedDescription
@@ -1058,7 +1410,7 @@ struct UsageGuideView: View {
                 Text("点某一天进当天详情，再点调班或请假。调班：选对方班，默认两人互换，保存前能看到两边怎么变；可以先不填还班日，过几天再补；删掉调班时替班日和还班日一起恢复。请假：选一天或一段日期，只算有班的日子，休班那天不算。只能改自己班的日历（设置页里那个班），切到别的班只能看。两条连班禁令：中班接次日早班不行，早班加日班不行；能双班的组合只剩早班加中班、日班加中班；一天不能上两个相同的班；休班的人来顶岗只上一个班，不算双班。")
             }
             Section("工资页怎么看") {
-                Text("工资页显示的是预估工资，仅供参考，和实际发的有出入属正常。点「可改」的行能按单月改科室绩效、绩效系数、奖金系数、加班天数、水电费，只影响当月。个税按累计预扣法算：累计应纳税所得额 = 累计总收入 − 累计五险一金 − 5000 × 已发薪月份数，当月扣税 = 本月累计税额 − 上月累计税额，税从奖金里扣。学历补贴和缺员补贴在「设置 → 工资设置」里填。")
+                Text("工资页显示的是预估工资，仅供参考，和实际发的有出入属正常。点「可改」的行能按单月改科室绩效、绩效系数、奖金系数、加班天数、水电费，只影响当月。个税按累计预扣法算：累计应纳税所得额 = 累计总收入 − 累计五险一金 − 5000 × 已发薪月份数 − 累计专项附加扣除，当月扣税 = 本月累计税额 − 上月累计税额，税从奖金里扣。学历补贴、缺员补贴和专项附加扣除在「设置 → 工资设置」里填。")
             }
             Section("反馈问题") {
                 Text("设置页点「反馈问题」，选类型和出问题的页面，写清是哪个月出了问题，可附一张截图，发送时附上最近 24 小时运行日志。发完的反馈在反馈页下方的「我的反馈」里能看到，点开一条看管理员的回复，还能继续回，像聊天一样来回说。")
@@ -1079,56 +1431,58 @@ struct ChangelogView: View {
     var body: some View {
         Form {
             Section {
+                changelog(version: "1.3.1.001（内测）", items: [
+                    "个税加专项附加扣除：子女教育、赡养老人按自己填的每月金额扣，婴幼儿照护每孩自己填每月金额（每孩最多 2000），学历教育 400/月，职业资格取证当年一次性扣 3600（要填取证年月），大病医疗只在次年汇算时扣、不影响每月工资，房贷 1000/月或租金三档（二选一）；设置 → 工资设置 → 专项附加扣除里填；有工资权限的人第一次进工资页会问一次有没有专项扣除，只问一次；工资页奖金区多了一行「专项附加扣除」",
+                    "个税算出来是负数时不再倒扣：按 0 算，多的留到以后月份再抵，不会从实发奖金里扣钱。",
+                    "工资页首次进页改成空状态：还没填工资设置时，工资页只显示一个「填写工资设置」按钮，点进去走一遍引导，填完才显示数据",
+                    "登录页加「忘记密码？」：没登录时用短信验证码重置密码（输手机号 → 收验证码 → 设新密码），不用再找管理员",
+                    "切月更快、更省流量；小组件只在内容变化时刷新",
+                    "点某天能直接改这天的班：日班/中班/早班/早中班/日中班，改完计入当月总班数算工资。",
+                ])
                 changelog(version: "1.3.0.015（内测）", items: [
-                    "底栏回归最开始的样子：液态玻璃这条线不做了，直接用 1.3.0 正式版那套系统自带的底栏（图标加文字就是系统默认那套），001–014 的自定义底栏（悬浮胶囊、满宽毛玻璃栏）全撤了，液态玻璃测试页也删了。三页底部留白改回原生底栏对应的值，不用再留 24pt / 120pt。其他功能都在：更新弹窗修法、滚动指示条常显、刷新率适配、公积金自填",
+                    "底栏恢复系统默认样式；修复更新提醒不弹出的问题；滚动指示条常显；支持 120Hz 刷新率；公积金可以自己填。",
                 ])
                 changelog(version: "1.3.0.014（内测）", items: [
-                    "底栏按老爷说的办法重做：直接用第一版 1.3.0.001 那条满宽毛玻璃栏（玻璃是对的），把顶上盖着玻璃的那条分隔线拿掉，三个标签（图标加文字）直接坐在玻璃上，中间什么都不隔；整条栏往上挪一点、离屏幕底边留 8pt，不贴底。满宽栏本来就占位，三页底部留白改回 24pt。栏上左右滑切页还在，不震动",
-                    "更新弹窗也修了：012 那次打开 App 不弹更新提示，是启动那一下服务器还没解析好、检查直接跳过了，之后也没人重试；现在查之前先解析一次服务器，主界面稳了 2 秒后再查一次补上",
+                    "底栏改为满宽毛玻璃样式；修复更新提醒不弹出的问题。",
                 ])
                 changelog(version: "1.3.0.013（内测）", items: [
-                    "底栏玻璃换 UIKit 磨砂玻璃：.glassEffect() 连着五版（006/009/010/011/012）全是实心白，参数换遍了、层级核过没遮挡，这条路在咱这个工程里就是不通；这次底栏直接换 UIKit 的 UIVisualEffectView 磨砂玻璃（系统磨砂，实时糊掉底下经过的内容、透出色块，一定看得出来是玻璃），配淡淡白调、柔和投影、发亮细边。设置 → 关于里新加「液态玻璃测试」页：彩色底上并排两颗胶囊，A 是 SwiftUI 玻璃、B 是 UIKit 磨砂玻璃，上下滚彩色块、看哪个透出后面的颜色。悬浮胶囊的样子、位置、选中只变色、没有小药丸、不震动都没变；栏上左右滑切页更好滑了（阈值放宽到 24pt，短滑也切页）；三页的滚动指示条现在一直看得见，滚到哪一眼就知道。更新弹窗修（012）和刷新率适配（006）都在",
+                    "底栏玻璃效果优化；栏上滑动切页更灵敏；滚动指示条常显。",
                 ])
                 changelog(version: "1.3.0.012（内测）", items: [
-                    "更新弹窗修好了：之前打开 App 从来不弹更新提示，只能自己去文件 App 里翻 IPA 手动装——根因找到了：内测更新要服务端按认证换版号，请求没带上有效身份时服务端只回正式版 1.3.0，比装的内测版还旧，弹窗永远不弹。这次内测版直接读服务端公开回的内测版号比，不再依赖认证；进 App（冷启动、切回前台）都会查，有新版就弹；查失败也不清掉已排好的提示",
-                    "底栏液态玻璃：对着文件 App 那个真玻璃胶囊看明白了——真玻璃有淡淡的白调、柔和的投影、发亮的细边三样；之前只罩了一层透明玻璃，浅底上近乎隐形。这次三样都补上了，胶囊应该能看出来是浮着的玻璃了。悬浮胶囊的样子、位置、滑动切页、不震动都没变，选中还是蓝色、没选中灰色，没有小药丸",
+                    "修复更新提醒不弹出的问题；底栏玻璃效果优化。",
                 ])
                 changelog(version: "1.3.0.011（内测）", items: [
-                    "底栏液态玻璃根因修好了：010 发过去老爷发实机截图说「还是不行」——胶囊还是实心白。根因找到了：.glassEffect(.regular) 自带白霜色调，采样均匀浅灰底就显实心白；这次改最透的 .clear 玻璃，阴影整段拿掉（阴影的额外合成可能闷掉玻璃的实时采样），再埋一条日志标记证明玻璃路径在真机上跑了。悬浮胶囊的样子、位置、滑动切页、不震动都没变，选中还是蓝色、没选中灰色，没有小药丸。更新弹窗修（007）和刷新率适配（006）都在",
+                    "底栏玻璃效果优化。",
                 ])
                 changelog(version: "1.3.0.010（内测）", items: [
-                    "底栏液态玻璃根因修好了：009 发过去老爷发实机截图说「没有液态玻璃，我真的要生气了」——截图上胶囊是实心白色，一点玻璃感都没有。根因找到了：胶囊同时挂了中度磨砂底和系统 Liquid Glass，磨砂底太实、把玻璃折射全盖死了，胶囊成了实心白药丸。这次磨砂底整个拿掉，背景是透明的，只留系统 Liquid Glass，让玻璃直接去折射后面的内容；对着彩色内容（排班页日历）看，胶囊里能看到底下内容糊掉的影子和折射亮边。悬浮胶囊的样子、位置、滑动切页、不震动都没变，选中还是蓝色、没选中灰色，没有小药丸。更新弹窗修（007）和刷新率适配（006）都在",
+                    "底栏玻璃效果优化。",
                 ])
                 changelog(version: "1.3.0.009（内测）", items: [
-                    "底栏按胶囊 + 液态玻璃重做：008 理解错了——老爷要的是悬浮胶囊（不是满宽栏），上面加液态玻璃。006 那个胶囊的底层（磨砂 + 玻璃）他是认的，错的是上层那个选中小药丸。这次按 006 的胶囊、去掉选中小药丸：悬浮胶囊（底离屏幕底边约 23pt、限宽 300pt 居中、内容从胶囊下面滑过去），胶囊底先铺一层中度磨砂、上面罩系统 Liquid Glass（折射和亮边，胶囊形状）；选中就是蓝色、没选中就是灰色，只变颜色，什么都不盖在玻璃上。栏上左右滑切页还在，不震动。三页底部留白回到 120pt。更新弹窗修（007）和刷新率适配（006）都在",
+                    "底栏改成悬浮胶囊样式，加玻璃效果。",
                 ])
                 changelog(version: "1.3.0.008（内测）", items: [
-                    "底栏直接按液态玻璃重写：007 那版回到 001 的满宽毛玻璃栏，老爷发实机截图说「又回到之前了」——ultraThinMaterial 太素，没有液态玻璃那个味儿。这次底栏还是满宽一条、贴着屏幕底边、顶上一条细分隔线，没有胶囊、没有选中小药丸；底先铺一层中度磨砂（滚到下面的内容糊成色块、字读不出来），上面罩系统 Liquid Glass（折射和亮边，满宽矩形、不是胶囊）。三个按钮还是图标加文字，选中蓝色、没选中灰色，只变颜色、不盖玻璃。栏上左右滑切页还在，不震动。三页 24pt 底部留白不变。更新弹窗修（007）和刷新率适配（006）都在",
+                    "底栏玻璃效果重做。",
                 ])
                 changelog(version: "1.3.0.007（内测）", items: [
-                    "更新弹窗修好了：006 出来后打开 App 不弹更新提示，是查更新走错了渠道——查更新用的是设置页里存的更新偏好（默认正式版），偏好从不跟装的版本同步；装的是 1.3.0.005 内测版、偏好是正式版时，查到的就是正式版 1.3.0，比装的 1.3.0.005 还旧，系统就以为没有更新。1.2.7.009 渠道切换那个毛病也是同一个根。现在查更新按装的版本走：装内测版就查内测线、装正式版就查正式线，偏好脱节也不影响弹更新。设置页「检查更新」手动查也一样按装的版本走",
-                    "底栏按最开始 1.3.0.001 那版重做：002–006 的悬浮胶囊来回改了五版都不满意，这次直接回到第一版——满宽毛玻璃栏，不要悬浮胶囊、不要选中底块。底是 ultraThinMaterial 最薄那档毛玻璃、透出底下内容，顶上一条细分隔线；三个按钮就是图标加文字，选中蓝色、没选中灰色，干净。栏上左右滑切页还在，不震动。三页为悬浮胶囊留的 120pt 底部留白改回 24pt，栏本来就占位",
+                    "修复更新提醒不弹出的问题；底栏恢复满宽毛玻璃样式。",
                 ])
                 changelog(version: "1.3.0.006（内测）", items: [
-                    "底部切换栏改回透明玻璃：005 那版不透明实色胶囊看着死板，不是玻璃；现在胶囊底先铺一层中度磨砂，底下内容糊成色块、字认不出来，上面再罩系统 Liquid Glass，看上去是透明玻璃、透出底下内容的模糊影子。底栏改回悬浮：内容竖滚会从胶囊底下经过，玻璃才看得见；滑到底时三页的 120pt 底部留白让最后的内容完整露在胶囊上面。选中那个还是浅色圆角底块 + 蓝色图标文字，没选中的是灰色。位置、宽度、不震动都不变",
-                    "底栏左右滑切页修好了：005 里在栏上左右滑切不动，是手势挂法的问题（普通手势会被栏里三个按钮的点按抢走）；现在拖动手势优先于按钮点按，点按钮照样能点，在栏上左右滑能切页",
-                    "刷新率适配：App 跟着系统自适应刷新走，最高跑到 120Hz（iPhone 的 ProMotion 封顶就是 120Hz，140Hz 硬件上做不到）。滚动、切页、动画都跟上自适应刷新；静止时系统自己会降频省电，不用管",
+                    "底栏改回透明玻璃悬浮样式；栏上滑动切页修复；支持 120Hz 刷新率。",
                 ])
                 changelog(version: "1.3.0.005（内测）", items: [
-                    "底部切换栏照 iOS 文件 App 那个悬浮胶囊重做：004 的玻璃胶囊还是半透明，工资页奖金那几行透过胶囊露出来、重在一起，屏幕最底边那块也不干净；现在胶囊改成不透明实色，内容滚到下面直接被挡住，不会透出来。选中那个有浅色圆角底块 + 蓝色图标文字，没选中的是灰色。位置、宽度、滑动切页都不变，震动还是不要。三页底部留白加到 120pt，滑到底最底下的内容离胶囊更远。底栏改成底部固定：三页内容区在胶囊上面结束，内容永远滑不到胶囊下面，胶囊下面到屏幕底边那块只剩干净的页面底色",
+                    "底栏悬浮胶囊改成不透明。",
                 ])
                 changelog(version: "1.3.0.004（内测）", items: [
-                    "底部切换栏照音乐 App 那个悬浮胶囊改：003 的胶囊还是太宽、浮得太高，看着像回到了以前那条；现在底栏位置跟视频里一样（胶囊底离屏幕底边约 23pt，比 003 低约 27pt），胶囊按三个标签的宽度做短一点（限宽 300pt 居中），不照视频四个标签的宽度。震动不要了，点按和滑动切换都不震",
+                    "底栏悬浮胶囊位置和宽度调整。",
                 ])
                 changelog(version: "1.3.0.003（内测）", items: [
-                    "底部切换栏再修：002 那版旧底栏没藏住，底下还露着原来那条，点旧栏会震、点胶囊不震，滑动也没震动；现在不用系统 Tab 栏了，只留悬浮胶囊这一条，点胶囊切换和栏上左右滑切换都要震一下。胶囊再做长一点、往上靠一点点：左右留边收窄、底部空隙加大",
+                    "底栏只留悬浮胶囊。",
                 ])
                 changelog(version: "1.3.0.002（内测）", items: [
-                    "底部切换栏改成悬浮胶囊 + 系统 Liquid Glass：以前是贴底满宽的毛玻璃栏（不是真玻璃）；现在栏不贴底、不满宽、没有顶部分隔线，圆角胶囊浮在内容上面，离底边和左右都留一截空隙，像钉钉那样。玻璃用 iOS 26 以上系统最新的 Liquid Glass，透明度跟系统走，深浅色系统自己适配；在栏上左右滑动能切换页面（也能点），滑动时震一下。iOS 26 以下的手机还是以前的毛玻璃，不影响用",
+                    "底栏改成悬浮胶囊，加系统液态玻璃效果；在栏上左右滑动可以切页。",
                 ])
                 changelog(version: "1.3.0.001（内测）", items: [
-                    "底部切换栏加玻璃效果：排班/工资/设置那条栏变成毛玻璃，透出底下内容；在栏上左右滑动能切换页面（也能点），滑动时震一下，像钉钉那样",
-                    "公积金改直接填：以前按缴费基数×6.8% 反推，算出来的和工资条对不上；现在工资设置里直接填月扣金额，照工资条填，不填按 0 算（不扣公积金）。更新后第一次打开会弹一次窗让填，没填的下次打开再弹，正式版出来没填的还会再弹一次。养老、医疗、失业还是按基数算，不动",
+                    "底栏加毛玻璃效果，在栏上左右滑动可以切页；公积金改成自己填。",
                 ])
                 changelog(version: "1.3.0（正式版）", items: [
                     "内容与 1.2.9.004 内测版相同：每日预估改按实发算、排班页统计行加上基本天数、应出勤改按排班算（基础轮班天数）、小组件介绍图换成真实截图、小号今日小组件钱那行不再截断、入职时间年份纯数字且横着一行显示",
@@ -1139,12 +1493,12 @@ struct ChangelogView: View {
             }
             Section {
                 changelog(version: "1.2.9.003（内测）", items: [
-                    "每日预估改按实发算：以前只算工资部分（今天日班 ¥121.26，没含奖金），现在按天算、按当天班次类型算——每日净预估 = 基本工资 ÷ 当月实际班数 + 班次津贴 + (工龄津贴 + 高温补贴 + 学历补贴) ÷ 班数 − 五险一金 ÷ 班数 − 当月个税 ÷ 班数 + 奖金分摊（只分给正常上班的日子，三薪日、加班日不拿分摊）+ 类型加成（加班日 +2 倍日工资，三薪日 +3 倍日工资，日工资 = 基本工资 ÷ 21.75；21.75 只用在这里）。水电费不扣，餐补不算。当月每天预估加起来等于工资页那个月实发 + 水电费。排班页今日卡片、当天详情、小组件里的已挣和预估都按新口径算；工资页月度公式不动",
+                    "每日预估改按实发算：按当天班次类型算，扣五险一金和个税；水电费不扣，餐补不算。当月每天预估加起来等于工资页那个月实发 + 水电费。",
                     "排班页统计行加上基本天数：以前应出勤和基本天数共用一个数（11 月碰巧都是 21 看不出，10 月会错成 24）；现在基本天数按法定放假口径算（10 月 18 天、11 月 21 天、12 月 23 天）",
-                    "小组件介绍图换成真实截图：今日/本周/本月三张换成老爷手机上真实小组件的新裁图；没有双周这个小组件，双周那张拿掉；新加本月工资和锁屏今日已挣两张介绍卡，只有开了工资权限才显示；没权限的人小号今日小组件只显示班次和倒计时，不显示钱",
-                    "小号今日小组件钱那行不再截断：以前「已挣 ¥122.57 · 预估 ¥326.02」这么长的一行缩到 0.7 还是放不下，显示成「预估 ¥3...」；现在允许缩到 0.5，整行完整显示，仍是一行",
+                    "小组件介绍图换成真实截图；新加本月工资和锁屏今日已挣两张介绍卡，只有开了工资权限才显示；没权限的人小号今日小组件只显示班次和倒计时，不显示钱",
+                    "小号今日小组件钱那行不再截断：已挣和预估整行完整显示",
                     "入职时间年份不再带逗号：工资设置 → 入职时间的年份滚轮以前显示 2,012、2,018（带千分位逗号），现在显示 2012、2018 这种纯数字；日历显示设置预览和分享班表里的年份也一起改了。金额里的千分位逗号不受影响",
-                    "入职时间年份不再折行：工资设置 → 入职时间的年份以前窄得折成「20」/「18」两行竖着显示，现在横着一行显示（入职时间 2018 年 10 月）；工资引导里入职时间那一行也一起改了",
+                    "入职时间年份不再折行：工资设置 → 入职时间的年份以前窄得折成两行竖着显示，现在横着一行显示；工资引导里入职时间那一行也一起改了",
                 ])
             }
             Section {
@@ -1154,73 +1508,73 @@ struct ChangelogView: View {
             }
             Section {
                 changelog(version: "1.2.9.001（内测）", items: [
-                    "每日预估工资改成工资加奖金总共的：以前只算工资部分（今天日班 ¥121.26），现在按天算、按当天班次类型算——普通上班日、加班日、三薪日各按各的。每日预估 = 当日工资（日工资 + 班次补贴 + 餐补 10）+ 每日奖金分摊（当月绩效奖金部分 ÷ 当月实际出勤班数）+ 类型加成（加班日 +2 倍日工资，三薪日 +3 倍日工资）；双班两个班都算。排班页今日卡片、当天详情、小组件里的已挣和预估都按新口径算",
-                    "开通工资功能后，再次进软件弹窗走一遍工资引导：管理端给你开了工资功能，下次打开 App 会弹窗让你把基本工资、奖金系数、缴费基数、岗位、入职时间、剩余年休假填好，再进工资页；已有权限、设定填好了的不弹。引导可以点「以后再说」跳过，跳过后下次进软件还会再弹，直到走完为止",
+                    "每日预估工资改成工资加奖金总共的：按天算、按当天班次类型算，普通上班日、加班日、三薪日各按各的；双班两个班都算。",
+                    "开通工资功能后，再次进软件会弹窗走一遍工资引导：把基本工资、奖金系数、缴费基数、岗位、入职时间、剩余年休假填好，再进工资页；已有权限、设定填好了的不弹。引导可以点「以后再说」跳过，跳过后下次进软件还会再弹，直到走完为止",
                     "钱跟着工资权限走：排班页「已挣 · 预估」那行、当天详情「预估工资」行、小号今日小组件和锁屏小组件里的钱数、本月工资小组件，都只有开了工资权限才能看到；没权限只显示班次和倒计时，不显示钱。倒计时（距下班）不是钱，不管开关都显示",
-                    "调班/请假按空间那套重做（配对互换）：以前调班只能改自己这边、没有和哪个班调的选项；现在点一天看四个班、选一个班替你上这天（你这天休息，对方那天变成组合班），再挑一天还班（也可以先不填，待还班），保存前两边一起预览；删一边两边一起恢复；还班日可以后补，一直不还就转为请假。请假也可以安排别的班顶岗。只改你自己的记录，不动对方的日历；看别的班日历时，你和那个班调过的日子按调班后显示",
+                    "调班/请假重做（配对互换）：以前调班只能改自己这边、没有和哪个班调的选项；现在点一天看四个班、选一个班替你上这天（你这天休息，对方那天变成组合班），再挑一天还班（也可以先不填，待还班），保存前两边一起预览；删一边两边一起恢复；还班日可以后补，一直不还就转为请假。请假也可以安排别的班顶岗。只改你自己的记录，不动对方的日历；看别的班日历时，你和那个班调过的日子按调班后显示",
                     "新用户引导的倒班方式补全：以前引导里选四班三倒只有 8 天一轮一种；现在和设置页一样——手动/周期两张大卡 + 按分类列出的全部方式（四班三倒 5 种、五班三倒、四班两倒、三班二倒、两班倒、巴拿马、杜邦、三班三倒、五班四倒、四班 6 小时），每种带循环示意，选完就生效",
                     "法定节假日三薪标记：只要那天在法定节假日表里，日历格就标「三薪」，不管当天是上班还是休息（比如 2027 年 1 月 1 日元旦 B 班休息，也标三薪）；工资计算不变，三薪天数和金额只算实际上了法定节假日班次的",
-                    "班次推送提醒修好：以前开关看着开着，但提醒从没响过——权限请求只在手动拨开关时才触发，开关默认就是开的，权限一直没定下来，一条提醒都没排过。现在打开软件就弹一次系统通知权限弹窗（只弹一次，被拒后去系统设置里开）；提醒开着但权限还没定，进设置页也会再问一次；被拒就把开关关掉，不再假装开着。提醒是本地通知，不走推送服务",
+                    "班次推送提醒修好：以前开关看着开着，但提醒从没响过。现在打开软件就弹一次系统通知权限弹窗（只弹一次，被拒后去系统设置里开）；被拒就把开关关掉，不再假装开着。",
                 ])
             }
             Section {
                 changelog(version: "1.2.9", items: [
-                    "修深色模式蓝色字看不清：强调色之前是写死的深 navy 蓝，浅色底上没问题，深色黑底上对比度只有 1.3:1；改成深浅自适应——浅色保持原来那个深 navy，深色改系统亮蓝。设置页「切换管理员后台」「检查更新」「意见反馈」「欢迎评分」「自动选路」、排班页月份导航「今天」和左右箭头、底部 Tab 栏选中态、引导页进度条，深色下都清晰可读；底部 Tab 栏未选中态深色也提亮，不再是暗蓝灰",
+                    "修深色模式蓝色字看不清：深色下强调色改亮蓝，设置页、排班页、底部 Tab 栏、引导页深色下都清晰可读",
                     "深色模式全面排查：排班、工资、设置、登录/注册、引导、反馈、关于各页逐页过了一遍，标题、正文、次要文字、链接、按钮、Tab 栏深色下都清楚；系统次要灰字在深色下对比度够，没动",
                 ])
             }
             Section {
                 changelog(version: "1.2.8.002（内测）", items: [
-                    "修深色模式蓝色字看不清：强调色之前是写死的深 navy 蓝，浅色底上没问题，深色黑底上对比度只有 1.3:1；改成深浅自适应——浅色保持原来那个深 navy，深色改系统亮蓝。设置页「切换管理员后台」「检查更新」「意见反馈」「欢迎评分」「自动选路」、排班页月份导航「今天」和左右箭头、底部 Tab 栏选中态、引导页进度条，深色下都清晰可读；底部 Tab 栏未选中态深色也提亮，不再是暗蓝灰",
+                    "修深色模式蓝色字看不清：深色下强调色改亮蓝，设置页、排班页、底部 Tab 栏、引导页深色下都清晰可读",
                     "深色模式全面排查：排班、工资、设置、登录/注册、引导、反馈、关于各页逐页过了一遍，标题、正文、次要文字、链接、按钮、Tab 栏深色下都清楚；系统次要灰字在深色下对比度够，没动",
                 ])
             }
             Section {
                 changelog(version: "1.2.8.001（内测）", items: [
                     "设置里加深色模式：跟随系统 / 浅色 / 深色三个选项，改完立刻生效，不用重启 App",
-                    "修深色模式字体模糊：深色下半透明白字（顶栏班次行、倒计时钱那行、三薪行）发灰发虚，改成纯白；顶栏深 navy 卡片和按钮在黑底上没边，深色提亮一档；8–9pt 阴历小字太暗提亮；上下月补的日期深色放亮一点；开屏深色改深灰渐变，不闪白屏",
+                    "修深色模式字体模糊：深色下文字改纯白、提亮，开屏深色改深灰渐变，不闪白屏",
                 ])
             }
             Section {
                 changelog(version: "1.2.8", items: [
-                    "修小号小组件显示不全：小号宽度有限，顶行日期和底行明日班次都被 … 截断；两行字号都收到 caption2、外边距收紧、班组 pill 收紧，日期和明日班次完整显示，不截断",
-                    "启动加开屏：全屏品牌闪屏（白到极浅的柔和渐变，中间大 logo + 周围飘着班次色小 pill/小圆点，最底下一行小灰字「倒班排班 · 一目了然」），盖住启动时的加载/过渡，不再闪白屏；最少 0.5 秒，主界面准备好才揭开，启动慢就一直盖着",
+                    "修小号小组件显示不全：顶行日期和底行明日班次完整显示，不截断",
+                    "启动加开屏：全屏品牌闪屏（大 logo + 班次色小圆点），盖住启动时的加载/过渡，不再闪白屏",
                 ])
             }
             Section {
                 changelog(version: "1.2.7.010（内测）", items: [
-                    "修小号小组件显示不全：小号宽度有限，顶行日期「11月25日 周三」和底行「明日日班 08:00–16:00」都被 … 截断；两行字号都收到 caption2、外边距 14 → 12、班组 pill 收紧，日期和明日班次完整显示，不截断",
-                    "启动加开屏：全屏品牌闪屏（白到极浅的柔和渐变，中间大 logo + 周围飘着班次色小 pill/小圆点，最底下一行小灰字「倒班排班 · 一目了然」），盖住启动时的加载/过渡，不再闪白屏；最少 0.5 秒，主界面准备好才揭开，启动慢就一直盖着",
+                    "修小号小组件显示不全：顶行日期和底行明日班次完整显示，不截断",
+                    "启动加开屏：全屏品牌闪屏（大 logo + 班次色小圆点），盖住启动时的加载/过渡，不再闪白屏",
                 ])
             }
             Section {
                 changelog(version: "1.2.7.009（内测）", items: [
-                    "修设置页切版本渠道点不动（真根因）：选中态和点按判断之前按存的更新偏好定，偏好和装的版本一脱节，「正式版」就被误标成已选中，点它直接被拦掉；现在按装的版本号定，装着内测版点「正式版」一定进确认框，确认后按正式版查更新、正式版 1.2.7 会推出来让装",
+                    "修设置页切版本渠道点不动：点「正式版」/「内测版」会先弹确认框，确认后按新渠道查更新",
                 ])
             }
             Section {
                 changelog(version: "1.2.7.008（内测）", items: [
-                    "小组件 UI 优化：小号重新排版（日期一行不换行、班组改小 pill，三段上下撑满，休息日底行补明日班次）；本周加农历小字、今天加深高亮，底下加今天·明日和本周统计；本月日期旁加农历小字、今天加深高亮，底下加本月统计；设置页小组件删「怎么添加」「数据状态」两节，空位放真实小组件截图的介绍图（今日/本周/双周/月），「取数实测」留着",
+                    "小组件 UI 优化：小号重新排版，本周/本月加农历小字、今天高亮、底下加统计；设置页小组件改放真实小组件截图的介绍图",
                 ])
             }
             Section {
                 changelog(version: "1.2.7.007（内测）", items: [
-                    "修设置页切版本渠道点不动：List 行里并排两个 plain 按钮会被行手势吞掉点击，改 borderless 才点得动；确认框不等拉网，点下立刻弹，目标渠道版本号到了再补进文案",
+                    "修设置页切版本渠道点不动：点「正式版」/「内测版」立刻弹确认框",
                 ])
             }
             Section {
                 changelog(version: "1.2.7.006（内测）", items: [
-                    "小组件重写：密钥彻底拿掉，不用再填；取数只走设备直连，云和隧道并行抢答、8 秒封顶，工资拉不到也不拖垮班次；装好打开 App 就刷新，不用删掉重加；设置页小组件里加了「立即同步」，当场测取数通不通",
+                    "小组件重写：不用再填密钥；装好打开 App 就刷新，不用删掉重加；设置页小组件里加了「立即同步」",
                 ])
             }
             Section {
                 changelog(version: "1.2.7.005（内测）", items: [
-                    "修小组件只显示颜色、不显示文字：时间线拉数那步太慢、系统直接给了占位，现在 15 分钟内的缓存先出数，拉网只在缓存过期时才走、10 秒封顶，五个小组件都跟着好",
+                    "修小组件只显示颜色、不显示文字：小组件现在直接出数",
                 ])
             }
             Section {
                 changelog(version: "1.2.7.004（内测）", items: [
-                    "小组件不用填密钥了：打开 App 登录一次，本机就自动登记好，小组件直接从服务器拉数据；App Group 的权限留着，以后上架商店正规签名时用它",
+                    "小组件不用填密钥了：打开 App 登录一次，小组件直接从服务器拉数据",
                 ])
             }
             Section {
@@ -1232,18 +1586,18 @@ struct ChangelogView: View {
                 changelog(version: "1.2.7.002（内测）", items: [
                     "倒班方式全部推出：五班三倒、四班两倒（12 小时）、三班二倒（12 小时）、两班倒、巴拿马 2-2-3、杜邦、三班三倒（带替休）、五班四倒、四班 6 小时工作制；选了方式 + 班次，日历和工资班次统计跟着算",
                     "12 小时班禁令：白班接夜班不行、不能连上两个夜班、夜班后休 48 小时、一天只能上一个班；12 小时/6 小时班的工资口径待定，工资页只显示班次统计、金额暂不算",
-                    "手动排班改成参考图样式：月历 + 底部班次按钮，点某天再点班次就是给那天排班；可加自定义班次；日历里的「每周排班」整个删掉，日历只留月视图",
+                    "手动排班改成月历 + 底部班次按钮：点某天再点班次就是给那天排班；可加自定义班次；日历只留月视图",
                     "切版本渠道先弹确认：写清当前版本、目标渠道最新版、切了会怎样；切完立刻按新渠道查一次，另一条线的版本也推出来让用户自己决定装不装",
-                    "六班三倒继续留「即将推出」：两个版本的循环天数对不上、没有逐日序列表，核实不了不硬编",
+                    "六班三倒继续留「即将推出」",
                 ])
             }
             Section {
                 changelog(version: "1.2.7.001（内测）", items: [
-                    "内测渠道：每个版本分内测版 / 正式版两条线；内测人员在设置页切内测 / 正式，管理端按人开内测权限",
-                    "小组件数据修好：小组件直接从服务器拉数据（填一次小组件密钥），不再依赖全能签描述文件的 App Group；设置页「桌面&锁屏小组件」里看数据状态、生成密钥",
+                    "内测渠道：每个版本分内测版 / 正式版两条线；内测人员在设置页切内测 / 正式",
+                    "小组件数据修好：小组件直接从服务器拉数据（填一次小组件密钥）；设置页「桌面&锁屏小组件」里看数据状态、生成密钥",
                     "设置页按新样式重做：桌面&锁屏小组件、班次设置、倒班方式设置、日历显示设置、班次推送提醒、日历默认展开整月、更新日历的节假日、去除广告、意见反馈、欢迎评分、关于我们",
                     "倒班方式设置：手动排班（逐日点）或周期排班；四班三倒 5 种方式（8 天连休式 / 8 天分休式 / 12 天三三制 / 12 天九三制 / 4 天循环），带循环示意；班组名可改",
-                    "节假日走服务器接口：每年 11 月自动更新，管理端可手动刷新；2026 年春节、调休数据按官方通知修正",
+                    "节假日每年 11 月自动更新；2026 年春节、调休数据按官方通知修正",
                     "工资页权限：没有工资权限的人不显示工资 Tab，年休假也跟着隐藏；新用户引导只问排班，不问工资",
                     "共享班表：只共享基础日历，不共享调班；同事分享的班表自动进「同事分享给我的」，点开对照看班次",
                     "调班重做：调班只改自己的日历——把那天改成要换的班，备注写跟谁换的，再挑一天还班；保存前预览自己的日历",
@@ -1276,7 +1630,7 @@ struct ChangelogView: View {
             Section {
                 changelog(version: "1.2.5", items: [
                     "删掉软件里所有车间名字样",
-                    "登录页隐藏云服务器地址，底部中间显示当前版本号",
+                    "登录页底部中间显示当前版本号",
                 ])
             }
             Section {
@@ -1288,22 +1642,19 @@ struct ChangelogView: View {
             Section {
                 changelog(version: "1.2.3", items: [
                     "账号改用手机号登录，不能用中文登录",
-                    "管理员账号可以登录 App（用户端和管理端两边都能进）",
-                    "内置 admin 删掉，张晓文就是最高权限管理者、账号是 18765766628",
-                    "张晓文的 App 里能直接进管理端",
                 ])
             }
             Section {
                 changelog(version: "1.2.2", items: [
-                    "日历日期修复：窄屏手机（如 iPhone 15）上两位数的号不再截成「…」，阳历数字按屏宽自适应",
-                    "更新走服务器直链：点「更新」直接下载安装包，不用再输提取码",
-                    "反馈能双向回复：反馈页下方「我的反馈」里看管理员的回复，还能继续回",
+                    "日历日期修复：窄屏手机上两位数的号不再截成「…」",
+                    "更新不用再输提取码：点「更新」直接下载安装包",
+                    "反馈能双向回复：反馈页下方「我的反馈」里看回复，还能继续回",
                     "关于页加详细使用说明：排班、调班请假、工资、反馈、更新、账号与安全怎么用",
                 ])
             }
             Section {
                 changelog(version: "1.2.1", items: [
-                    "排班页滑动重叠彻底修复：每页数据拍快照、滑动中不换数据源，六行固定行距、各页对齐",
+                    "排班页滑动重叠修复：滑动时各页对齐，不重叠",
                     "日历节日名去掉「节」字：劳动节、儿童节、国庆节等只显示两个字",
                     "日历放假与请假的「假」字分色：放假白字绿底、请假红字",
                     "工资页加学历补贴：专科 50 元、本科 100 元、其他 0 元（工资设置里选学历）",
@@ -1313,14 +1664,14 @@ struct ChangelogView: View {
             }
             Section {
                 changelog(version: "1.1.4", items: [
-                    "排班页左右滑修卡顿：固定网格、不再重算、滑页刷新防抖",
-                    "工资页左右滑改原生 TabView，跟着手指走",
-                    "日历加载可靠：月份取不到重试 3 次、失败不写空缓存、滑页不打断在途加载",
+                    "排班页左右滑修卡顿",
+                    "工资页左右滑跟着手指走",
+                    "日历加载更可靠：滑页不打断加载，加载失败会重试",
                     "重装登录后云端数据完整恢复",
                     "账号与安全页精简：删修改密码提示、删更换手机号入口、换号提示移到换号流程里",
                     "更新日志改成二级菜单",
-                    "当天详情页重做：四按钮 2×2 等宽等高、提示框重排、卡片统一样式、sheet 高度自适应",
-                    "全 App UI 风格统一：主按钮/卡片/字号/间距同一套规范，主色统一成 navy",
+                    "当天详情页重做：按钮和卡片样式统一",
+                    "全 App UI 风格统一：主按钮、卡片、字号、间距同一套规范",
                 ])
             }
             Section {
@@ -1328,14 +1679,13 @@ struct ChangelogView: View {
                     "手机号验证码登录（账号密码登录也保留）",
                     "老账号首次打开强制绑定手机号",
                     "设置页可改密码、改名字、更换手机号（换号一月一次）",
-                    "退出登录只清登录状态，离线缓存保留",
-                    "调班/请假按排班空间重做：选对方班互换、预览两边、删了两边一起恢复",
+                    "退出登录只清登录状态",
+                    "调班/请假重做：选对方班互换、预览两边、删了两边一起恢复",
                     "其他班日历只读，可改的班跟着设置页的班组走",
                     "日历：字体收小、间距收紧、假标不再压阴历、三薪标回、月统计改三薪/加班",
-                    "排班页滑动修掉帧；工资页切月加动画；「可改」行滑动不再误触",
+                    "排班页滑动更顺滑；工资页切月加动画；「可改」行滑动不再误触",
                     "设置页改成二级菜单：账号与安全、工资设置、关于",
                     "点更新自动复制提取码，提示框里也直接显示提取码",
-                    "更新包改名「排班空间1.1.3.zip」",
                 ])
             }
             Section {
@@ -1349,9 +1699,8 @@ struct ChangelogView: View {
             Section {
                 changelog(version: "1.1.1", items: [
                     "科室绩效默认值，设置页可填",
-                    "切月缓存、工资页左右滑",
-                    "云优先，服务器区只对老爷显示",
-                    "管理员权限分层；反馈页改版",
+                    "切月更快、工资页左右滑",
+                    "反馈页改版",
                 ])
             }
             Section {
@@ -1803,8 +2152,12 @@ struct WidgetsView: View {
             return
         }
         if let snap = await WidgetServerClient.fetchSnapshot(deviceId: deviceId) {
-            WidgetSnapshotStore.save(snap)
-            WidgetCenter.shared.reloadAllTimelines()
+            // 只在快照内容真的变化时才写、才刷（和 Store.publishWidgetSnapshot 同一个规矩，
+            // WidgetCenter 刷新有系统预算，别浪费）；没变就只报成功，不重复刷。
+            if snap != WidgetSnapshotStore.load() {
+                WidgetSnapshotStore.save(snap)
+                WidgetKinds.reloadTimelines()
+            }
             syncOK = true
             syncMessage = "取数成功（\(Self.timeFormatter.string(from: Date()))），小组件已刷新，去桌面看。"
         } else {

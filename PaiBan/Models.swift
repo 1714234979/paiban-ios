@@ -1159,6 +1159,68 @@ struct PaySettings: Codable, Equatable {
     var education: String?
     /// 缺员补贴（1.1.5）：用户级设置，金额 + 期限；期限内每月计入奖金。
     var shortageSubsidy: ShortageSubsidy?
+    /// 专项附加扣除（第 52 条，2026-11-27）：存 paySettings.specialDeductions 里，每人自己填。
+    var specialDeductions: SpecialDeductions?
+    /// 今年是不是第一次拿工资（2026-11-27 修订版，第 4.4 条）：true/没填 = 首次取得工资收入，
+    /// 累计减除费用按 5000 × 当年截至本月月份数；false = 今年之前已在别处拿过工资（年中入职），
+    /// 累计减除费用按在本单位任职月数算（入职年月 → 当月，含当月）。
+    var firstEmploymentInYear: Bool?
+}
+
+/// 专项附加扣除（第 52 条，2026-11-27；2026-11-27 修订版：DeepSeek 修订）：
+/// infantCare: 3岁以下婴幼儿照护每孩每月金额数组（如 [2000, 1000]，每孩 0–2000；
+///   旧数据是孩子数 Int，读时按每孩 2000 转数组）；childEdu: 子女教育每月金额（元，0–10000 自填；夫妻分摊填自己那份）；
+/// continuingEdu: "" | "degree"（学历教育 400/月）| "vocational"（职业资格：取证当年一次性 3600）；
+/// certYearMonth: 取证年月（"YYYY-MM"，vocational 时用，取证当月一次性扣 3600，其余月 0）；
+/// medicalSelfPayAnnual: 大病医疗年度自付总额（医保目录范围内年度自付总额；月度不扣，
+///   只汇算时按 min(max(自付−15000,0),80000) 扣）；
+/// mortgage: true = 首套房贷利息 1000/月（与租金互斥）；rent: 住房租金 0|800|1100|1500；
+/// elderly: 赡养老人每月金额（元，0–3000 自填；独生 3000，和兄弟姐妹分摊填自己那份，每人每月不超过 1500）。
+struct SpecialDeductions: Codable, Equatable {
+    var infantCare: [Int]? = nil
+    var childEdu: Int? = nil
+    var continuingEdu: String? = nil
+    var certYearMonth: String? = nil
+    var medicalSelfPayAnnual: Double? = nil
+    var mortgage: Bool? = nil
+    var rent: Double? = nil
+    var elderly: Double? = nil
+
+    enum CodingKeys: String, CodingKey {
+        case infantCare, childEdu, continuingEdu, certYearMonth, medicalSelfPayAnnual, mortgage, rent, elderly
+    }
+
+    init(infantCare: [Int]? = nil, childEdu: Int? = nil, continuingEdu: String? = nil,
+         certYearMonth: String? = nil, medicalSelfPayAnnual: Double? = nil,
+         mortgage: Bool? = nil, rent: Double? = nil, elderly: Double? = nil) {
+        self.infantCare = infantCare
+        self.childEdu = childEdu
+        self.continuingEdu = continuingEdu
+        self.certYearMonth = certYearMonth
+        self.medicalSelfPayAnnual = medicalSelfPayAnnual
+        self.mortgage = mortgage
+        self.rent = rent
+        self.elderly = elderly
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        // infantCare：新口径是每孩金额数组；旧数据是孩子数（Int），按每孩 2000 转数组。
+        if let arr = try? c.decode([Int].self, forKey: .infantCare) {
+            infantCare = arr
+        } else if let n = try? c.decode(Int.self, forKey: .infantCare) {
+            infantCare = n > 0 ? Array(repeating: 2000, count: n) : []
+        } else {
+            infantCare = nil
+        }
+        childEdu = try? c.decode(Int.self, forKey: .childEdu)
+        continuingEdu = try? c.decode(String.self, forKey: .continuingEdu)
+        certYearMonth = try? c.decode(String.self, forKey: .certYearMonth)
+        medicalSelfPayAnnual = try? c.decode(Double.self, forKey: .medicalSelfPayAnnual)
+        mortgage = try? c.decode(Bool.self, forKey: .mortgage)
+        rent = try? c.decode(Double.self, forKey: .rent)
+        elderly = try? c.decode(Double.self, forKey: .elderly)
+    }
 }
 
 /// 缺员补贴（用户级设置）：金额 + 期限（开始/结束日期，YYYY-MM-DD；空表示不限）。
@@ -1522,6 +1584,9 @@ struct PayMonth: Codable, Equatable {
     var bonusAfterTax: Double? = nil
     var grandTotal: Double? = nil
     var taxableIncome: Double? = nil
+    /// 专项附加扣除（第 52 条）：当月扣除额；累计到当月的专项扣除总额。
+    var specialDeductionMonthly: Double? = nil
+    var cumulativeSpecialDeductions: Double? = nil
 }
 
 /// 全年工资视图已删（预估工资只按月看），PayYear 与睡眠窗口 QuietInfo 一并移除。

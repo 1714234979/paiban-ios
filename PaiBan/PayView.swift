@@ -17,6 +17,10 @@ struct PayView: View {
     @State private var editSaving = false
     @State private var editError: String?
     @FocusState private var editFieldFocused: Bool
+    /// 工资设定还没填完时，工资页显示空状态（2026-11-27 10:28）：点按钮进引导。
+    @State private var showPayGuide = false
+    /// 专项扣除询问弹窗里点「有，去填写」后打开的编辑页（第 52 条）。
+    @State private var showSpecialDeductions = false
     /// 滑页的页码 = 月份绝对序号（年*12 + 月-1），与排班页同一套。
     /// 1.2.6 冷启动回当天：默认当月。
     @State private var pageIndex: Int = PayView.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
@@ -48,6 +52,41 @@ struct PayView: View {
             .padding()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(.systemGroupedBackground))
+        } else if store.needsPaySetup {
+            // 工资设定还没填完（2026-11-27 10:28，老爷亲口定，取代第 30 条自动弹窗）：
+            // 干净的空页面，中间只有一个按钮，不显示任何空数字或零；点进去走一遍
+            // 工资设置引导（基本工资、奖金系数、缴费基数、岗位、入职时间、剩余年休假），
+            // 填完引导，工资页才开始正常显示数据。
+            VStack(spacing: 20) {
+                Image(systemName: "doc.text.fill")
+                    .font(.system(size: 44))
+                    .foregroundColor(.secondary)
+                Text("还没填工资设置")
+                    .font(.headline)
+                Text("基本工资、奖金系数、缴费基数、岗位、入职时间和剩余年休假填好后，工资页就按你的数算。")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+                Button {
+                    showPayGuide = true
+                } label: {
+                    Text("填写工资设置")
+                        .font(.headline)
+                        .frame(maxWidth: 240)
+                        .frame(height: AppStyle.buttonHeight)
+                        .background(AppStyle.navyAdaptive)
+                        .foregroundColor(.white)
+                        .cornerRadius(AppStyle.buttonHeight / 2)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding()
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(.systemGroupedBackground))
+            .sheet(isPresented: $showPayGuide) {
+                PayGuideView()
+            }
         } else {
         VStack(spacing: 16) {
             headerCard
@@ -96,6 +135,28 @@ struct PayView: View {
             store.setPayMonth(year: now.year, month: now.month)
             if store.pay == nil {
                 await store.refreshPay()
+            }
+            // 专项扣除询问（第 52 条，2026-11-27）：有工资权限、设定已填完、还没问过、
+            // 且还没填专项扣除，第一次进工资页时弹窗问一次「有没有专项附加扣除」。
+            if store.payAccess && !store.needsPaySetup && !store.specialDeductionAsked
+                && PayCalc.specialDeductionMonthly(store.user?.paySettings?.specialDeductions) == 0 {
+                store.needsSpecialDeductionAsk = true
+            }
+        }
+        .alert("有没有专项附加扣除？", isPresented: $store.needsSpecialDeductionAsk) {
+            Button("有，去填写") {
+                store.markSpecialDeductionAsked()
+                showSpecialDeductions = true
+            }
+            Button("没有", role: .cancel) {
+                store.markSpecialDeductionAsked()
+            }
+        } message: {
+            Text("子女教育、房贷利息、赡养老人这些，每月能从应纳税所得额里扣，个税会少交。有的话填一下，没有就跳过，只问一次。")
+        }
+        .sheet(isPresented: $showSpecialDeductions) {
+            NavigationStack {
+                SpecialDeductionsView()
             }
         }
         .onChange(of: store.payYearMonth.year) { _ in Task { await store.refreshPay() } }
@@ -306,6 +367,17 @@ struct PayView: View {
                         currentValue: pay.overtimeDays.map { String(format: "%.1f", $0) } ?? "0",
                         placeholder: "加班天数（如 2）")
             staticRow(title: "税前奖金", valueText: MoneyUtil.money(pay.bonusTotal), bold: true)
+            // 专项附加扣除（第 52 条）：这个月扣了多少，一眼就能看到税少了是因为扣了专项。
+            if (pay.specialDeductionMonthly ?? 0) > 0 {
+                staticRow(title: "专项附加扣除", valueText: "−\(MoneyUtil.money(pay.specialDeductionMonthly))/月", bold: false)
+            }
+            // 大病医疗（修订版）：只汇算时扣，不进月度预扣；填了年度自付总额就提示一句。
+            if let selfPay = store.user?.paySettings?.specialDeductions?.medicalSelfPayAnnual, selfPay > 0 {
+                Text("大病医疗需在次年汇算时扣除，未计入本月预扣；年度自付 \(MoneyUtil.money(selfPay))，预计汇算可扣 \(MoneyUtil.money(PayCalc.medicalAnnualDeduction(store.user?.paySettings?.specialDeductions)))。")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding(.vertical, 4)
+            }
             staticRow(title: "个税（累计预扣，税从奖金里扣）", valueText: MoneyUtil.money(pay.incomeTax), bold: false)
             staticRow(title: "实发奖金", valueText: MoneyUtil.money(pay.bonusAfterTax), bold: true)
         }

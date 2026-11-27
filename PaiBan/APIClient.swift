@@ -312,9 +312,12 @@ final class APIClient {
 
     /// POST /api/v1/auth/sms/send — 发验证码（6 位、5 分钟有效）。
     /// 服务端限流：同一手机号 60 秒一次、每天最多 10 次；失败中文错误原样透传。
-    func sendSmsCode(phone: String) async throws {
+    /// scenario：发码场景，不传默认 login；忘记密码时传 reset（用重置密码模板 100003）。
+    func sendSmsCode(phone: String, scenario: String? = nil) async throws {
+        var body: [String: Any] = ["phone": phone]
+        if let scenario { body["scenario"] = scenario }
         try await requestNoData(path: "/api/v1/auth/sms/send", method: "POST",
-                                jsonBody: ["phone": phone])
+                                jsonBody: body)
     }
 
     /// GET /api/v1/auth/sms/status — 短信服务是否已开通（只返回 configured，
@@ -366,6 +369,14 @@ final class APIClient {
     func changePassword(phone: String, code: String, newPassword: String) async throws -> UserProfile {
         try await request(path: "/api/v1/me/password/change", method: "POST",
                           jsonBody: ["phone": phone, "code": code, "newPassword": newPassword])
+    }
+
+    /// POST /api/v1/auth/password/reset — 忘记密码（公开接口，没登录时用）。
+    /// 发码时传 scenario=reset（重置密码模板）；核验通过只改密码，不发 session、
+    /// 不自动登录——让用户回登录页用新密码登录。
+    func resetPassword(phone: String, code: String, newPassword: String) async throws {
+        try await requestNoData(path: "/api/v1/auth/password/reset", method: "POST",
+                                jsonBody: ["phone": phone, "code": code, "newPassword": newPassword])
     }
 
     /// POST /api/v1/auth/login — App 专用登录：

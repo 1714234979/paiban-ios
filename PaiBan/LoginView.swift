@@ -28,6 +28,7 @@ struct LoginView: View {
     @State private var errorText: String?
     @State private var isBusy = false
     @State private var showRegister = false
+    @State private var showForgotPassword = false
 
     var body: some View {
         NavigationStack {
@@ -44,7 +45,14 @@ struct LoginView: View {
                     }
                     loginButton
                     if loginMode == .password {
-                        registerLink
+                        HStack {
+                            registerLink
+                            Spacer()
+                            Button("忘记密码？") {
+                                showForgotPassword = true
+                            }
+                            .font(.subheadline)
+                        }
                     }
                     Spacer(minLength: 24)
                     otherMethods
@@ -58,6 +66,13 @@ struct LoginView: View {
             .navigationBarHidden(true)
             .sheet(isPresented: $showRegister) {
                 RegisterView()
+            }
+            .sheet(isPresented: $showForgotPassword) {
+                ForgotPasswordView(onDone: { phone in
+                    // 重置成功回登录页：账号框直接填好这个手机号，用户只输新密码就行。
+                    username = phone
+                    loginMode = .password
+                })
             }
         }
     }
@@ -299,4 +314,229 @@ struct LoginView: View {
 
     /// 大陆手机号校验（共用 PhoneUtil）。
     private func isValidPhone(_ s: String) -> Bool { PhoneUtil.isValid(s) }
+}
+
+/// 忘记密码（登录页「忘记密码？」入口）：没登录时用短信验证码重置密码。
+/// 流程：输手机号 → 点获取验证码（走重置密码模板）→ 输 6 位码 → 设新密码 → 提交。
+/// 成功后只改密码，不自动登录；回登录页时账号框已填好这个手机号，用户只输新密码就行。
+/// 样式和登录页同一套：下划线输入框 + 藏青全圆角胶囊按钮。
+struct ForgotPasswordView: View {
+    @EnvironmentObject private var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+
+    /// 重置成功后回登录页：把手机号带回去填进账号框。
+    var onDone: (String) -> Void = { _ in }
+
+    @State private var phone = ""
+    @State private var smsCode = ""
+    @State private var newPassword = ""
+    @State private var confirmPassword = ""
+    @State private var showPassword = false
+    @State private var showConfirmPassword = false
+    @State private var smsCountdown = 0
+    @State private var smsSending = false
+    @State private var errorText: String?
+    @State private var isBusy = false
+    @State private var resetDone = false
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 24) {
+                    if resetDone {
+                        successBody
+                    } else {
+                        formBody
+                    }
+                }
+                .padding(.horizontal, 32)
+                .padding(.top, 32)
+                .padding(.bottom, 24)
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("忘记密码")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("取消") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private var formBody: some View {
+        VStack(spacing: 24) {
+            Text("用绑定手机号收个验证码，验过就能设新密码。")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+            VStack(spacing: 8) {
+                underlineField {
+                    TextField("请输入手机号", text: $phone)
+                        .keyboardType(.numberPad)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                }
+                underlineField {
+                    HStack(spacing: 12) {
+                        TextField("请输入验证码", text: $smsCode)
+                            .keyboardType(.numberPad)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Button {
+                            Task { await sendSmsCode() }
+                        } label: {
+                            Text(smsCountdown > 0 ? "\(smsCountdown) 秒后重发" : "获取验证码")
+                                .font(.subheadline)
+                                .foregroundColor(.blue)
+                        }
+                        .disabled(smsSending || smsCountdown > 0 || !PhoneUtil.isValid(phone))
+                    }
+                }
+                underlineField {
+                    HStack(spacing: 8) {
+                        Group {
+                            if showPassword {
+                                TextField("请输入新密码（至少 6 位）", text: $newPassword)
+                            } else {
+                                SecureField("请输入新密码（至少 6 位）", text: $newPassword)
+                            }
+                        }
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        Button { showPassword.toggle() } label: {
+                            Image(systemName: showPassword ? "eye" : "eye.slash")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                underlineField {
+                    HStack(spacing: 8) {
+                        Group {
+                            if showConfirmPassword {
+                                TextField("请再输一次新密码", text: $confirmPassword)
+                            } else {
+                                SecureField("请再输一次新密码", text: $confirmPassword)
+                            }
+                        }
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        Button { showConfirmPassword.toggle() } label: {
+                            Image(systemName: showConfirmPassword ? "eye" : "eye.slash")
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
+            if let errorText {
+                Text(errorText)
+                    .font(.subheadline)
+                    .foregroundColor(.red)
+                    .multilineTextAlignment(.center)
+            }
+            Button {
+                Task { await doReset() }
+            } label: {
+                Group {
+                    if isBusy {
+                        ProgressView().tint(.white)
+                    } else {
+                        Text("重置密码").font(.headline)
+                    }
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: AppStyle.buttonHeight)
+                .background(AppStyle.navyAdaptive)
+                .foregroundColor(.white)
+                .cornerRadius(AppStyle.buttonHeight / 2)
+            }
+            .buttonStyle(.plain)
+            .disabled(isBusy || !canReset)
+        }
+    }
+
+    private var successBody: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 56))
+                .foregroundColor(.green)
+            Text("密码已重置")
+                .font(.headline)
+            Text("请用新密码登录。")
+                .font(.subheadline)
+                .foregroundColor(.secondary)
+            Button {
+                onDone(phone.trimmingCharacters(in: .whitespaces))
+                dismiss()
+            } label: {
+                Text("去登录").font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: AppStyle.buttonHeight)
+                    .background(AppStyle.navyAdaptive)
+                    .foregroundColor(.white)
+                    .cornerRadius(AppStyle.buttonHeight / 2)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.top, 48)
+    }
+
+    /// 下划线输入框：和登录页同一套（只有底部一条细线）。
+    private func underlineField<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+        VStack(spacing: 0) {
+            content()
+                .padding(.vertical, 12)
+            Rectangle()
+                .fill(Color(.separator))
+                .frame(height: 1)
+        }
+    }
+
+    private var canReset: Bool {
+        PhoneUtil.isValid(phone) && smsCode.count == 6
+            && newPassword.count >= 6 && !newPassword.contains(":")
+            && confirmPassword == newPassword
+    }
+
+    /// 发验证码（重置密码场景）：成功后开始 60 秒倒计时；失败把服务端中文错误显示出来。
+    private func sendSmsCode() async {
+        errorText = nil
+        smsSending = true
+        defer { smsSending = false }
+        do {
+            try await store.api.sendSmsCode(phone: phone.trimmingCharacters(in: .whitespaces), scenario: "reset")
+            smsCountdown = 60
+            Task {
+                while smsCountdown > 0 {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    smsCountdown -= 1
+                }
+            }
+        } catch {
+            errorText = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    private func doReset() async {
+        errorText = nil
+        guard confirmPassword == newPassword else {
+            errorText = "两次输入的新密码不一致"
+            return
+        }
+        guard !newPassword.contains(":") else {
+            errorText = "新密码不能含冒号"
+            return
+        }
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await store.api.resetPassword(
+                phone: phone.trimmingCharacters(in: .whitespaces),
+                code: smsCode.trimmingCharacters(in: .whitespaces),
+                newPassword: newPassword)
+            resetDone = true
+        } catch {
+            errorText = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
 }

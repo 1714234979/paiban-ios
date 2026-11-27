@@ -88,6 +88,53 @@ enum PayCalc {
         return 0
     }
 
+    /// 专项附加扣除每月额（第 52 条，2026-11-27；2026-11-27 修订版：DeepSeek 修订）：
+    /// 与服务端 specialDeductionMonthly 同口径。婴幼儿照护每孩自填 0–2000/月（数组求和，每孩封顶 2000）；
+    /// 子女教育按填的每月金额（夫妻分摊填自己那份）；学历教育 400/月；
+    /// 职业资格：取证当月（certYearMonth == 当月）一次性 3600，其余月 0（一年只计一次）；
+    /// 大病医疗不参与月度预扣（只汇算时扣，这里按 0 计）；房贷利息 1000/月（与租金互斥，填了房贷就不算租金）；
+    /// 赡养老人按填的每月金额。没填就是 0。
+    /// - year/month: 算哪一月的扣除额（只影响职业资格取证当月那 3600）。
+    static func specialDeductionMonthly(_ sd: SpecialDeductions?, year: Int, month: Int) -> Double {
+        guard let sd else { return 0 }
+        var total: Double = 0
+        total += Double((sd.infantCare ?? []).reduce(0) { $0 + min(max($1, 0), 2000) })
+        total += Double(sd.childEdu ?? 0)
+        if sd.continuingEdu == "degree" { total += 400 }
+        else if sd.continuingEdu == "vocational" {
+            if sd.certYearMonth == String(format: "%04d-%02d", year, month) { total += 3600 }
+        }
+        if sd.mortgage == true { total += 1000 }
+        else { total += sd.rent ?? 0 }
+        total += sd.elderly ?? 0
+        return round2(total)
+    }
+
+    /// 当前月的专项附加扣除额（编辑器预览、摘要、“有没有专项扣除”判断用）。
+    static func specialDeductionMonthly(_ sd: SpecialDeductions?) -> Double {
+        let now = Date()
+        let cal = Calendar.current
+        return specialDeductionMonthly(sd, year: cal.component(.year, from: now), month: cal.component(.month, from: now))
+    }
+
+    /// 大病医疗汇算可扣额（只汇算时用，不进月度预扣）：min(max(年度自付总额 − 15000, 0), 80000)。
+    static func medicalAnnualDeduction(_ sd: SpecialDeductions?) -> Double {
+        let selfPay = sd?.medicalSelfPayAnnual ?? 0
+        return max(0, min(max(selfPay - 15000, 0), 80000))
+    }
+
+    /// 累计减除费用的月数（2026-11-27 修订版，第 4.4 条）：
+    /// 今年第一次拿工资（firstEmploymentInYear 没填或 true）= 当年截至本月月份数；
+    /// 非首次、今年年中才入职 = 在本单位任职月数（入职月 → 当月，含当月）；
+    /// 往年入职的（入职年在今年之前）= 当年截至本月月份数（全年都在职）。
+    static func monthsForDeduction(userSettings: PaySettings?, year: Int, month: Int) -> Int {
+        if userSettings?.firstEmploymentInYear == false,
+           let hy = userSettings?.hireYear, let hm = userSettings?.hireMonth, hy == year {
+            return max(1, month - hm + 1)
+        }
+        return month
+    }
+
     /// 按 monthKey 生效的设置（baseSalary / position / bonusCoef）：取 <= key 的全部条目按 key 升序合并。
     static func effectiveFor(_ effective: [String: PayEffective], key: String) -> PayEffective {
         var out = PayEffective()
@@ -340,7 +387,7 @@ enum PayCalc {
     // MARK: - 全月工资（含累计预扣个税）
 
     /// 算某月工资（含累计预扣个税）：从 1 月算到当月，累计口径与服务端 computePay 一致。
-    /// 税从奖金里扣：当月扣税 = 本月累计个税总额 − 上月累计个税总额。
+    /// 税从奖金里扣：当月扣税 = max(0, 本月累计个税总额 − 上月累计个税总额)，负数钳 0 留抵。
     static func computePay(
         yearDays: [DaySchedule],
         global: PayGlobalSettings,
@@ -353,6 +400,7 @@ enum PayCalc {
         var cumGross: Double = 0
         var cumContrib: Double = 0
         var prevCumTax: Double = 0
+        var cumSpecial: Double = 0
         var result = PayMonth()
         for mm in 1...month {
             var mp = monthPay(
@@ -361,22 +409,33 @@ enum PayCalc {
                 effective: effective, annualLeaveOffset: annualLeaveOffset,
                 year: year, month: mm
             )
+            // 专项扣除按月累计（第 52 条）：没填就是 0；职业资格取证当月那 3600 只在取证月计（其余月 0）。
+            let sdMonthly = specialDeductionMonthly(userSettings?.specialDeductions, year: year, month: mm)
             cumGross = round2(cumGross + (mp.salaryPayable ?? 0) + (mp.contributionTotal ?? 0) + (mp.bonusTotal ?? 0))
             cumContrib = round2(cumContrib + (mp.contributionTotal ?? 0))
-            let cumTaxable = round2(cumGross - cumContrib - 5000 * Double(mm))
+            cumSpecial = round2(cumSpecial + sdMonthly)
+            // 累计减除费用（2026-11-27 修订版，第 4.4 条）：今年第一次拿工资按 5000 × 当年截至本月月份数；
+            // 非首次（年中入职）按在本单位任职月数算。
+            let deductionMonths = monthsForDeduction(userSettings: userSettings, year: year, month: mm)
+            let cumTaxable = round2(cumGross - cumContrib - 5000 * Double(deductionMonths) - cumSpecial)
             let cumTax = taxFor(cumTaxable)
-            let incomeTax = round2(cumTax - prevCumTax)
+            // 当月个税钳 0（修订版第 4.3 条）：余额为负时暂不退税，不冲减实发奖金；
+            // prevCumTax 仍按完整累计走，负值下个月自动吸收（留抵）。
+            let prevTax = prevCumTax
+            let incomeTax = max(0, round2(cumTax - prevTax))
             prevCumTax = cumTax
             mp.cumulativeGross = cumGross
             mp.cumulativeContributions = cumContrib
             mp.cumulativeMonths = mm
             mp.cumulativeTaxableIncome = cumTaxable
             mp.cumulativeTaxTotal = cumTax
-            mp.previousCumulativeTaxTotal = round2(cumTax - incomeTax)
+            mp.previousCumulativeTaxTotal = prevTax
             mp.incomeTax = incomeTax
             mp.bonusAfterTax = round2((mp.bonusTotal ?? 0) - incomeTax)
             mp.grandTotal = round2((mp.salaryNet ?? 0) + ((mp.bonusTotal ?? 0) - incomeTax))
             mp.taxableIncome = cumTaxable
+            mp.specialDeductionMonthly = sdMonthly
+            mp.cumulativeSpecialDeductions = cumSpecial
             result = mp
         }
         return result

@@ -71,7 +71,6 @@ final class AppStore: ObservableObject {
             }
             // 换账号/退出：清掉旧账号的引导弹窗状态，免得串到新账号上。
             if Self.userKey(for: oldValue) != Self.userKey(for: user) {
-                needsPayGuide = false
                 needsHousingFundPrompt = false
                 housingFundPromptEvaluatedThisSession = false
             }
@@ -89,6 +88,21 @@ final class AppStore: ObservableObject {
     var rotation: RotationSetting { user?.rotation ?? .default }
     /// 1.2.7.001：工资页权限（服务端回的；字段缺失时默认开，避免老服务端把老爷的工资页藏掉）。
     var payAccess: Bool { user?.payAccess ?? true }
+
+    /// 工资页空状态（2026-11-27 10:28，老爷亲口定，取代第 30 条的自动弹窗）：
+    /// 有工资权限、但 6 项核心设定（基本工资、奖金系数、岗位、入职年月、剩余年休假）
+    /// 里有没填的，第一次点开工资页只显示一个「填写工资设置」按钮，不显示任何
+    /// 空数字或零；填完引导，工资页才开始正常显示数据。缴费基数不算在内——引导里
+    /// 养老月扣可以空着，基数默认 5938，算工资时有默认值；引导完成时这 6 项一定都填了。
+    /// 老爷不走这套：他的工资走全局配置（基本工资/缴费基数/岗位/入职时间都在全局里），
+    /// 用户级 paySettings 不全也不影响，永远直接进正常工资页。
+    var needsPaySetup: Bool {
+        guard payAccess else { return false }
+        if isOwner { return false }
+        guard let ps = user?.paySettings else { return true }
+        return ps.baseSalary == nil || ps.bonusCoef == nil || ps.position == nil
+            || ps.hireYear == nil || ps.hireMonth == nil || ps.annualLeaveRemaining == nil
+    }
     /// 1.2.7.001：日历显示设置（本地 UserDefaults + 服务端 profile 同步）。
     @Published var calendarDisplay: CalendarDisplaySettings = CalendarDisplaySettings.loadLocal()
     /// 1.2.8.001：外观（跟随系统/浅色/深色，本地 UserDefaults；改完立刻生效，不用重启）。
@@ -155,7 +169,12 @@ final class AppStore: ObservableObject {
     /// 只有真正的数据变更才 +1 让各页重拍快照——调班/请假保存、刷新成功、换班组。
     /// 滑页中的 prefetch / setCurrentMonth 不碰它，滑稳之前快照一动不动。
     @Published var calendarVersion = 0
-    private var fetchingMonths: Set<String> = []       // 正在后台取的月份，避免重复发请求
+    /// 正在后台取的月份，按「班组-yyyy-MM」记在途的 Task：同一个月只发一次请求，
+    /// 再有人要这个月就直接复用正在跑的那个 Task（等它写完缓存），不要重复发请求。
+    /// 1.1.4 只用一个 Set 记 key，只能“跳过”重复请求；现在记 Task，refreshMonth
+    /// 能 await 它、读它写好的缓存，是真正的复用。isLoadingMonth 还是只表示
+    /// “当前月正在刷新”（UI 转圈用），去重逻辑全在这里。
+    private var monthLoadTasks: [String: Task<Void, Never>] = [:]
 
     // App 内更新提示
     @Published var pendingUpdate: VersionInfo?
@@ -324,7 +343,7 @@ final class AppStore: ObservableObject {
         guard !current.isEmpty else { return }
         if UserDefaults.standard.string(forKey: key) != current {
             UserDefaults.standard.set(current, forKey: key)
-            WidgetCenter.shared.reloadAllTimelines()
+            WidgetKinds.reloadTimelines()
         }
     }
 
@@ -452,7 +471,7 @@ final class AppStore: ObservableObject {
         // 退出后小组件没数据可显示：清掉共享区的快照，让它显示占位。
         lastPublishedSnapshot = nil
         WidgetSnapshotStore.clear()
-        WidgetCenter.shared.reloadAllTimelines()
+        WidgetKinds.reloadTimelines()
     }
 
     // MARK: 缓存
@@ -692,11 +711,11 @@ final class AppStore: ObservableObject {
     func prefetchMonth(year: Int, month: Int) {
         let key = monthCacheKey(team: myTeam, year: year, month: month)
         let mk = payCacheKey(year: year, month: month)
-        guard monthCache[key] == nil || swapsCache[mk] == nil || leavesCache[mk] == nil, !fetchingMonths.contains(key) else { return }
-        fetchingMonths.insert(key)
-        Task {
+        // 缓存齐了不用取；这个月已经有在途的 Task，直接复用它（它跑完会写缓存），不另起一个。
+        guard monthCache[key] == nil || swapsCache[mk] == nil || leavesCache[mk] == nil, monthLoadTasks[key] == nil else { return }
+        let task = Task {
             defer {
-                fetchingMonths.remove(key)
+                monthLoadTasks.removeValue(forKey: key)
                 persistCache()
             }
             // fetchMonth 失败重试 3 次（fetchMonthWithRetry）；3 次都失败就不写缓存，
@@ -719,6 +738,7 @@ final class AppStore: ObservableObject {
             if let ot { overtimeCache[mk] = ot }
             isOffline = false
         }
+        monthLoadTasks[key] = task
     }
 
     func refreshMonth() async {
@@ -731,6 +751,18 @@ final class AppStore: ObservableObject {
             let hadCache = month?.year == ym.year && month?.month == ym.month
             if !hadCache { isLoadingMonth = true }
             defer { isLoadingMonth = false }
+            // 复用在途的后台预取：这个月正在取时，等它写完缓存、直接读缓存，
+            // 不再发一遍请求。预取失败（缓存还是不齐）就走下面的正常取数。
+            if let inFlight = monthLoadTasks[key] {
+                await inFlight.value
+                applyCachedMonth()
+                if monthCache[key] != nil && swapsCache[monthKey] != nil && leavesCache[monthKey] != nil {
+                    isOffline = false
+                    calendarVersion += 1
+                    persistCache()
+                    return
+                }
+            }
             do {
                 // 先把四趟取完（各在自己的 await 里），再一次性把结果写进 @Published：
                 // 1.1.2 是取一趟写一次，每次写都触发一次整页重绘，滑页时连着重绘好几次才卡。
@@ -1058,6 +1090,20 @@ final class AppStore: ObservableObject {
         await refreshPay()
     }
 
+    /// 自己改排班：点某天直接改这天的班（单日覆盖，POST /api/v1/me/override，
+    /// body 只有 {date, shift}，partner 不传）。服务端收到后 upsert 当天的覆盖记录，
+    /// 排班和工资计算都按改后的班次算，改完计入当月总班数。
+    /// 连班禁令由服务端最终裁定，失败原样显示中文错误；等服务端回话再报成功。
+    /// 不走 /api/v1/me/swap（那是调班/换班，带还班日概念），也不走本地手动排班
+    /// （那是本机逐日设定，不进服务器、不算工资）。
+    func submitDayShift(date: String, shift: String) async throws {
+        _ = try await api.postOverride(date: date, shift: shift, note: nil, partner: nil, partnerShift: nil)
+        await refreshDayOnCalendar(date: date)
+        await refreshMonth()
+        await refreshPayInputs()
+        await refreshPay()
+    }
+
     func submitLeaveRange(start: String, end: String, type: String?, note: String?) async {
         // 请一段假：本地先把范围内有班的日子都标上请假，后台再同步。
         if let s = DateUtil.date(from: start), let e = DateUtil.date(from: end) {
@@ -1199,10 +1245,16 @@ final class AppStore: ObservableObject {
 
     // MARK: - 工资引导（第 30 条，2026-11-26）
 
-    /// 工资引导弹窗（第 30 条）：管理端给用户开了工资权限后，下次进软件弹出来走一遍工资引导。
-    /// 触发：启动/同步时发现 payAccess 从 false 变成 true、且还没走过这遍引导。
-    /// 已有权限、设定填好了的老用户不弹（他们的 payAccess 一直是 true，没经过 false→true 的翻转）。
-    @Published var needsPayGuide = false
+    /// 工资引导弹窗（第 30 条，2026-11-26）——已废弃（2026-11-27 10:28 老爷亲口定，
+    /// 改成工资页空状态 + 单按钮进引导；自动弹窗不再弹）。
+    /// 旧触发：payAccess 从 false 翻成 true 时弹。现改为：工资页自己看 needsPaySetup，
+    /// 没填完就显示空状态 + 「填写工资设置」按钮（PayView），点进去走同一套 PayGuideView。
+    /// 这里留空函数（调用点还在），避免两个入口同时出现；PayGuideView 本体留着给工资页复用，
+    /// completePayGuide / skipPayGuide 照常用（完成/跳过时记状态、关弹窗）。
+    /// 公积金弹窗（第 47 条）不受影响，照常走 checkHousingFundPrompt。
+    private func checkPayGuide() {
+        // 空状态做法为准，不再自动弹引导。
+    }
 
     /// 公积金弹窗（第 47 条，1.3.0.001）：公积金没填时，更新后首次打开 App 弹一次窗让用户填。
     /// 开关就是「公积金为空就弹」：内测版没填的弹，正式版出来没填的还会再弹一次。
@@ -1223,59 +1275,50 @@ final class AppStore: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: payGuideDoneKey) }
     }
 
-    /// 每次服务端 profile 刷新（user 被赋值）后调：看 payAccess 是不是刚从 false 翻成 true。
-    /// 只在主界面已就绪（引导已过）时才弹；引导页里不弹。
-    /// 跳过（以后再说）不记完成、不更新上次权限——下次启动还会再弹，直到走完为止。
-    private func checkPayGuide() {
-        guard let u = user, u.onboardingDone == true else { return }
-        guard !payGuideDone else { return }
-        let currentAccess = u.payAccess ?? true
-        guard currentAccess else {
-            // 还没开通：记下当前状态（false），等以后翻成 true 再弹。
-            UserDefaults.standard.set(false, forKey: lastPayAccessKey)
-            return
-        }
-        let last = UserDefaults.standard.object(forKey: lastPayAccessKey) as? Bool
-        let flipped = (last == false)
-        // 首跑这版：以前没记过权限，且用户一条工资设定都没填过——当成刚开通，弹一次。
-        // 已有权限的老用户都有 paySettings（哪怕只填了一项），不会误弹。
-        let firstRunUnsetUp = (last == nil && u.paySettings == nil)
-        if flipped || firstRunUnsetUp {
-            needsPayGuide = true
-            // 先不更新 lastPayAccess：跳过的话下次启动还会再弹；走完引导时再记。
-        } else {
-            UserDefaults.standard.set(true, forKey: lastPayAccessKey)
-        }
+    /// 专项扣除询问（第 52 条，2026-11-27）：有工资权限的人第一次进工资页（或第一次打开
+    /// 专项扣除）时，弹窗问「有没有专项附加扣除」；只问一次，问过就按用户 id 存本机标记，
+    /// 不管选有还是没有都不再问。以后改在设置 → 工资设置 → 专项附加扣除里随时改。
+    private var specialDeductionAskedKey: String { "paiban.specialDeductionAsked." + Self.userKey(for: user) }
+    var specialDeductionAsked: Bool {
+        get { UserDefaults.standard.bool(forKey: specialDeductionAskedKey) }
+        set { UserDefaults.standard.set(newValue, forKey: specialDeductionAskedKey) }
+    }
+    /// 专项扣除询问弹窗开关（PayView 第一次进工资页时触发，见 PayView）。
+    @Published var needsSpecialDeductionAsk = false
+    /// 问过了：不管选有还是没有，都记问过、不再弹。
+    func markSpecialDeductionAsked() {
+        specialDeductionAsked = true
+        needsSpecialDeductionAsk = false
     }
 
     /// 公积金弹窗（第 47 条，1.3.0.001）：公积金没填就弹一次窗让用户填。
     /// 只在主界面已就绪（引导已过）时才弹；引导页里不弹；没工资权限的不弹
     /// （公积金是工资设置，没权限的人没有这项）。
     /// 每次启动只评一次：评过就不再评，免得后台同步又弹出来；下次启动重新评，
-    /// 没填的再弹，直到填了为止。工资引导（第 30 条）优先：它在弹的时候不评，
-    /// 等它关了（completePayGuide / skipPayGuide）再评。
+    /// 没填的再弹，直到填了为止。（旧的“工资引导优先”已废弃：第 30 条自动弹窗
+    /// 改成工资页空状态后，引导只在用户点工资页按钮时才打开，不会和启动时
+    /// 评的公积金弹窗撞上，不用再等它。）
     private func checkHousingFundPrompt() {
         guard !housingFundPromptEvaluatedThisSession else { return }
         guard let u = user, u.onboardingDone == true else { return }
         guard u.payAccess ?? true else { return }
-        guard !needsPayGuide else { return }
         housingFundPromptEvaluatedThisSession = true
         if u.paySettings?.housingFund == nil {
             needsHousingFundPrompt = true
         }
     }
 
-    /// 工资引导走完了：记完成、记下当前权限，下次不再弹。
+    /// 工资引导走完了：记完成、记下当前权限；工资页的空状态随之消失（needsPaySetup
+    /// 读的是 6 项设定，填完就不再是空状态）。PayGuideView 自己用 dismiss 关掉。
     func completePayGuide() {
         payGuideDone = true
         UserDefaults.standard.set(true, forKey: lastPayAccessKey)
-        needsPayGuide = false
         checkHousingFundPrompt()
     }
 
-    /// 工资引导点「以后再说」：这次不弹了，但不记完成——下次进软件还会再弹，直到走完为止。
+    /// 工资引导点「以后再说」：这次不填了，但不记完成——工资页还是空状态，
+    /// 下次点开工资页还会看到「填写工资设置」按钮。PayGuideView 自己用 dismiss 关掉。
     func skipPayGuide() {
-        needsPayGuide = false
         checkHousingFundPrompt()
     }
 
@@ -1305,7 +1348,7 @@ final class AppStore: ObservableObject {
         guard snap != lastPublishedSnapshot else { return }
         lastPublishedSnapshot = snap
         WidgetSnapshotStore.save(snap)
-        WidgetCenter.shared.reloadAllTimelines()
+        WidgetKinds.reloadTimelines()
     }
 
     /// 小组件快照：今天 + 本周 7 天 + 本月每天（带调班/请假）+ 本月工资 + 解析好的工资口径。

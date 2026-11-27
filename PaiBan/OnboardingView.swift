@@ -302,6 +302,9 @@ struct OnboardingView: View {
 /// 完成时记完成（Store.completePayGuide），不再弹。
 struct PayGuideView: View {
     @EnvironmentObject private var store: AppStore
+    /// 引导现在从工资页的空状态按钮打开（2026-11-27 10:28，取代第 30 条自动弹窗）：
+    /// 完成/跳过时自己关掉这页（以前是 ContentView 的 needsPayGuide 绑定在关）。
+    @Environment(\.dismiss) private var dismiss
 
     @State private var step = 0
     @State private var baseSalaryText = ""
@@ -369,8 +372,11 @@ struct PayGuideView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("以后再说") { store.skipPayGuide() }
-                        .disabled(isBusy)
+                    Button("以后再说") {
+                        store.skipPayGuide()
+                        dismiss()
+                    }
+                    .disabled(isBusy)
                 }
             }
             .interactiveDismissDisabled(true)
@@ -565,6 +571,7 @@ struct PayGuideView: View {
         do {
             try await store.saveProfile(paySettings: settings)
             store.completePayGuide()
+            dismiss()
         } catch {
             errorText = (error as? APIError)?.message ?? error.localizedDescription
         }

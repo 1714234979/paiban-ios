@@ -141,10 +141,6 @@ struct ContentView: View {
                         ForcedBindGateView(onEnterAnyway: { bindGateDismissedForSession = true })
                     } else {
                         MainTabView()
-                            // 第 30 条：工资权限刚开通时，弹工资引导（3 步弹窗，走完记完成，不再弹）。
-                            .sheet(isPresented: $store.needsPayGuide) {
-                                PayGuideView()
-                            }
                             // 第 47 条：公积金没填时，弹一次窗让用户填（框里留空，照工资条填；
                             // 能关掉，没填的下次打开再弹，直到填了为止）。
                             .sheet(isPresented: $store.needsHousingFundPrompt) {

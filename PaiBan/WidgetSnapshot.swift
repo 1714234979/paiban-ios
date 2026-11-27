@@ -1,4 +1,17 @@
 import Foundation
+import WidgetKit
+
+/// 小组件的 5 种 kind（与 PaiBanWidget.swift 里的 StaticConfiguration 一致）。
+/// 刷新小组件时按 kind 逐个刷，不要用 reloadAllTimelines（一刀切，会浪费系统预算，
+/// 苹果也建议只刷变了的那种）。5 种小组件都读同一份快照，快照变了就 5 种一起刷。
+enum WidgetKinds {
+    static let all = ["TodayWidget", "WeekWidget", "PayWidget", "MonthWidget", "LockWidget"]
+    static func reloadTimelines() {
+        for kind in all {
+            WidgetCenter.shared.reloadTimelines(ofKind: kind)
+        }
+    }
+}
 
 /// App Group 共享标识：App 与小组件扩展共用（entitlements 两边都要配 group.com.paiban.app）。
 /// 注意：重签（全能签）用的描述文件必须带这个 App Group，否则共享区读不到、小组件只显示占位。
