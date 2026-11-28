@@ -31,7 +31,7 @@ struct RotationSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Text("先选一种排班方式，再选班次。切方式后日历按新方式算，现有调班/请假记录只重算基础轮次、不删记录。")
+                Text("先选一种排班方式，再选班次。切方式后日历按新方式算，现有调班/请假记录只重算基础轮次、不删记录。12 小时/6 小时班制的工资口径待定，工资页只显示班次统计、金额暂不算；三班二倒周均 56 小时，超 44 小时法定上限，需综合工时 + 加班费。")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             }
@@ -84,19 +84,9 @@ struct RotationSettingsView: View {
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(mode.name)
                                             .foregroundColor(.primary)
-                                        Text("\(mode.cycleDays) 天一循环 · \(mode.sequence) · \(mode.shiftHours) 小时/班 · 周均 \(mode.weeklyHours) 小时")
+                                        Text("\(mode.cycleDays)天一循环 · 休\(mode.restDays)天 · 周均\(PayCalc.jsNum(mode.weeklyHours))小时")
                                             .font(.caption)
                                             .foregroundColor(.secondary)
-                                        if let note = mode.note {
-                                            Text(note)
-                                                .font(.caption)
-                                                .foregroundColor(.secondary)
-                                        }
-                                        if mode.isPayTBD {
-                                            Text("工资口径待定：工资页只显示班次统计，金额暂不算")
-                                                .font(.caption)
-                                                .foregroundColor(.orange)
-                                        }
                                     }
                                     Spacer()
                                     if modeId == mode.id {

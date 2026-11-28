@@ -167,19 +167,9 @@ struct OnboardingView: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(mode.name)
                                         .foregroundColor(.primary)
-                                    Text("\(mode.cycleDays) 天一循环 · \(mode.sequence) · \(mode.shiftHours) 小时/班 · 周均 \(mode.weeklyHours) 小时")
+                                    Text("\(mode.cycleDays)天一循环 · 休\(mode.restDays)天 · 周均\(PayCalc.jsNum(mode.weeklyHours))小时")
                                         .appFont(size: AppFont.caption)
                                         .foregroundColor(.secondary)
-                                    if let note = mode.note {
-                                        Text(note)
-                                            .appFont(size: AppFont.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                    if mode.isPayTBD {
-                                        Text("工资口径待定（金额暂不算）")
-                                            .appFont(size: AppFont.caption)
-                                            .foregroundColor(.orange)
-                                    }
                                 }
                                 Spacer()
                                 if modeId == mode.id {

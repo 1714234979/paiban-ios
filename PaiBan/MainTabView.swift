@@ -20,6 +20,13 @@ import SwiftUI
 
 /// 主界面：三个 Tab（排班 / 工资 / 设置），各带自己的 NavigationStack。
 /// 今日 Tab 已删；工资页标题叫「预估工资」。
+/// 底栏重做（老爷 2026-11-28 14:36 亲口令：改回 SwiftUI 原生 TabView）：
+/// 本来就是原生 TabView（1.3.0.015 已撤掉全部自定义底栏），这次只做三件事——
+/// ① 删掉 PaiBanApp.init 里 UITabBar.appearance() 的全局改色（改 appearance 的全删掉，
+/// 未选中态改回系统默认）；② 删掉两页为躲底栏垫的 88pt 大额留白（见 CalendarView /
+/// PayView），安全区交由原生底栏自动处理；③ iOS 26+ 加上往下滚自动收起底栏
+///（.tabBarMinimizeBehavior(.onScrollDown)，见下面 iOS26TabBarEnhancement）。
+/// 只有三个 Tab，不加第四个“统计”Tab（示例代码里的第四个只是模板）。
 struct MainTabView: View {
     @EnvironmentObject private var store: AppStore
 
@@ -57,9 +64,12 @@ struct MainTabView: View {
             }
             .tag(2)
         }
+        // 选中态走 AccentColor 资产（浅色深 navy、深色亮蓝）；未选中态改回系统默认
+        //（PaiBanApp.init 里的 UITabBar.appearance() 改色已按老爷令删掉）。
         .tint(Color.accentColor)
-        // 1.2.8.002：Tab 选中态走自适应强调色（浅色深 navy、深色亮蓝），
-        // 别让系统默认去猜；未选中态在 PaiBanApp.init 里用 UITabBar 外观定。
+        // iOS 26+ 底栏往下滚自动收起（老爷 2026-11-28 14:36 亲口令）：滑到底看统计栏、
+        // 奖金卡时底栏自己让开，不挡内容；往回滚就恢复。iOS 17–25 没有这个 API，原样显示。
+        .modifier(iOS26TabBarEnhancement())
         // 没登录时点小组件进来的深链：登录后进主界面再跳（store.handleDeepLink 先记下来）。
         .task {
             if let tab = store.pendingDeepLinkTab {
@@ -78,6 +88,21 @@ struct MainTabView: View {
                     store.selectedTab = 0
                 }
             }
+    }
+}
+
+/// iOS 26 底栏增强（老爷 2026-11-28 14:36 亲口令）：原生 TabView 在 iOS 26+ 上
+/// 自动渲染液态玻璃；往下滚动时底栏自动收起（.onScrollDown），滑到底看统计栏、
+/// 奖金卡时不挡内容；往回滚就恢复。iOS 17–25 没有这个 API，直接原样显示。
+/// 注意：.tabBarMinimizeBehavior 是 iOS 26 SDK 的 API，必须包在 #available 里，
+/// 不然部署目标 iOS 17 的包编不过。
+private struct iOS26TabBarEnhancement: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 26.0, *) {
+            content.tabBarMinimizeBehavior(.onScrollDown)
+        } else {
+            content
+        }
     }
 }
 

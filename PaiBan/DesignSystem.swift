@@ -64,15 +64,6 @@ enum AppStyle {
                 : UIColor.secondaryLabel
         })
     }
-    /// 「三薪」行底衬（1.2.8.001 深色修）：浅色黑 0.22（原来那样）；
-    /// 深色改白 0.14——黑衬在深色 pill 上把那行压得更暗，白字跟着糊。
-    static var tripleScrim: Color {
-        Color(UIColor { t in
-            t.userInterfaceStyle == .dark
-                ? UIColor(white: 1, alpha: 0.14)
-                : UIColor(white: 0, alpha: 0.22)
-        })
-    }
     /// 当天详情连班禁令提示条（1.2.8.001 深色修）：浅色深棕字 + 浅黄底（原来那样）；
     /// 深色改浅琥珀字 + 深棕底，不然亮黄块在深色页里晃眼、字也扎眼。
     static var banHintText: Color {

@@ -11,7 +11,6 @@ struct SettingsView: View {
 
     @State private var isCheckingUpdate = false
     @State private var showFeedback = false
-    @State private var showAdminBackend = false
     /// 切渠道确认（1.2.7.002）：目标渠道 + 目标渠道最新版（先拉到再弹框）。
     @State private var pendingChannel: String?
     @State private var pendingChannelVersion: String?
@@ -44,7 +43,7 @@ struct SettingsView: View {
             // 账号（图一没有，但必须保留在最上面）。
             Section {
                 NavigationLink {
-                    AccountSecurityView()
+                    AccountSecurityView().toolbar(.hidden, for: .tabBar)
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("账号与安全")
@@ -59,7 +58,7 @@ struct SettingsView: View {
             Section {
                 // 桌面&锁屏小组件。
                 NavigationLink {
-                    WidgetsView()
+                    WidgetsView().toolbar(.hidden, for: .tabBar)
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("桌面&锁屏小组件")
@@ -71,7 +70,7 @@ struct SettingsView: View {
 
                 // 班次设置：三个班次的时段（固定）。
                 NavigationLink {
-                    ShiftSettingsView()
+                    ShiftSettingsView().toolbar(.hidden, for: .tabBar)
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("班次设置")
@@ -83,7 +82,7 @@ struct SettingsView: View {
 
                 // 倒班方式设置（新增）：手动/周期、四班三倒 5 种方式、班组名。
                 NavigationLink {
-                    RotationSettingsView()
+                    RotationSettingsView().toolbar(.hidden, for: .tabBar)
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("倒班方式设置")
@@ -95,7 +94,7 @@ struct SettingsView: View {
 
                 // 日历显示设置（新增）：周一首日 / 法定节假日 / 农历 / 上下月。
                 NavigationLink {
-                    CalendarDisplaySettingsView()
+                    CalendarDisplaySettingsView().toolbar(.hidden, for: .tabBar)
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("日历显示设置")
@@ -139,7 +138,7 @@ struct SettingsView: View {
             // 换班（保留）：更换班组 + 重新走一遍引导。
             Section {
                 NavigationLink {
-                    TeamChangeView()
+                    TeamChangeView().toolbar(.hidden, for: .tabBar)
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("更换班组")
@@ -149,7 +148,7 @@ struct SettingsView: View {
                     }
                 }
                 NavigationLink {
-                    OnboardingView()
+                    OnboardingView().toolbar(.hidden, for: .tabBar)
                 } label: {
                     Text("重新走一遍引导设置")
                 }
@@ -176,7 +175,7 @@ struct SettingsView: View {
             if store.payAccess {
                 Section {
                     NavigationLink {
-                        PaySettingsView()
+                        PaySettingsView().toolbar(.hidden, for: .tabBar)
                     } label: {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("工资设置")
@@ -189,21 +188,25 @@ struct SettingsView: View {
             }
 
             // 管理后台切换：只有老爷（张晓文）能看到。
+            // 原生 push 进去（系统自带“‹ 设置”返回 + 隐藏底栏），不再用 fullScreenCover
+            // + 自定义“‹ 返回”按钮（Gemini 整改模块 1b/1c）。
             if store.isOwner {
                 Section {
-                    Button {
-                        showAdminBackend = true
+                    NavigationLink {
+                        AdminBackendView()
+                            .toolbar(.hidden, for: .tabBar)
                     } label: {
                         HStack {
                             VStack(alignment: .leading, spacing: 2) {
+                                // 深色模式下 Button 标题会走 AccentColor（深色亮蓝），
+                                // 这里显式 primary，和其他菜单项配色一致（模块 4a）。
                                 Text("切换管理员后台")
+                                    .foregroundColor(.primary)
                                 Text("用最高权限打开管理端，可管账号、发 App 更新")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
                             }
                             Spacer()
-                            Image(systemName: "chevron.right")
-                                .foregroundColor(.secondary)
                         }
                     }
                 }
@@ -285,7 +288,7 @@ struct SettingsView: View {
 
             Section {
                 NavigationLink {
-                    AboutView()
+                    AboutView().toolbar(.hidden, for: .tabBar)
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("关于我们")
@@ -338,9 +341,6 @@ struct SettingsView: View {
         .sheet(isPresented: $showFeedback) {
             FeedbackView()
         }
-        .fullScreenCover(isPresented: $showAdminBackend) {
-            AdminBackendView()
-        }
         .task {
             // 1.2.9.001（第 35 条）：进设置页检查一次提醒权限——开着但还没定，
             // 弹系统权限请求；被拒就把开关关掉并提示去系统设置开。
@@ -377,10 +377,11 @@ struct SettingsView: View {
         return parts.isEmpty ? "全部关闭" : parts.joined(separator: " · ")
     }
 
-    /// 节假日入口副标题：上次更新时间。
+    /// 节假日入口副标题：上次更新时间（ISO 时间戳转本地 yyyy-MM-dd HH:mm，
+    /// 如 2026-11-27T07:36:10.262Z → 2026-11-27 15:36；模块 2a）。
     private var holidaySubtitle: String {
         if let updatedAt = store.holidaysUpdatedAt, !updatedAt.isEmpty {
-            return "上次更新 \(updatedAt)"
+            return "上次更新 \(DateUtil.localDateTime(fromISO: updatedAt))"
         }
         return "每年 11 月自动更新，也可手动刷新"
     }
@@ -1437,6 +1438,13 @@ struct ChangelogView: View {
     var body: some View {
         Form {
             Section {
+                changelog(version: "1.3.2.008（内测）", items: [
+                    "排班页重做了：月份滑动是系统原生的分页，标题只跟着落定的那一页走，不再错位、重叠、跳月；「今天」按钮只在非当月出现",
+                    "底栏改回系统原生：iOS 26 上是液态玻璃，低版本是标准底栏；所有二级页面都藏起底栏，倒班方式设置的保存按钮和关于页的版权信息不再被压住；管理后台也从设置页点进去，左上角是系统返回",
+                    "节假日更新时间改成本地时间；倒班方式的周均小时不再带一串小数",
+                    "排班页往上滚时导航栏不再透字；三薪改成右上角的 3x 小角标",
+                    "工资页黑卡回来了，里面是当月实发合计的大数字",
+                ])
                 changelog(version: "1.3.2.007（内测）", items: [
                     "动画按文档重做了：月份滑动跟手、松手轻轻落定；点箭头切月只轻轻移一点、淡过去，不再整页横甩；班组切换底色滑过去，标签跟着换；点某一天格子会暗一下，点「今天」那格闪一下",
                     "底栏切换不再自己加淡入淡出：恢复系统原生的切换，干净利落",

@@ -24,12 +24,27 @@ struct PayView: View {
     /// 滑页的页码 = 月份绝对序号（年*12 + 月-1），与排班页同一套。
     /// 1.2.6 冷启动回当天：默认当月。
     @State private var pageIndex: Int = PayView.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
-    /// 滑页范围：一次生成 20 年（240 个月），当前月居中（前后各 120 个月），和排班页对齐。
-    @State private var windowStartIndex: Int = {
+    /// 基准月（视图第一次创建时的当月，之后不再动）：月份偏移数组相对它算。
+    /// 月份切换重做（老爷 2026-11-28 14:30 亲口令「直接重做」）：分页走 SmoothMonthPager
+    ///（原生分页 ScrollView），月份索引是相对基准月的固定偏移数组（-120..<120，共 240 个月，
+    /// 覆盖 10 年窗口 2016-11～2036-10），数组本身永远不变。pageIndex 是已落定的月份
+    ///（标题 + 工资数据都跟它走），拖拽中不动，只在分页落定时才变——标题绝不提前跳变。
+    @State private var baseIndex: Int = {
         let now = DateUtil.yearMonth(of: Date())
-        return PayView.monthIndex(year: now.year, month: now.month) - 120
+        return PayView.monthIndex(year: now.year, month: now.month)
     }()
-    private var pageRange: Range<Int> { windowStartIndex..<(windowStartIndex + 240) }
+    private var pageRange: Range<Int> { (baseIndex - 120)..<(baseIndex + 120) }
+    /// 固定月份偏移数组（-120..<120，共 240 个月，相对基准月）。
+    private var monthOffsets: [Int] { Array(-120..<120) }
+    /// 分页器用的已落定偏移（pageIndex 与 baseIndex 的差）：分页器落定时写回 pageIndex。
+    private var selectedOffsetBinding: Binding<Int> {
+        Binding(get: { pageIndex - baseIndex }, set: { pageIndex = baseIndex + $0 })
+    }
+    /// 今天所在的月份绝对序号（“今天”按钮的跳转目标）。
+    private var currentMonthIndex: Int {
+        let now = DateUtil.yearMonth(of: Date())
+        return Self.monthIndex(year: now.year, month: now.month)
+    }
 
     /// 邻月工资预热的在途任务（1.3.2.004）：翻得快时旧任务直接取消，只留最新的。
     @State private var preloadPayTask: Task<Void, Never>?
@@ -38,14 +53,57 @@ struct PayView: View {
     @State private var paySkeletonTask: Task<Void, Never>?
     /// 月明细的骨架是否显示（同上，150ms 延迟后才置 true）。
     @State private var showPaySkeleton = false
-    /// 箭头点按切月过渡（1.3.2.007，iOS.docx §3.1）：TabView 瞬间跳页，明细本身只做
-    /// 20pt 轻微位移 + 短促交叉淡入，0.25s easeInOut；拖拽滑月走原生 TabView 分页，不动。
-    @State private var monthShift: CGFloat = 0
-    @State private var monthOpacity: Double = 1
-    /// 标题箭头淡入（跳页时标题 0.5→1 淡入恢复）。
-    @State private var titleDim: Double = 1
-    /// 减弱动态效果（1.3.2.007，iOS.docx §3.4）：取消横向位移，改 0.15s 交叉淡入。
+    /// 箭头 / 今天点按切月（重做）：直接改 pageIndex（已落定），标题立刻用 numericText
+    /// 滚动过去；分页器收到 selectedOffset 变化滑过去（0.25s snappy，减弱动态效果时
+    /// 0.15s 淡入）。不做位移、不做交叉淡入——旧的 jumpToMonth 整段删掉。
+    private func goToMonth(_ index: Int) {
+        let target = min(max(index, pageRange.lowerBound), pageRange.upperBound - 1)
+        withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : .snappy(duration: 0.25)) {
+            pageIndex = target
+        }
+    }
+
+    /// 点“今天”：切回当月（工资页没有日期格要闪，只跳页）。
+    private func goToToday() {
+        goToMonth(currentMonthIndex)
+    }
+
+    /// 减弱动态效果（重做，1.3.2.008）：月份切换只做 0.15s 淡入，不做位移、不做数字滚动。
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// 黑卡（Gemini 整改模块 4d，老爷 2026-11-28 14:49 亲口改回）：上一轮按 14:31 的意思
+    /// 把只写「预估工资」四个字的黑卡删掉了，现在恢复——当月实发合计作为大号核心数据
+    /// 放进去，和排班页顶部黑卡视觉统一（AppStyle.navyAdaptive + 16pt 圆角）。
+    /// 数从当月工资数据里取已有的 grandTotal（下面合计行同一个数），不重算、不改公式；
+    /// 当月工资还没算出来显示“—”；12h/6h 方式工资口径待定时也显示“—”并注一句。
+    private var headerCard: some View {
+        let ym = yearMonth(from: pageIndex)
+        let pay = store.payFor(year: ym.year, month: ym.month)
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("本月实发合计")
+                .appFont(size: AppFont.bodySmall)
+                .foregroundColor(AppStyle.whiteText(opacity: 0.75))
+            if let pay = pay, !isPayTBD {
+                Text(MoneyUtil.money(pay.grandTotal))
+                    .appFont(size: AppFont.titleLarge, weight: 700)
+                    .foregroundColor(.white)
+            } else {
+                Text("—")
+                    .appFont(size: AppFont.titleLarge, weight: 700)
+                    .foregroundColor(.white)
+                if isPayTBD {
+                    Text("工资口径待定，金额暂不算")
+                        .appFont(size: AppFont.bodySmall)
+                        .foregroundColor(AppStyle.whiteText(opacity: 0.75))
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .background(AppStyle.navyAdaptive)
+        .cornerRadius(16)
+        .padding(.horizontal, 16)
+    }
 
     static func monthIndex(year: Int, month: Int) -> Int { year * 12 + (month - 1) }
     private func yearMonth(from index: Int) -> (year: Int, month: Int) { (index / 12, index % 12 + 1) }
@@ -81,22 +139,6 @@ struct PayView: View {
         paySkeletonTask?.cancel()
         paySkeletonTask = nil
         showPaySkeleton = false
-    }
-
-    /// 箭头点按切月（1.3.2.007，iOS.docx §3.1）：不用大跨度横甩——TabView 瞬间跳到
-    /// 新月，明细本身只做 20pt 轻微位移 + 短促交叉淡入，0.25s easeInOut；标题同时
-    /// 0.5→1 淡入恢复。减弱动态效果时不位移，只做 0.15s 淡入。direction：+1 下月，-1 上月。
-    private func jumpToMonth(_ index: Int, direction: Int) {
-        let target = min(max(index, pageRange.lowerBound), pageRange.upperBound - 1)
-        monthShift = reduceMotion ? 0 : CGFloat(direction) * 20
-        monthOpacity = 0.6
-        titleDim = 0.5
-        pageIndex = target
-        withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : .easeInOut(duration: 0.25)) {
-            monthShift = 0
-            monthOpacity = 1
-            titleDim = 1
-        }
     }
 
     var body: some View {
@@ -154,39 +196,47 @@ struct PayView: View {
             }
         } else {
         VStack(spacing: 16) {
+            // 月份标题栏（重做）：共用的 MonthHeaderView，跟排班页同一套。
+            MonthHeaderView(
+                year: yearMonth(from: pageIndex).year,
+                month: yearMonth(from: pageIndex).month,
+                isCurrentMonth: pageIndex == currentMonthIndex,
+                onPrevious: { goToMonth(pageIndex - 1) },
+                onNext: { goToMonth(pageIndex + 1) },
+                onBackToToday: { goToToday() }
+            )
+            .padding(.top, 8)
+            // 黑卡（模块 4d）：固定在标题栏下方、分页器上方，不跟页内滚动走。
             headerCard
-            monthStepper
-            // 1.1.4：原生 TabView 分页（每页一个 ScrollView 竖滚）。
-            // 顶栏和月份步进固定在上面不滚动，工资明细在页内上下滚、左右滑切月；
-            // TabView 只预渲染当前页与相邻页，切月不整页重算（工资走 payFor 缓存）。
-            TabView(selection: $pageIndex) {
-                ForEach(pageRange, id: \.self) { idx in
-                    let ym = yearMonth(from: idx)
-                    ScrollView {
-                        VStack(spacing: 16) {
-                            monthBreakdown(year: ym.year, month: ym.month)
-                            syncTimeFooter
-                        }
-                        // 底部留白 88pt（1.3.2.006）：iOS 26/27 上原生底栏是悬浮胶囊样式（约 64pt），
-                        // ScrollView 底部不留够白，最底下的奖金卡片会被底栏压住一半。
-                        .padding(.bottom, 88)
-                        // 点编辑框以外的地方就收起（丢弃未保存的改动）。Tap 手势只认轻点，
-                        // 拖动（滚动/横滑）不会触发，不跟左右滑切月、上下滚动冲突。
-                        .onTapGesture {
-                            if editingField != nil { dismissEdit() }
-                        }
+            // 月份分页重做（老爷 2026-11-28 14:30 亲口令）：共用的 SmoothMonthPager——
+            // 原生分页 ScrollView + .scrollTargetBehavior(.paging)，手势物理曲线、回弹与
+            // 打断全交给系统；每页一个 ScrollView 竖滚，横滑归分页器、竖滚归页内，两边
+            // 不抢手势。旧的 TabView 分页 + 20pt 轻移 + 交叉淡入整段删掉。
+            // 顶栏和月份标题固定在上面不滚动，工资明细在页内上下滚、左右滑切月；
+            // 分页器只预渲染当前页与相邻页，切月不整页重算（工资走 payFor 缓存）。
+            // pagePadding 传 0：明细卡片自带 16pt 横向留白，两页卡片之间自然有 32pt
+            // 间距，不粘连；再加 16pt 会把卡片挤得过窄。
+            SmoothMonthPager(monthOffsets: monthOffsets, selectedOffset: selectedOffsetBinding, pagePadding: 0, fillHeight: true) { offset in
+                let ym = yearMonth(from: baseIndex + offset)
+                ScrollView {
+                    VStack(spacing: 16) {
+                        monthBreakdown(year: ym.year, month: ym.month)
+                        syncTimeFooter
                     }
-                    // 1.3.0.013：滚动指示条常显（老爷 19:24 说「没有滑动框」）——.visible 没用，
-                    // 画廊实拍证明它根本不画出来，改走自绘滑块 AlwaysVisibleScrollIndicator。
-                    .modifier(AlwaysVisibleScrollIndicator())
-                    .tag(idx)
+                    // 底部留白（重做，老爷 2026-11-28 14:36 亲口令）：1.3.2.006 加的 88pt
+                    // 删掉——那是给自定义底栏留的，底栏已改回原生 TabView（iOS 26+ 液态玻璃 +
+                    // 往下滚自动收起），安全区由原生底栏自动处理，不再手动垫大额留白。
+                    // 点编辑框以外的地方就收起（丢弃未保存的改动）。Tap 手势只认轻点，
+                    // 拖动（滚动/横滑）不会触发，不跟左右滑切月、上下滚动冲突。
+                    .onTapGesture {
+                        if editingField != nil { dismissEdit() }
+                    }
                 }
+                // 1.3.0.013：滚动指示条常显（老爷 19:24 说「没有滑动框」）——.visible 没用，
+                // 画廊实拍证明它根本不画出来，改走自绘滑块 AlwaysVisibleScrollIndicator。
+                .modifier(AlwaysVisibleScrollIndicator())
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
-            // 箭头点按切月过渡（1.3.2.007，iOS.docx §3.1）：跳页 + 20pt 轻移 + 交叉淡入；
-            // 拖拽滑月时这里是 0/1，不动，原生 TabView 自己跟手。
-            .offset(x: monthShift)
-            .opacity(monthOpacity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(AppStyle.pageBackground)
         // 滑到哪页，Store 就跟到哪月（setPayMonth 同步算好当月工资、写进缓存）；
@@ -208,10 +258,11 @@ struct PayView: View {
             if store.isLoadingPay { schedulePaySkeleton() }
         }
         .task {
-            // 1.2.6 冷启动回当天：进页先对齐到今天所在的月（不再跟 Store 恢复的月份走），
-            // 窗口以当月为中心重定。只在视图第一次创建时跑，从后台切回来不重跑、不强制回当月。
+            // 1.2.6 冷启动回当天：进页先对齐到今天所在的月（不再跟 Store 恢复的月份走）。
+            // 只在视图第一次创建时跑，从后台切回来不重跑、不强制回当月。
+            // 基准月（baseIndex）只在创建时定一次，这里不再重定——动态改基准会让
+            // 分页器的 scrollPosition id 错位、跳月。
             let now = DateUtil.yearMonth(of: Date())
-            windowStartIndex = Self.monthIndex(year: now.year, month: now.month) - 120
             pageIndex = Self.monthIndex(year: now.year, month: now.month)
             store.setPayMonth(year: now.year, month: now.month)
             if store.pay == nil {
@@ -245,63 +296,6 @@ struct PayView: View {
         .onChange(of: store.payYearMonth.year) { _ in Task { await store.refreshPay() } }
         .onChange(of: store.payYearMonth.month) { _ in Task { await store.refreshPay() } }
         } // else: 有工资权限时显示工资页
-    }
-
-    private var headerCard: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("预估工资")
-                .appFont(size: AppFont.titleLarge, weight: 700)
-                .fadeIn()
-                .foregroundColor(.white)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .background(AppStyle.navyAdaptive)
-        .cornerRadius(16)
-        .padding(.horizontal, 16)
-        .padding(.top, 8)
-    }
-
-    /// 月份步进：标题直接取当前页（跟着滑页走，不用等网络）；左右箭头改页码，
-    /// onChange 里 setPayMonth，同样有滑动动画。滑页范围与排班页一致（240 页窗口，20 年，到边就停）。
-    private var monthStepper: some View {
-        HStack {
-            Button {
-                // 1.3.2.007：箭头点按不用大跨度横甩，跳页 + 20pt 轻移 + 交叉淡入（见 jumpToMonth）。
-                jumpToMonth(max(pageRange.lowerBound, pageIndex - 1), direction: -1)
-            } label: {
-                Image(systemName: "chevron.left")
-                    .frame(width: 36, height: 36)
-                    .background(AppStyle.surface1)
-                    .clipShape(Circle())
-                    // 1.3.2.005（方案 §3.3）：36pt 圆按钮，透明留白扩到 48pt，视觉不变。
-                    .touchTarget(vertical: 6, horizontal: 6)
-            }
-            // 1.3.2.007：按压反馈是新版 PressableButtonStyle（0.97 + opacity 0.85）；
-            // 热区不动（.005 已做 48pt）。
-            .buttonStyle(PressableButtonStyle())
-            Spacer()
-            Text(DateUtil.yearMonthTitle(year: yearMonth(from: pageIndex).year, month: yearMonth(from: pageIndex).month))
-                .appFont(size: 20, weight: 700).monospacedDigit()
-                // 跳页时标题 0.5→1 淡入恢复（1.3.2.007）。
-                .opacity(titleDim)
-            Spacer()
-            Button {
-                // 1.3.2.007：箭头点按不用大跨度横甩，跳页 + 20pt 轻移 + 交叉淡入（见 jumpToMonth）。
-                jumpToMonth(min(pageRange.upperBound - 1, pageIndex + 1), direction: 1)
-            } label: {
-                Image(systemName: "chevron.right")
-                    .frame(width: 36, height: 36)
-                    .background(AppStyle.surface1)
-                    .clipShape(Circle())
-                    // 1.3.2.005（方案 §3.3）：36pt 圆按钮，透明留白扩到 48pt，视觉不变。
-                    .touchTarget(vertical: 6, horizontal: 6)
-            }
-            // 1.3.2.007：按压反馈是新版 PressableButtonStyle（0.97 + opacity 0.85）；
-            // 热区不动（.005 已做 48pt）。
-            .buttonStyle(PressableButtonStyle())
-        }
-        .padding(.horizontal, 16)
     }
 
     // MARK: 月度明细

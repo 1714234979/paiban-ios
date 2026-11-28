@@ -44,6 +44,27 @@ enum DateUtil {
         return f
     }()
 
+    /// 本地日期时间，如“2026-11-27 15:36”（设置页节假日更新时间用）。
+    static let dateTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = calendar
+        f.locale = Locale(identifier: "zh_CN")
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        return f
+    }()
+
+    /// ISO 时间戳（如服务端 holidaysUpdatedAt "2026-11-27T07:36:10.262Z"）转本地
+    /// "yyyy-MM-dd HH:mm"；解析不出就原样截一段显示（FeedbackView.displayTime 同款兜底）。
+    static func localDateTime(fromISO iso: String) -> String {
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let date = parser.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
+        guard let date else {
+            return String(iso.prefix(16)).replacingOccurrences(of: "T", with: " ")
+        }
+        return dateTimeFormatter.string(from: date)
+    }
+
     static func string(from date: Date) -> String { dayFormatter.string(from: date) }
 
     static func date(from string: String) -> Date? { dayFormatter.date(from: string) }
@@ -309,6 +330,12 @@ struct RotationMode: Codable, Equatable, Identifiable {
 
     /// 该方式的工资是否待定（12h/6h 方式：工资口径未定，金额不可信）。
     var isPayTBD: Bool { pay == "TBD" }
+
+    /// 该方式一个循环里的休息天数（各班组轮换同一套，天数一样，取第一个班组的算）。
+    /// 列表短规律用（如“8天一循环 · 休2天 · 周均42小时”）。
+    var restDays: Int {
+        (cycles[teamIds.first ?? "A"] ?? []).filter { $0 == "休息" }.count
+    }
 
     /// 该方式下某班某天的班次（基准日 = 2026-11-01）。
     func shift(team: String, date: Date) -> String {

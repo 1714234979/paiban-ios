@@ -13,22 +13,7 @@ private func calendarRowSpacing(weeks: Int) -> CGFloat {
     6
 }
 
-/// 标题视差的页位置上报（1.3.2.007，整改提示词 §3.3）：每页用 GeometryReader 把
-/// 自己在 monthPager 坐标系里的 minX + 页宽报上来，父视图按当前页的位移算标题的
-/// 0.5 倍视差。原生 TabView 不直接暴露拖拽进度，这是取进度的办法。
-private struct PageGeom: Equatable {
-    var minX: CGFloat
-    var width: CGFloat
-}
-
-private struct PageOffsetKey: PreferenceKey {
-    static var defaultValue: [Int: PageGeom] = [:]
-    static func reduce(value: inout [Int: PageGeom], nextValue: () -> [Int: PageGeom]) {
-        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
-    }
-}
-
-/// 排班页：原生月历。每个日期格里的班次 pill 都是同一固定高度（28pt、通栏圆角），
+/// 排班页：原生月历。每个日期格里的班次 pill 都是同一固定高度（24pt、通栏圆角），
 /// 修掉网页版“日班绿块占满整格、别的班只是短 pill”的 bug。
 struct CalendarView: View {
     @EnvironmentObject private var store: AppStore
@@ -42,37 +27,37 @@ struct CalendarView: View {
     @State private var recordsSkeletonTask: Task<Void, Never>?
     /// 调班/请假卡的骨架是否显示（同上，150ms 延迟后才置 true）。
     @State private var showRecordsSkeleton = false
-    /// 箭头点按切月过渡（1.3.2.007，iOS.docx §3.1）：TabView 瞬间跳页，网格本身只做
-    /// 20pt 轻微位移 + 短促交叉淡入，0.25s easeInOut；拖拽滑月走原生 TabView 分页（1:1 linear），不动。
-    @State private var monthShift: CGFloat = 0
-    @State private var monthOpacity: Double = 1
-    /// 标题视差（1.3.2.007，整改提示词 §3.3）：拖拽时年月标题以当前页位移的 0.5 倍
-    /// 同向移动，opacity 随进度 1→0.5；落定后 0.25s easeInOut 回位、新标题淡入恢复。
-    @State private var titleParallaxOffset: CGFloat = 0
-    @State private var titleParallaxOpacity: Double = 1
-    /// 标题箭头淡入（跳页时标题 0.5→1 淡入恢复）。
-    @State private var titleDim: Double = 1
-    /// 标题落定回位动画进行中：期间不接新的拖拽进度，免得打断回位。
-    @State private var titleReturning = false
-    @State private var titleReturnTask: Task<Void, Never>? = nil
     /// 今天格轻高亮（1.3.2.007，iOS.docx §3.2）：点“今天”后目标格一次微闪（边框/底色，不放大）。
     @State private var todayFlashDate: String? = nil
     @State private var todayFlashTask: Task<Void, Never>? = nil
     /// 班组胶囊滑动（1.3.2.007，iOS.docx §3.2）：选中底色用 matchedGeometryEffect 在四个 pill 间滑动。
     @Namespace private var teamCapsuleNamespace
-    /// 减弱动态效果（1.3.2.007，iOS.docx §3.4）：取消横向位移与弹簧过冲，改 0.15s 交叉淡入；跟手位移保留。
+    /// 减弱动态效果（重做，1.3.2.008）：月份切换只做 0.15s 淡入，不做位移、不做数字滚动。
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     // 滑页的页码 = 月份绝对序号（年*12 + 月-1），2026年11月 = 24322。
-    // 用原生 TabView 分页滑，切月跟着手指走、左右月预渲染，不再整格闪白重画。
+    // 月份切换重做（老爷 2026-11-28 14:30 亲口令「直接重做」）：分页走 SmoothMonthPager
+    //（原生分页 ScrollView），月份索引是相对基准月的固定偏移数组（-120..<120，共 240 个月，
+    // 覆盖 10 年窗口 2016-11～2036-10），数组本身永远不变；基准月只在视图第一次创建时
+    // 定一次（当月），之后不再动。pageIndex 是已落定的月份（标题 + 汇总 + 记录都跟它走），
+    // 拖拽中不动，只在分页落定时才变——标题绝不提前跳变。
     @State private var pageIndex: Int = CalendarView.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
-    // 滑页范围：一次生成 20 年（240 个月），当前月居中（前后各 120 个月）。
-    // 现在是 2026 年 11 月，窗口就是 2016-11 ~ 2036-10，滑到边就停。
-    // 240 页只渲染附近页（TabView 懒加载），滑页不再为全量页做布局，卡顿的根也去了。
-    @State private var windowStartIndex: Int = {
+    /// 基准月（视图第一次创建时的当月，之后不再动）：月份偏移数组相对它算。
+    @State private var baseIndex: Int = {
         let now = DateUtil.yearMonth(of: Date())
-        return CalendarView.monthIndex(year: now.year, month: now.month) - 120
+        return CalendarView.monthIndex(year: now.year, month: now.month)
     }()
-    private var pageRange: Range<Int> { windowStartIndex..<(windowStartIndex + 240) }
+    private var pageRange: Range<Int> { (baseIndex - 120)..<(baseIndex + 120) }
+    /// 固定月份偏移数组（-120..<120，共 240 个月，相对基准月）。
+    private var monthOffsets: [Int] { Array(-120..<120) }
+    /// 分页器用的已落定偏移（pageIndex 与 baseIndex 的差）：分页器落定时写回 pageIndex。
+    private var selectedOffsetBinding: Binding<Int> {
+        Binding(get: { pageIndex - baseIndex }, set: { pageIndex = baseIndex + $0 })
+    }
+    /// 今天所在的月份绝对序号（“今天”按钮的判断与跳转目标）。
+    private var currentMonthIndex: Int {
+        let now = DateUtil.yearMonth(of: Date())
+        return Self.monthIndex(year: now.year, month: now.month)
+    }
 
     /// 预加载窗口（1.3.2.004，老爷 2026-11-28 11:32 亲口定）：
     /// 当前页前后各 10 个月，共 21 页——“我每翻一页就加载 21 页”。
@@ -109,20 +94,14 @@ struct CalendarView: View {
         preloadedGrids = next
     }
 
-    /// 箭头/今天/邻月点按切月（1.3.2.007，iOS.docx §3.1）：不用大跨度横甩——
-    /// TabView 瞬间跳到新月（pageIndex 不包动画），网格本身只做 20pt 轻微位移 +
-    /// 短促交叉淡入，0.25s easeInOut；标题同时 0.5→1 淡入恢复。
-    /// 减弱动态效果时不位移，只做 0.15s 淡入。direction：+1 下月（内容从右进），-1 上月。
-    private func jumpToMonth(_ index: Int, direction: Int) {
+    /// 箭头 / 今天 / 邻月点按切月（重做）：直接改 pageIndex（已落定），标题立刻用
+    /// numericText 滚动过去；分页器收到 selectedOffset 变化滑过去（0.25s snappy，
+    /// 减弱动态效果时 0.15s 淡入）。不做位移、不做交叉淡入、不碰视差——旧的
+    /// jumpToMonth（20pt 轻移 + 交叉淡入）整段删掉。
+    private func goToMonth(_ index: Int) {
         let target = min(max(index, pageRange.lowerBound), pageRange.upperBound - 1)
-        monthShift = reduceMotion ? 0 : CGFloat(direction) * 20
-        monthOpacity = 0.6
-        titleDim = 0.5
-        pageIndex = target
-        withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : .easeInOut(duration: 0.25)) {
-            monthShift = 0
-            monthOpacity = 1
-            titleDim = 1
+        withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : .snappy(duration: 0.25)) {
+            pageIndex = target
         }
     }
 
@@ -131,11 +110,11 @@ struct CalendarView: View {
     /// 已在当月时只闪格子，不跳页。减弱动态效果时不闪（当天已有绿边框标识）。
     private func goToToday() {
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-        let target = Self.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
+        let target = currentMonthIndex
         if target == pageIndex {
             flashTodayCell()
         } else {
-            jumpToMonth(target, direction: target > pageIndex ? 1 : -1)
+            goToMonth(target)
             if !reduceMotion {
                 // 页落定（0.25s）后再闪格子，免得格子还没滑到位就闪完了。
                 flashTodayCell(after: 300_000_000)
@@ -170,14 +149,22 @@ struct CalendarView: View {
                 syncTimeFooter
             }
             .padding(.horizontal, 16)
-            // 底部留白 88pt（1.3.2.006）：iOS 26/27 上原生底栏是悬浮胶囊样式（约 64pt），
-            // ScrollView 底部不留够白，最底下一行（“当月应出勤”）会被底栏压住一半。
-            .padding(.bottom, 88)
+            // 底部留白（重做，老爷 2026-11-28 14:36 亲口令）：1.3.2.006 加的 88pt 删掉——
+            // 那是给自定义底栏留的，底栏已改回原生 TabView（iOS 26+ 液态玻璃 + 往下滚自动收起），
+            // 安全区由原生底栏自动处理，不再手动垫大额留白。
+            // 88pt 没起作用的根因（录屏实测）：统计栏（summaryLine）本来就在 ScrollView 内容里，
+            // 不是固定 footer；88pt 只加在内容最底下、只影响滑到底的位置，静止时统计栏
+            // 照样落在 iOS 26/27 悬浮胶囊底栏盖住的那截里——垫数字修不了静止位置。
+            // 现在底栏往下滚自动收起（.tabBarMinimizeBehavior(.onScrollDown)），滑到底时
+            // 统计栏上面还有调班/请假卡 + 同步时间，统计栏本身早已升到胶囊上方，完整露出。
         }
         // 1.3.0.013：滚动指示条常显（老爷 19:24 说「没有滑动框」）——.visible 没用，
         // 画廊实拍证明它根本不画出来，改走自绘滑块 AlwaysVisibleScrollIndicator。
         .modifier(AlwaysVisibleScrollIndicator())
         .background(AppStyle.pageBackground)
+        // 导航栏毛玻璃隔离（Gemini 整改模块 3b）：向上滚时黑色概览卡的金额文字
+        // 会透过导航栏、和「排班」标题重叠；强制导航栏始终显示背景，不改标题本身。
+        .toolbarBackground(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
@@ -252,22 +239,6 @@ struct CalendarView: View {
                 store.prefetchMonth(year: next.year, month: next.month)
                 store.prefetchMonth(year: prev.year, month: prev.month)
                 await store.refreshMonth()
-            }
-            // 标题视差落定回位（1.3.2.007）：拖拽松手、页落定后，标题从 0.5× 偏移 /
-            // 0.5 透明度 0.25s easeInOut 回到原位，新月份标题淡入恢复；回位期间
-            // 不接新的拖拽进度（titleReturning），免得打断回位。
-            // 没拖拽（箭头点按）时视差本来就是 0/1，这里什么都不做。
-            if titleParallaxOffset != 0 || titleParallaxOpacity != 1 {
-                titleReturning = true
-                withAnimation(.easeInOut(duration: 0.25)) {
-                    titleParallaxOffset = 0
-                    titleParallaxOpacity = 1
-                }
-                titleReturnTask?.cancel()
-                titleReturnTask = Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 260_000_000)
-                    titleReturning = false
-                }
             }
         }
         .onChange(of: store.viewTeam) { _ in
@@ -381,66 +352,19 @@ struct CalendarView: View {
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: store.viewTeam)
     }
 
+    /// 月份标题栏（重做，老爷 2026-11-28 14:30 亲口令）：共用的 MonthHeaderView——
+    /// 标题绝对居中（等宽数字 + numericText），“今天”按钮独立定位、仅非当月出现，
+    /// 再也不会被挤偏、不会跟标题撞车（录屏 00:03/00:10 的毛病）。旧的 HStack
+    ///（左右箭头 + Spacer + 标题 + 今天 + Spacer + 箭头）整段删掉。
     private var monthNavigator: some View {
-        HStack {
-            Button {
-                // 1.3.2.007：箭头点按不用大跨度横甩，跳页 + 20pt 轻移 + 交叉淡入（见 jumpToMonth）。
-                jumpToMonth(max(pageRange.lowerBound, pageIndex - 1), direction: -1)
-            } label: {
-                Image(systemName: "chevron.left")
-                    .frame(width: 36, height: 36)
-                    .background(AppStyle.surface1)
-                    .clipShape(Circle())
-                    // 1.3.2.005（方案 §3.3）：36pt 圆按钮，透明留白扩到 48pt，视觉不变。
-                    .touchTarget(vertical: 6, horizontal: 6)
-            }
-            // 1.3.2.007：按压反馈是新版 PressableButtonStyle（0.97 + opacity 0.85）；
-            // 热区不动（.005 已做 48pt）。
-            .buttonStyle(PressableButtonStyle())
-            Spacer()
-            Text(pagerTitle)
-                .appFont(size: 20, weight: 700).monospacedDigit()
-                // 标题视差（1.3.2.007，整改提示词 §3.3）：拖拽时以网格位移 0.5 倍同向移动、
-                // opacity 随进度 1→0.5；跳页时 titleDim 让它 0.5→1 淡入恢复。
-                .offset(x: titleParallaxOffset)
-                .opacity(titleParallaxOpacity * titleDim)
-            Button {
-                goToToday()
-            } label: {
-                Text("今天")
-                    .appFont(size: AppFont.bodySmall)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(AppStyle.surface1)
-                    .cornerRadius(14)
-                    // 1.3.2.005（方案 §3.3）：小 pill 只有约 31pt 高，透明留白扩到 48pt。
-                    .touchTarget(vertical: 9)
-            }
-            // 1.3.2.007：按压反馈是新版 PressableButtonStyle（0.97 + opacity 0.85）；
-            // 热区不动（.005 已做 48pt）。
-            .buttonStyle(PressableButtonStyle())
-            Spacer()
-            Button {
-                // 1.3.2.007：箭头点按不用大跨度横甩，跳页 + 20pt 轻移 + 交叉淡入（见 jumpToMonth）。
-                jumpToMonth(min(pageRange.upperBound - 1, pageIndex + 1), direction: 1)
-            } label: {
-                Image(systemName: "chevron.right")
-                    .frame(width: 36, height: 36)
-                    .background(AppStyle.surface1)
-                    .clipShape(Circle())
-                    // 1.3.2.005（方案 §3.3）：36pt 圆按钮，透明留白扩到 48pt，视觉不变。
-                    .touchTarget(vertical: 6, horizontal: 6)
-            }
-            // 1.3.2.007：按压反馈是新版 PressableButtonStyle（0.97 + opacity 0.85）；
-            // 热区不动（.005 已做 48pt）。
-            .buttonStyle(PressableButtonStyle())
-        }
-    }
-
-    /// 当前页的标题，如“2027年2月”（跟着滑页走，不用等网络；年份纯数字不带逗号）。
-    private var pagerTitle: String {
-        let ym = yearMonth(from: pageIndex)
-        return DateUtil.yearMonthTitle(year: ym.year, month: ym.month)
+        MonthHeaderView(
+            year: yearMonth(from: pageIndex).year,
+            month: yearMonth(from: pageIndex).month,
+            isCurrentMonth: pageIndex == currentMonthIndex,
+            onPrevious: { goToMonth(pageIndex - 1) },
+            onNext: { goToMonth(pageIndex + 1) },
+            onBackToToday: { goToToday() }
+        )
     }
 
     // MARK: 日历滑页（原生分页，跟着手指走）
@@ -468,65 +392,33 @@ struct CalendarView: View {
         VStack(spacing: 4) {
             // 周几固定在最上面，不跟月份一起滑（原来在每页里，滑走就没了）。
             weekdayHeader
-            // 240 页 TabView：每页固定高（外框总高不变），行距按行数自适应。
-            // 滑页时不再重新布局、不再因周数不同伸缩，根治掉帧与页边忽大忽小。
+            // 月份分页重做（老爷 2026-11-28 14:30 亲口令）：共用的 SmoothMonthPager——
+            // 原生分页 ScrollView + .scrollTargetBehavior(.paging)，手势物理曲线、回弹与
+            // 打断全交给系统；月份索引是相对基准月的固定偏移数组，不动态改。旧的
+            // TabView 分页 + 每页 GeometryReader 报位置（标题视差）整段删掉。
+            // 每页固定高（外框总高不变），行距恒定 6pt；滑页时不再重新布局、不再因周数
+            // 不同伸缩，根治掉帧与页边忽大忽小。
             // 月份数据走 store.monthFor：有缓存直接取，没缓存本地 8 天一轮算好缓存起来，
             // 滑页时不再现算、不再发网络请求。
-            TabView(selection: $pageIndex) {
-                ForEach(pageRange, id: \.self) { idx in
-                    let ym = yearMonth(from: idx)
-                    MonthPageView(
-                        year: ym.year, month: ym.month,
-                        preloadedDays: preloadedGrids[idx],
-                        isSelected: { selectedDay?.date == $0 },
-                        onSelectDay: { day in
-                            selectedDay = day
-                            showDayDetail = true
-                        },
-                        onSelectAdjacentMonth: { y, m in
-                            // 1.3.2.007：邻月格点按也是跳页，走同一个轻移 + 淡入（见 jumpToMonth）。
-                            let target = Self.monthIndex(year: y, month: m)
-                            jumpToMonth(target, direction: target > pageIndex ? 1 : -1)
-                        },
-                        flashDate: todayFlashDate
-                    )
-                    .tag(idx)
-                    // 标题视差取进度（1.3.2.007）：每页把自己在 monthPager 坐标系里的
-                    // minX + 页宽报上来，父视图按当前页位移算标题的 0.5 倍视差。
-                    .background(
-                        GeometryReader { geo in
-                            Color.clear.preference(
-                                key: PageOffsetKey.self,
-                                value: [idx: PageGeom(minX: geo.frame(in: .named("monthPager")).minX, width: geo.size.width)]
-                            )
-                        }
-                    )
-                }
+            SmoothMonthPager(monthOffsets: monthOffsets, selectedOffset: selectedOffsetBinding, pagePadding: 16) { offset in
+                let ym = yearMonth(from: baseIndex + offset)
+                MonthPageView(
+                    year: ym.year, month: ym.month,
+                    preloadedDays: preloadedGrids[baseIndex + offset],
+                    isSelected: { selectedDay?.date == $0 },
+                    onSelectDay: { day in
+                        selectedDay = day
+                        showDayDetail = true
+                    },
+                    onSelectAdjacentMonth: { y, m in
+                        // 邻月格点按也是跳页，走同一个 goToMonth。
+                        goToMonth(Self.monthIndex(year: y, month: m))
+                    },
+                    flashDate: todayFlashDate
+                )
             }
-            .tabViewStyle(.page(indexDisplayMode: .never))
+            // 每页固定 414pt（6 行 × 64 + 5 × 6），跟原来 TabView 的高度一致。
             .frame(height: calendarGridHeight)
-            // 1.1.5：裁剪——每页内容绝不漏到邻页上（重叠的最后一道保险）。
-            .clipped()
-            // 标题视差的坐标系：页的 minX 在这个坐标系里静止时是 0，拖拽时就是位移。
-            .coordinateSpace(name: "monthPager")
-            // 箭头点按切月过渡（1.3.2.007，iOS.docx §3.1）：跳页 + 20pt 轻移 + 交叉淡入；
-            // 拖拽滑月时这里是 0/1，不动，原生 TabView 自己跟手。
-            .offset(x: monthShift)
-            .opacity(monthOpacity)
-            // 标题视差（1.3.2.007，整改提示词 §3.3）：拖拽时标题以当前页位移的 0.5 倍
-            // 同向移动，opacity 随进度 1→0.5；直接写状态、不包动画，1:1 linear 跟手。
-            // 减弱动态效果时不做视差；落定回位动画期间（titleReturning）不接新进度。
-            .onPreferenceChange(PageOffsetKey.self) { offsets in
-                guard !reduceMotion, !titleReturning else { return }
-                guard let geom = offsets[pageIndex], geom.width > 0 else {
-                    titleParallaxOffset = 0
-                    titleParallaxOpacity = 1
-                    return
-                }
-                let progress = min(abs(geom.minX) / geom.width, 1)
-                titleParallaxOffset = geom.minX * 0.5
-                titleParallaxOpacity = 1 - 0.5 * progress
-            }
             if store.isLoadingMonth {
                 ProgressView("正在加载…")
                     .padding(.top, 8)
@@ -1014,15 +906,14 @@ struct MonthPageView: View {
 
 /// 日期格（参考图样式）：阳历大数字 + 阴历/节气/节日小字 + 班次色块；
 /// 法定节假日左上角绿“假”、调休上班日红“班”；当天描绿边。
-/// 关键：所有班次的 pill 都是同一固定高度 28pt、通栏、圆角；
-/// 双班时在同一个 28pt 高度里上下叠两个 13pt 小 pill，不撑高格子。
-/// 整格固定 64pt（日期行 26 + 间距 2 + pill 28 + 上下边距 8），行距自适应靠网格间距调。
+/// 关键：所有班次的 pill 都是同一固定高度 24pt、通栏、圆角；
+/// 双班时在同一个 24pt 高度里上下叠两个 11pt 小 pill，不撑高格子。
+/// 整格固定 64pt（日期行 26 + 间距 2 + pill 24 + 上下边距 8），行距恒定 6pt。
 /// 1.1.3：阳历数字 18→16pt（收一收、别太高）；日期与色块间距 4→2pt；
 /// 1.2.2：窄屏（<400pt，如 iPhone 15 的 393pt）阳历数字 16→15pt + 缩放兜底，
 /// 左右两列 12/9→11/8——之前两位数的号在窄屏上被截成「…」。
 /// 请假「假」标从号数旁边移到左列、和法定「假/班」上下叠放（之前号数+红标太宽、压着右边阴历字）；
-/// 三薪日：同一个 28pt 色块里上下两行——上面班次名、下面半透明白字「三薪」，
-/// 和色块重叠、不另起一行；法定「假/班」保持原样，两套标法不混。
+/// 三薪日：色块右上角 "3x" 橙色小角标，不塞进色块里；法定「假/班」保持原样，两套标法不混。
 struct DayCell: View {
     @EnvironmentObject private var store: AppStore
     /// 1.2.8.001：上下月补的日期在深色下 0.5 透明太暗、看着发虚，深色放宽到 0.65。
@@ -1042,7 +933,7 @@ struct DayCell: View {
     /// 减弱动态效果：班次标签变化只做 0.15s 淡入、不缩放；微闪也取消。
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private let pillHeight: CGFloat = 28
+    private let pillHeight: CGFloat = 24
 
     /// 班次标签的身份（1.3.2.007）：换班组时 pill 内容变了就换身份，触发 0.2s 缩放 + 交叉淡入。
     private var pillKey: String { "\(day.shift)|\(day.isRest)|\(isTriplePay)" }
@@ -1164,72 +1055,46 @@ struct DayCell: View {
             }
             .frame(height: 26)
 
-            // 班次 pill：固定 28pt；补的日期用班次色但半透明（班次色不变，只是淡一点）。
-            // 三薪日：色块里上下两行——上面班次名、下面半透明白字「三薪」，和色块重叠，
-            // 不另起一行、不占格子外的地方；双班三薪日上行两个班次并排、下行「三薪」。
+            // 班次 pill：固定 24pt；三薪不塞进色块，改右上角 "3x" 橙色小角标（重做，
+            // 老爷 2026-11-28 14:30 亲口令：录屏里三薪和班次挤在同一个色块里又小又挤，
+            // 格子高度还不一致）。所有格子的 pill 同高，视觉节奏一致。
+            // 双班：两个 11pt 小 pill 上下叠（11 + 2 + 11 = 24）；单班：一个 24pt pill。
             Group {
                 if day.isDouble == true {
-                    if isTriplePay && !isAdjacent {
-                        VStack(spacing: 0) {
-                            HStack(spacing: 2) {
-                                ForEach(ShiftStyle.parts(of: day.shift), id: \.self) { part in
-                                    Text(TeamInfo.shortName(part))
-                                        .appFont(size: 10, weight: 700)
-                                        .foregroundColor(.white)
-                                        .frame(maxWidth: .infinity)
-                                        .frame(height: 15)
-                                        .background(ShiftStyle.color(for: part))
-                                        .cornerRadius(4)
-                                }
-                            }
-                            Text("三薪")
+                    VStack(spacing: 2) {
+                        ForEach(ShiftStyle.parts(of: day.shift), id: \.self) { part in
+                            Text(TeamInfo.shortName(part))
                                 .appFont(size: 9, weight: 700)
-                                .foregroundColor(AppStyle.whiteText(opacity: 0.9))
+                                .foregroundColor(.white)
                                 .frame(maxWidth: .infinity)
-                                .frame(height: 13)
-                                .background(AppStyle.tripleScrim)
+                                .frame(height: 11)
+                                .background(ShiftStyle.color(for: part))
+                                .cornerRadius(4)
                         }
-                        .frame(height: pillHeight)
-                        .clipShape(RoundedRectangle(cornerRadius: 7))
-                    } else {
-                        VStack(spacing: 2) {
-                            ForEach(ShiftStyle.parts(of: day.shift), id: \.self) { part in
-                                Text(TeamInfo.shortName(part))
-                                    .appFont(size: 10, weight: 700)
-                                    .foregroundColor(.white)
-                                    .frame(maxWidth: .infinity)
-                                    .frame(height: 13)
-                                    .background(ShiftStyle.color(for: part))
-                                    .cornerRadius(4)
-                            }
-                        }
-                        .frame(height: pillHeight)
                     }
-                } else if isTriplePay && !isAdjacent {
-                    VStack(spacing: 0) {
-                        Text(day.isRest ? "休" : TeamInfo.shortName(day.shift))
-                            .appFont(size: 12, weight: 700)
-                            .foregroundColor(day.isRest ? ShiftStyle.color(for: "休息") : .white)
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 15)
-                        Text("三薪")
-                            .appFont(size: 9, weight: 700)
-                            .foregroundColor(AppStyle.whiteText(opacity: 0.85))
-                            .frame(maxWidth: .infinity)
-                            .frame(height: 13)
-                    }
-                    .frame(maxWidth: .infinity)
                     .frame(height: pillHeight)
-                    .background(day.isRest ? ShiftStyle.background(for: "休息") : ShiftStyle.color(for: day.shift))
-                    .cornerRadius(7)
                 } else {
                     Text(day.isRest ? "休" : TeamInfo.shortName(day.shift))
-                        .appFont(size: 12, weight: 700)
+                        .appFont(size: 13, weight: 700)
                         .foregroundColor(day.isRest ? ShiftStyle.color(for: "休息") : .white)
                         .frame(maxWidth: .infinity)
                         .frame(height: pillHeight)
                         .background(day.isRest ? ShiftStyle.background(for: "休息") : ShiftStyle.color(for: day.shift))
-                        .cornerRadius(7)
+                        .cornerRadius(6)
+                }
+            }
+            // 三薪角标：右上角小橙 capsule "3x"，不占 pill 内的地方、不撑高格子。
+            // offset 只向右伸 2pt（不用老爷示例里的 4pt）：页有 .clipped() 裁剪，
+            // 周六那列的角标伸 4pt 会被页边裁掉 2pt，伸 2pt 正好贴着格边、完整显示。
+            .overlay(alignment: .topTrailing) {
+                if isTriplePay && !isAdjacent {
+                    Text("3x")
+                        .font(.system(size: 8, weight: .black))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 3)
+                        .padding(.vertical, 1)
+                        .background(Color.orange, in: Capsule())
+                        .offset(x: 2, y: -5)
                 }
             }
             // 班次标签变化（1.3.2.007，iOS.docx §3.2）：换班组时标签快速轻微缩放加交叉淡入，
@@ -1241,8 +1106,9 @@ struct DayCell: View {
         }
         .padding(2)
         .frame(height: calendarCellHeight)
-        .background(isSelected ? Color.blue.opacity(0.12) : Color.clear)
-        .cornerRadius(8)
+        // 选中底色用圆角矩形画，不用 .cornerRadius() 裁剪——三薪角标 "3x" 要伸出 pill
+        // 右边 2pt，裁剪会把它切掉；圆角背景只画底色，不裁内容。
+        .background(RoundedRectangle(cornerRadius: 8).fill(isSelected ? Color.blue.opacity(0.12) : Color.clear))
         // 今天格微闪（1.3.2.007，iOS.docx §3.2）：底色微闪一次，0.55s 淡出，不放大；
         // 描边那层在上面，不会被闪盖住。
         .overlay(

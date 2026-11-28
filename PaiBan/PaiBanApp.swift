@@ -1,5 +1,4 @@
 import SwiftUI
-import UIKit // Tab 栏未选中态用动态 UIColor（1.2.8.002）
 import QuartzCore // CADisplayLink（1.3.0.006 刷新率适配）
 
 /// 刷新率适配（1.3.0.006，第 34 条）：显式让 App 跟着系统自适应刷新走，最高 120Hz。
@@ -39,14 +38,9 @@ struct PaiBanApp: App {
     init() {
         // 1.3.0.006：刷新率适配（第 34 条）——显式声明 10–120Hz 自适应刷新，最高 120Hz。
         RefreshRateBoost.shared.start()
-        // 1.2.8.002：Tab 栏深色下未选中态也要认得出来。选中态走 AccentColor 资产
-        //（深色已提亮成亮蓝）；未选中默认灰在黑底上太暗，深色改 0.65 白，浅色沿用系统灰。
-        // 动态 UIColor 跟着 trait 走，设置页切外观（跟随系统/浅色/深色）时跟着变。
-        UITabBar.appearance().unselectedItemTintColor = UIColor { t in
-            t.userInterfaceStyle == .dark
-                ? UIColor(white: 0.65, alpha: 1)
-                : UIColor.systemGray
-        }
+        // 底栏重做（老爷 2026-11-28 14:36 亲口令：改回原生 TabView，改 appearance 的全删掉）：
+        // 这里原来用 UITabBar.appearance() 全局改未选中态颜色（1.2.8.002，深色 0.65 白 /
+        // 浅色系统灰），已删掉——未选中态改回系统默认，选中态仍走 AccentColor 资产。
     }
 
     var body: some Scene {

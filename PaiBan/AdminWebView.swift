@@ -4,11 +4,10 @@ import WebKit
 /// 管理后台：张晓文点设置页「切换管理员后台」后打开。
 /// 用 WKWebView 打开云服务器的管理端（http://47.97.168.14:3003/admin），
 /// 并把 App 已有的登录会话（paiban_session cookie）注入 WebView，免得再输一遍密码。
-/// 左上角有「返回」按钮，点一下回到 App 的排班/工资页；下面的排班/工资页
-/// 状态、登录态、本地缓存都不动（fullScreenCover 只是盖在上面一层）。
-/// 两边互不干扰：切到管理后台再切回来，两边都保持原样。
+/// 设置页原生 push 进来，左上角是系统自带的“‹ 设置”返回（Gemini 整改模块 1c，
+/// 之前 fullScreenCover + 自定义“‹ 返回”按钮已删掉）；下面的排班/工资页
+/// 状态、登录态、本地缓存都不动。两边互不干扰：切到管理后台再切回来，两边都保持原样。
 struct AdminBackendView: View {
-    @Environment(\.dismiss) private var dismiss
     @State private var isLoading = true
     @State private var title = "管理后台"
 
@@ -18,28 +17,14 @@ struct AdminBackendView: View {
     }
 
     var body: some View {
-        NavigationStack {
-            ZStack {
-                AdminWebView(url: adminURL, isLoading: $isLoading, title: $title)
-                if isLoading {
-                    ProgressView()
-                }
-            }
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button {
-                        dismiss()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "chevron.left")
-                            Text("返回")
-                        }
-                    }
-                }
+        ZStack {
+            AdminWebView(url: adminURL, isLoading: $isLoading, title: $title)
+            if isLoading {
+                ProgressView()
             }
         }
+        .navigationTitle(title)
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
