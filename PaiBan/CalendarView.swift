@@ -32,8 +32,6 @@ struct CalendarView: View {
     @State private var todayFlashTask: Task<Void, Never>? = nil
     /// 年月快选弹窗（1.3.2.013）：点月份标题弹出，选年月直接跳过去。
     @State private var showMonthJump = false
-    /// 班组胶囊滑动（1.3.2.007，iOS.docx §3.2）：选中底色用 matchedGeometryEffect 在四个 pill 间滑动。
-    @Namespace private var teamCapsuleNamespace
     /// 减弱动态效果（重做，1.3.2.008）：月份切换只做 0.15s 淡入，不做位移、不做数字滚动。
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     // 滑页的页码 = 月份绝对序号（年*12 + 月-1），2026年11月 = 24322。
@@ -211,10 +209,18 @@ struct CalendarView: View {
                     .sheet(isPresented: $showMonthJump) {
                         MonthJumpSheet(currentIndex: pageIndex, range: pageRange) { goToMonth($0) }
                     }
-                headerCard
+                // 顶卡（1.3.2.016，Gemini 升级版规格）：两区紧凑结构，高度固定。
+                todayOverviewCard
                 // 1.2.7.002：日历只留月视图（周视图已删）。
                 monthPager
-                teamSwitcher
+                // 班次切换栏（1.3.2.016，Gemini 升级版规格）：弹性滑块（纯实心、无玻璃），
+                // 本人班组带 4pt 小圆点；选中变化写回 store.viewTeam（栏外不加 animation，
+                // 栏自己有动画，会打架）。
+                ElasticTeamSegmentedBar(
+                    items: TeamInfo.allTeams.map { "\($0)班" },
+                    myTeamIndex: TeamInfo.allTeams.firstIndex(of: store.myTeam),
+                    selectedIndex: teamIndexBinding
+                )
                 summaryLine
                 recordsSection
                 syncTimeFooter
@@ -232,9 +238,9 @@ struct CalendarView: View {
             // 2026-11-28 底栏改成永不收起（.never）：底栏一直在、统计栏上面还有调班/请假卡
             // + 同步时间，统计栏本身在底栏上方，完整露出，不再被收起的小圆球盖住。
         }
-        // 1.3.2.014：右下角悬浮「今天」删了（老爷令）——回到今天改成顶卡右下角的
-        // 「回到今天」按钮（见 headerCard），排班/工资两页一样；悬浮钮压底栏、
-        // 又多一个浮层，不要了。
+        // 1.3.2.014：右下角悬浮「今天」删了（老爷令）——回到今天改成顶卡里的
+        // 「今天」按钮（见 todayOverviewCard，1.3.2.016 起在顶卡上行右端），
+        // 排班/工资两页一样；悬浮钮压底栏、又多一个浮层，不要了。
         // 1.3.0.013：滚动指示条常显（老爷 19:24 说「没有滑动框」）——.visible 没用，
         // 画廊实拍证明它根本不画出来，改走自绘滑块 AlwaysVisibleScrollIndicator。
         .modifier(AlwaysVisibleScrollIndicator())
@@ -345,6 +351,15 @@ struct CalendarView: View {
             preloadAround(pageIndex, forceRebuild: true)
             Task { await store.refreshMonth() }
         }
+        // 切 Tab 回来自动归位（1.3.2.016，老爷令）：切到别的 Tab（工资/设置）再回来，
+        // 排班页回到本月。只认 Tab 选中态变化——日详情 sheet / 共享 / 手动排班页
+        // 推入弹出回来不触发（selectedTab 没变），不误重置；同页内左右滑、
+        // 点月份标题跳月、点「回到今天」都不受影响。设置页也在切换路径里。
+        .onChange(of: store.selectedTab) { newTab in
+            if newTab == 0 {
+                goToMonth(currentMonthIndex)
+            }
+        }
         // 1.3.2.004：日历真数据到了 / 显示设置（周一首日、显示上下月）改了，
         // 预加载的 21 页整窗重算，已缓存的页直接复用。
         .onChange(of: store.calendarVersion) { _ in preloadAround(pageIndex, forceRebuild: true) }
@@ -359,61 +374,42 @@ struct CalendarView: View {
 
     // MARK: 头部
 
-    /// 顶卡（1.3.2.014，Gemini 排版 + 白框）：今天的年月日、周几、什么班
-    ///（切到别的月份也照样显示今天）。顶行左大号日期、右角标与眼睛；
-    /// 下面班次行、状态行（带状态圆点）；最底下一行左“今日已挣”+预估、右大号金额。
-    /// 1.3.2.014 老爷令：顶卡从黑底（navyAdaptive）改成白框——浅色白、深色深，
-    /// 跟随系统浅深色变（AppStyle.surface1），字也全改成自适应色（主字 onSurface、
-    /// 次字 secondary），黑底那套白字不再用。倒计时和金额各走自己的 TimelineView
-    /// 每秒刷新，不带动整页（1.2.7 的隔离还在）。
-    /// 顶卡始终显示登录用户自己的今日（看别班时也不变），右上角角标「B班 · 我的今日」
-    /// 点明归属；眼睛开关一键隐藏全部金额（只有有工资权限的人才有金额可藏，
-    /// 没权限时只留角标）。
-    private var headerCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 8) {
-                Text(todayDateLine)
-                    .appFont(size: AppFont.titleLarge, weight: 700)
-                    .fadeIn()
-                    .foregroundColor(AppStyle.onSurface)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.8)
-                Spacer()
-                Text("\(store.myTeam)班 · 我的今日")
-                    .appFont(size: AppFont.caption)
-                    .foregroundColor(.primary)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(AppStyle.surface2)
-                    .clipShape(Capsule())
-                if store.payAccess {
-                    HideAmountsEyeButton()
+    /// 顶卡（1.3.2.016，Gemini 升级版规格 + 老爷令重构）：TodayOverviewCard，
+    /// 两区紧凑结构（日期+徽标+今天 / 班次状态+今日已挣），高度固定。
+    /// 徽标点回本班、「今天」按钮回当月（走 goToToday）。
+    private var todayOverviewCard: some View {
+        let inputs = store.todayEstimateInputs
+        return TodayOverviewCard(
+            dateText: todayDateLine,
+            myTeam: store.myTeam,
+            isViewingOtherTeam: store.viewTeam != store.myTeam,
+            shiftLine: todayShiftLine,
+            day: store.todaySchedule,
+            earlyRate: inputs.earlyRate,
+            midRate: inputs.midRate,
+            inputs: inputs.inputs,
+            payAccess: store.payAccess,
+            hideAmounts: Bindable(store).hideAmounts,
+            showBackToToday: pageIndex != currentMonthIndex,
+            onTapMyTeamBadge: { store.viewTeam = store.myTeam },
+            onBackToToday: goToToday
+        )
+    }
+
+    /// 班组下标桥接（1.3.2.016）：弹性切换栏绑的是 selectedIndex（Int），
+    /// 现有是 store.viewTeam（Team 字符串）。用 TeamInfo.allTeams 的下标换算，
+    /// 选中变化写回 store.viewTeam；viewTeam 一定在四班里，fallback 只是兜底。
+    private var teamIndexBinding: Binding<Int> {
+        Binding(
+            get: { TeamInfo.allTeams.firstIndex(of: store.viewTeam) ?? TeamInfo.allTeams.firstIndex(of: store.myTeam) ?? 1 },
+            set: { index in
+                guard TeamInfo.allTeams.indices.contains(index) else { return }
+                let team = TeamInfo.allTeams[index]
+                if team != store.viewTeam {
+                    store.viewTeam = team
                 }
             }
-            Text(todayShiftLine)
-                .appFont(size: AppFont.bodySmall)
-                .fadeIn()
-                .foregroundColor(.secondary)
-            if let day = store.todaySchedule {
-                let inputs = store.todayEstimateInputs
-                TodayStatusLine(day: day, earlyRate: inputs.earlyRate, midRate: inputs.midRate, inputs: inputs.inputs)
-            }
-            if let day = store.todaySchedule, store.payAccess {
-                let inputs = store.todayEstimateInputs
-                TodayMoneyRow(day: day, earlyRate: inputs.earlyRate, midRate: inputs.midRate, inputs: inputs.inputs, hideAmounts: store.hideAmounts)
-            }
-            // 回到今天（1.3.2.014，老爷令）：不在当月时才出现，放在顶卡右下角；
-            // 悬浮「今天」和导航栏「本月」都不要了，两页统一放这里。
-            if pageIndex != currentMonthIndex {
-                HStack {
-                    Spacer()
-                    backToTodayButton
-                }
-            }
-        }
-        .padding(16)
-        .background(AppStyle.surface1)
-        .cornerRadius(16)
+        )
     }
 
     /// 今天的年月日 + 周几，如“2026年11月24日 星期二”。
@@ -439,56 +435,6 @@ struct CalendarView: View {
         return "\(day.shift) \(day.displayTime)"
     }
 
-    /// 班组切换（1.3.2.014，Gemini 排版）：一个灰胶囊里的分段选择器——外框 surface2，
-    /// 选中那格是 surface3 白片（浅色白、深色比框亮一档）+ 轻阴影，matchedGeometryEffect
-    /// 让白片在四格间滑过去；未选中是 secondary 灰字。按压只压暗不缩放（.012 规矩），
-    /// 白片滑得干净。热区 48pt（.005 已做）。
-    private var teamSwitcher: some View {
-        HStack(spacing: 0) {
-            ForEach(TeamInfo.allTeams, id: \.self) { team in
-                Button {
-                    // 1.3.2.007（iOS.docx §3.2/P7）：轻冲击触感与动画起点同一帧触发。
-                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                    store.viewTeam = team
-                } label: {
-                    Text("\(team)班")
-                        .appFont(size: AppFont.headline, weight: store.viewTeam == team ? 700 : 400)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 8)
-                        .background(
-                            Group {
-                                if store.viewTeam == team {
-                                    // 选中白片平滑滑动（1.3.2.007，iOS.docx §3.2）：
-                                    // matchedGeometryEffect 让白片在四格间滑过去，
-                                    // 不是整块日历横移；减弱动态效果时不滑动。
-                                    RoundedRectangle(cornerRadius: 16)
-                                        .fill(AppStyle.surface3)
-                                        .matchedGeometryEffect(id: "teamCapsule", in: teamCapsuleNamespace)
-                                        .shadow(color: Color.black.opacity(0.08), radius: 2, y: 1)
-                                }
-                            }
-                        )
-                        .foregroundColor(store.viewTeam == team ? AppStyle.onSurface : .secondary)
-                        .cornerRadius(16)
-                        // 1.3.2.005（方案 §3.3）：班组 pill 只有约 37pt 高，透明留白扩到 48pt；
-                        // 只加竖向留白，不动四个 pill 之间的横向间距。
-                        .touchTarget(vertical: 6)
-                }
-                // 1.3.2.012（Gemini 2026-11-28 逐帧复核）：按压反馈改成只压暗不缩放
-                //（DayCellPressStyle，opacity 0.75）——原来 PressableButtonStyle 的 0.97
-                // 缩放和 matchedGeometryEffect 的胶囊滑动同一帧走，胶囊在滑过去的同时
-                // 被压扁、抬手又弹回来，看着就是切换变形；只压暗，胶囊滑得干净。
-                // 热区不动（.005 已做 48pt）。
-                .buttonStyle(DayCellPressStyle())
-            }
-        }
-        .padding(4)
-        .background(AppStyle.surface2, in: RoundedRectangle(cornerRadius: 20))
-        // 胶囊滑动只绑在 viewTeam 这个状态上（iOS.docx §4.1：动画绑具体状态，不绑父容器）；
-        // 减弱动态效果时 animation 传 nil，胶囊直接跳过去、不滑动。
-        .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: store.viewTeam)
-    }
-
     /// 月份标题栏（重做，老爷 2026-11-28 14:30 亲口令）：共用的 MonthHeaderView——
     /// 标题绝对居中（等宽数字，1.3.2.011：标题走 MonthTitleState，滑动中只重绘标题），
     /// 标题跟 titleState（过半就换），再也不会被挤偏（录屏 00:03/00:10 的毛病）。旧的 HStack
@@ -502,28 +448,6 @@ struct CalendarView: View {
             onNext: { goToMonth(pageIndex + 1) },
             onTitleTap: { showMonthJump = true }
         )
-    }
-
-    /// 回到今天按钮（1.3.2.014，老爷令）：顶卡右下角的小胶囊——不在当月时才出现，
-    /// 点按回到当月（走 goToToday）。排班/工资两页一样。样式跟顶卡角标同款
-    ///（surface2 底 + 主字），轻，不抢顶卡的数字。热区扩到 48pt。
-    private var backToTodayButton: some View {
-        Button(action: goToToday) {
-            HStack(spacing: 4) {
-                Image(systemName: "arrow.counterclockwise")
-                    .font(.system(size: 11, weight: .semibold))
-                Text("回到今天")
-                    .appFont(size: AppFont.caption, weight: 600)
-            }
-            .foregroundColor(AppStyle.onSurface)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(AppStyle.surface2)
-            .clipShape(Capsule())
-            .touchTarget(vertical: 9, horizontal: 4)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("回到今天")
     }
 
     // MARK: 日历滑页（原生分页，跟着手指走）
@@ -588,6 +512,11 @@ struct CalendarView: View {
                         },
                         flashDate: todayFlashDate
                     )
+                    // 切班组时网格层不做隐式动画（1.3.2.016）：切换栏的 withAnimation(spring)
+                    // 会顺着 viewTeam 的变化流进格子，色块跟着弹簧交叉淡入、看着重影；
+                    // 这里把动画清掉，色块直接换。分页滑动（ScrollView 层）与今天格微闪
+                    //（格子内部 withAnimation）不受影响。
+                    .transaction { $0.animation = nil }
                 }
                 .padding(12)
                 .background(AppStyle.surface1)
@@ -596,12 +525,10 @@ struct CalendarView: View {
             if store.isLoadingMonth {
                 ProgressView("正在加载…")
                     .padding(.top, 8)
-            } else if store.viewTeam != store.myTeam {
-                Text("看的是 \(store.viewTeam)班的排班（基础 8 天一轮；我和这个班调过、顶过岗的日子按调班后显示）。调班/请假只能改自己班的日历。")
-                    .appFont(size: AppFont.caption)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
             }
+            // 1.3.2.016（老爷令：直接删掉）：「看的是 D班的排班……」两行长文案整段删掉，
+            // 不留开关；切班组时页面骨架不再上下跳动。归属提示改由切换栏上本人班组的
+            // 4pt 小圆点承担；看别班点日期时，日详情页里的只读提示 +「切回」按钮引导。
         }
     }
 
@@ -1438,139 +1365,4 @@ struct DayCell: View {
     }
 
     /// 三薪角标已改成日期数字右侧的小橙点（见 dateRow），这里不再留 capsule 版。
-}
-
-/// 今日倒计时（1.2.7）：只这一行每秒刷新（TimelineView 1 秒一格），不带动整页。
-/// 上班前：距上班 HH:MM:SS；上班中：距下班；双班间隔：距下一班；下班后：今日已下班；
-/// 休息/请假：今日休息/今日请假。
-/// 今日状态行（1.3.2.014，Gemini 排版）：状态圆点 + 倒计时文案。
-/// 圆点颜色看状态——上班中/已下班绿（进行中/已完成），上班前/两班之间橙
-///（等着上班），休息/请假灰。白框上用自适应主字色，不再是黑底白字。
-private struct TodayStatusLine: View {
-    let day: DaySchedule
-    let earlyRate: Double
-    let midRate: Double
-    let inputs: PayCalc.DayEstimateInputs
-
-    var body: some View {
-        TimelineView(.periodic(from: Date(), by: 1)) { context in
-            let now = context.date
-            let today = DateUtil.calendar.startOfDay(for: now)
-            let state = PayCalc.todayLiveState(
-                shift: day.shift, onLeave: day.onLeave == true, day: today, now: now,
-                earlyRate: earlyRate, midRate: midRate, inputs: inputs
-            )
-            // 2026-11-28 慢滑卡顿修：倒计时每秒重画一次，上面挂 .fadeIn 等于每秒
-            // 多走一次离屏模糊；字本来就是等宽、宽度不动，模糊入场效果在每秒刷新的
-            // 文字上根本看不出来，直接去掉，只留等宽数字。
-            HStack(spacing: 6) {
-                Circle()
-                    .fill(dotColor(state: state))
-                    .frame(width: 8, height: 8)
-                Text(countdownText(state: state, now: now))
-                    .appFont(size: AppFont.bodySmall).monospacedDigit()
-                    .foregroundColor(AppStyle.onSurface)
-            }
-        }
-    }
-
-    /// 状态圆点色：上班中/已下班绿，上班前/两班之间橙，休息/请假灰。
-    private func dotColor(state: PayCalc.TodayLiveState) -> Color {
-        switch state {
-        case .rest: return .gray
-        case .before: return .orange
-        case .working: return .green
-        case .between: return .orange
-        case .done: return .green
-        }
-    }
-
-    /// 倒计时文案：距上班/下班 HH:MM:SS（秒数跟着走）。
-    private func countdownText(state: PayCalc.TodayLiveState, now: Date) -> String {
-        switch state {
-        case .rest:
-            return day.onLeave == true ? "今日请假" : "今日休息"
-        case .before(let start, _):
-            return "距上班 " + durationText(from: now, to: start)
-        case .working(let end, _, _):
-            return "距下班 " + durationText(from: now, to: end)
-        case .between(let nextStart, _, _):
-            return "距下一班 " + durationText(from: now, to: nextStart)
-        case .done:
-            return "今日已下班"
-        }
-    }
-
-    /// 时长 HH:MM:SS（不足 1 小时也写 00:MM:SS，保持位数不动、不跳行）。
-    private func durationText(from: Date, to: Date) -> String {
-        let total = max(0, Int(to.timeIntervalSince(from)))
-        let h = total / 3600
-        let m = (total % 3600) / 60
-        let s = total % 60
-        return String(format: "%02d:%02d:%02d", h, m, s)
-    }
-}
-
-/// 今日已挣底行（1.3.2.014，Gemini 排版）：顶卡最底下一行——左边小字标签 +
-/// 预估，右边大号金额；每秒刷新，只这一小块，不带动整页。
-/// 上班中/上班前显示已挣 + 预估；下班后显示今日已挣；休息/请假没钱可挣，
-/// 这一行直接不渲染（headerCard 里不放它）。
-/// 三薪那天标签/预估行带「（三薪）」，加班那天带「（加班）」。
-/// 白框上用自适应色（主字 onSurface、次字 secondary），不再是黑底白字。
-private struct TodayMoneyRow: View {
-    let day: DaySchedule
-    let earlyRate: Double
-    let midRate: Double
-    let inputs: PayCalc.DayEstimateInputs
-    /// 金额隐藏开关（1.3.2.013）：打开时金额一律 ¥****。
-    let hideAmounts: Bool
-
-    var body: some View {
-        TimelineView(.periodic(from: Date(), by: 1)) { context in
-            let now = context.date
-            let today = DateUtil.calendar.startOfDay(for: now)
-            let state = PayCalc.todayLiveState(
-                shift: day.shift, onLeave: day.onLeave == true, day: today, now: now,
-                earlyRate: earlyRate, midRate: midRate, inputs: inputs
-            )
-            if let money = moneyParts(state: state) {
-                HStack(alignment: .bottom, spacing: 8) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(money.label)
-                            .appFont(size: AppFont.caption)
-                            .foregroundColor(.secondary)
-                        if let sub = money.sub {
-                            Text(sub)
-                                .appFont(size: AppFont.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                    Spacer()
-                    Text(money.amount)
-                        .appFont(size: 24, weight: 700).monospacedDigit()
-                        .foregroundColor(AppStyle.onSurface)
-                }
-            }
-        }
-    }
-
-    /// 金额三件套：标签 / 大号金额 / 预估小字（下班后没预估、休息没钱，返回 nil）。
-    /// 第 40 条：三薪/加班以后缀看当日种类（不是法定日就一定是三薪——超额的法定日转加班）。
-    private func moneyParts(state: PayCalc.TodayLiveState) -> (label: String, amount: String, sub: String?)? {
-        let suffix = inputs.isTriple ? "（三薪）" : (inputs.isOvertime ? "（加班）" : "")
-        // 隐藏时金额一律 ¥****（1.3.2.013），三薪/加班后缀照常显示。
-        let m: (Double?) -> String = { hideAmounts ? "¥****" : MoneyUtil.money($0) }
-        switch state {
-        case .rest:
-            return nil
-        case .before(_, let total):
-            return ("已挣", m(0), "预估 \(m(total))\(suffix)")
-        case .working(_, let earned, let total):
-            return ("已挣", m(earned), "预估 \(m(total))\(suffix)")
-        case .between(_, let earned, let total):
-            return ("已挣", m(earned), "预估 \(m(total))\(suffix)")
-        case .done(let total):
-            return ("今日已挣\(suffix)", m(total), nil)
-        }
-    }
 }

@@ -410,14 +410,33 @@ struct DayDetailView: View {
     }
 
     /// 只读提示：看别的班的日历时显示，改数据的入口全部不出现。
+    /// 1.3.2.016（Gemini 升级版规格的 Toast 改成本地化做法）：看别班时调班/请假
+    /// 入口根本不出现，没有能挂 Toast 的编辑入口；这条只读提示就是引导本身，
+    /// 这里直接给一个「切回自己班」按钮——点一下回自己班、关掉本页，再点当天就能改。
     private var readOnlyNote: some View {
-        Text("正在看 \(shownDay.team ?? store.viewTeam) 班的日历，只能看，不能改。切回自己班（\(store.myTeam) 班）才能调班、请假、记加班。")
-            .appFont(size: AppFont.bodySmall)
-            .foregroundColor(.secondary)
-            .padding(AppStyle.cardPadding)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(AppStyle.surface2)
-            .cornerRadius(AppStyle.cardRadius)
+        VStack(alignment: .leading, spacing: 10) {
+            Text("正在看 \(shownDay.team ?? store.viewTeam) 班的日历，只能看，不能改。切回自己班（\(store.myTeam) 班）才能调班、请假、记加班。")
+                .appFont(size: AppFont.bodySmall)
+                .foregroundColor(.secondary)
+            Button {
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                store.viewTeam = store.myTeam
+                dismiss()
+            } label: {
+                Text("切回 \(store.myTeam)班")
+                    .appFont(size: AppFont.bodySmall, weight: 600)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 8)
+                    .background(AppStyle.navyAdaptive)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(AppStyle.cardPadding)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(AppStyle.surface2)
+        .cornerRadius(AppStyle.cardRadius)
     }
 
     /// 手动排班：点一天直接设当天班次（日/中/早/休），不用走调班。

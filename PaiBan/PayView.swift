@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 预估工资页：月份步进（1.2.6 冷启动回当天：默认当月），只按月看（全年视图已删）。
+/// 预估工资页：月份步进（1.3.2.016 冷启动回默认月：默认上个月，工资压一个月发），只按月看（全年视图已删）。
 /// 数字在手机本地算（服务端只给排班与工资配置原始数据），切月秒出。
 /// 1.1.4：切月改成原生 TabView 分页滑（和排班页一样，跟着手指走、左右月预渲染）。
 /// 原来是自定义 DragGesture（minimumDistance 12）+ onEnded 里才调 stepPayMonth，
@@ -24,19 +24,18 @@ struct PayView: View {
     /// 年月快选弹窗（1.3.2.013）：点月份标题弹出，选年月直接跳过去。
     @State private var showMonthJump = false
     /// 滑页的页码 = 月份绝对序号（年*12 + 月-1），与排班页同一套。
-    /// 1.2.6 冷启动回当天：默认当月。
-    @State private var pageIndex: Int = PayView.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
+    /// 1.3.2.016（老爷令：工资压一个月发）：默认上个月，不是当月。
+    @State private var pageIndex: Int = PayView.defaultMonthIndex()
     /// 标题跟的月份（2026-11-28 改，取代落定才变）：拖过一半就换（分页器的过半回调写这里），
     /// 落定时跟 pageIndex 同步；拖一半松手弹回时跟着回来。工资数据仍只跟 pageIndex（落定页）。
     /// 1.3.2.011（Gemini）：改成 MonthTitleState——过半变月只刷新标题，滑动中不重算
     /// PayView.body，也不叠糊数字；滑动中/0.28s 内连变禁动画，慢速单次点按保留数字滚动。
     @State private var titleState: MonthTitleState = {
-        let now = DateUtil.yearMonth(of: Date())
-        return MonthTitleState(monthIndex: PayView.monthIndex(year: now.year, month: now.month))
+        return MonthTitleState(monthIndex: PayView.defaultMonthIndex())
     }()
-    /// 冷启动回当天只做一次（切 Tab 闪跳的根因，和排班页同一个 .task 毛病）：
-    /// .task 在切 Tab 回来时也会重跑，不加标志每次回来都强制回当月，先闪一帧离开时的月份
-    /// 再跳回当月；有了标志，只有第一次创建时才回当天。
+    /// 冷启动回默认月只做一次（切 Tab 闪跳的根因，和排班页同一个 .task 毛病）：
+    /// .task 在切 Tab 回来时也会重跑，不加标志每次回来都强制回默认月，先闪一帧离开时的月份
+    /// 再跳回默认月；有了标志，只有第一次创建时才回默认月。
     @State private var didInitialMonthAlign = false
     /// 基准月（视图第一次创建时的当月，之后不再动）：月份偏移数组相对它算。
     /// 月份切换重做（老爷 2026-11-28 14:30 亲口令「直接重做」）：分页走 SmoothMonthPager
@@ -54,11 +53,26 @@ struct PayView: View {
     private var selectedOffsetBinding: Binding<Int> {
         Binding(get: { pageIndex - baseIndex }, set: { pageIndex = baseIndex + $0 })
     }
-    /// 今天所在的月份绝对序号（“今天”按钮的跳转目标）。
+    /// 今天所在的月份绝对序号（顶卡标题「本月实发合计」的判断用）。
     private var currentMonthIndex: Int {
         let now = DateUtil.yearMonth(of: Date())
         return Self.monthIndex(year: now.year, month: now.month)
     }
+
+    /// 工资页默认月（1.3.2.016，老爷令：工资压一个月发，默认看上个月）。
+    /// 用日历 API 算上个月（1 月的上个月是去年 12 月），不手写月份减一。
+    /// 「回到今天」按钮与切 Tab 回来都落到这里，不是当月。
+    static func defaultMonthIndex() -> Int {
+        let now = Date()
+        if let prev = DateUtil.calendar.date(byAdding: .month, value: -1, to: now) {
+            let ym = DateUtil.yearMonth(of: prev)
+            return monthIndex(year: ym.year, month: ym.month)
+        }
+        let ym = DateUtil.yearMonth(of: now)
+        return monthIndex(year: ym.year, month: ym.month) - 1
+    }
+    /// 工资页默认月（上个月，见上）。
+    private var defaultMonth: Int { Self.defaultMonthIndex() }
 
     /// 月明细骨架延迟 150ms 的在途任务（1.3.2.006）：加载开始后 150ms 再现骨架，
     /// 数据快回来就不闪；加载结束或视图消失时取消。
@@ -77,9 +91,10 @@ struct PayView: View {
         }
     }
 
-    /// 点顶卡右下角“回到今天”：切回当月（工资页没有日期格要闪，只跳页）。
+    /// 点顶卡右下角“回到今天”：切回默认月（上个月，1.3.2.016 工资压一个月发；
+    /// 工资页没有日期格要闪，只跳页）。按钮名字仍叫“回到今天”，落点是上个月。
     private func goToCurrentMonth() {
-        goToMonth(currentMonthIndex)
+        goToMonth(defaultMonth)
     }
 
     /// 减弱动态效果（重做，1.3.2.008）：月份切换只做 0.15s 淡入，不做位移、不做数字滚动。
@@ -90,7 +105,8 @@ struct PayView: View {
     /// 放进去，和排班页顶部顶卡视觉统一（1.3.2.014 起是白框 AppStyle.surface1 + 16pt 圆角，
     /// 不再是黑底 navyAdaptive）。
     /// 数从当月工资数据里取已有的 grandTotal（下面合计行同一个数），不重算、不改公式；
-    /// 当月工资还没算出来显示“—”；12h/6h 方式工资口径待定时也显示“—”并注一句。
+    /// 当月工资还没算出来显示“—”；12h/6h 方式工资口径待定时也显示“—”，构成条
+    /// 与三列小字用 opacity 0 占位（1.3.2.016 固定高度，不再另注一行）。
     /// 2026-11-28 改：从固定在分页器上方改成每个月页面的页眉（见 body），
     /// 跟着月份一起翻页；所以改成函数、按页面的年月取数，不再读 pageIndex。
     /// 1.3.2.010：页眉放在页内、纵向 ScrollView 外（之前在 ScrollView 顶部，
@@ -106,13 +122,18 @@ struct PayView: View {
         let pay = store.cachedPay(year: ym.year, month: ym.month)
         return VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("本月实发合计")
+                // 1.3.2.016：看当月仍叫「本月实发合计」；看别的月叫「{M}月实发合计」
+                //（默认月是上个月，标题写明是几月，免得以为看的是本月）。
+                Text(PayView.monthIndex(year: ym.year, month: ym.month) == currentMonthIndex ? "本月实发合计" : "\(ym.month)月实发合计")
                     .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.secondary)
                 Spacer()
                 // 金额一键隐藏（1.3.2.013）：右上角眼睛，点一下本页全部金额脱敏为 ¥****。
                 HideAmountsEyeButton()
             }
+            // 顶卡固定高度（1.3.2.016，老爷令）：有工资和 TBD 两套结构等高——
+            // 总数行都是 32pt（TBD 放「—」）；构成条与三列小字在 TBD 时用
+            // opacity 0 的同结构占位，不直接省掉，否则卡片在 TBD 时变矮。
             if let pay = pay, !isPayTBD {
                 Text(store.moneyText(pay.grandTotal))
                     .appFont(size: 32, weight: 700).monospacedDigit()
@@ -134,19 +155,27 @@ struct PayView: View {
                 Text("—")
                     .appFont(size: 32, weight: 700).monospacedDigit()
                     .foregroundColor(AppStyle.onSurface)
-                if isPayTBD {
-                    Text("工资口径待定，金额暂不算")
-                        .appFont(size: AppFont.bodySmall)
-                        .foregroundColor(.secondary)
+                // hidden:true 强制画出 6pt 灰条当占位（三者为 0 时原组件不画、
+                // 占不到高度）；opacity 0 看不见。
+                PayCompositionBar(salary: 0, bonus: 0, meal: 0, hidden: true)
+                    .opacity(0)
+                HStack(spacing: 0) {
+                    payMiniColumn(label: "实发工资", value: "—")
+                    Rectangle().fill(AppStyle.outline).frame(width: 1, height: 28)
+                    payMiniColumn(label: "实发奖金", value: "—")
+                    Rectangle().fill(AppStyle.outline).frame(width: 1, height: 28)
+                    payMiniColumn(label: "餐贴", value: "—")
                 }
+                .opacity(0)
             }
-            // 回到今天（1.3.2.014，老爷令）：不在当月时才出现，放在顶卡右下角；
-            // 导航栏「本月」胶囊不要了，排班/工资两页统一放这里。
-            if PayView.monthIndex(year: ym.year, month: ym.month) != currentMonthIndex {
-                HStack {
-                    Spacer()
-                    backToTodayButton
-                }
+            // 回到今天（1.3.2.016，老爷令 + 固定高度）：行常驻占位，默认月
+            // （上个月）时按钮 opacity 0 + disabled（看得见才可点）；点按回到
+            // 默认月，不是回当月。
+            HStack {
+                Spacer()
+                backToTodayButton
+                    .opacity(PayView.monthIndex(year: ym.year, month: ym.month) != defaultMonth ? 1 : 0)
+                    .disabled(PayView.monthIndex(year: ym.year, month: ym.month) == defaultMonth)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -171,9 +200,10 @@ struct PayView: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// 回到今天按钮（1.3.2.014，老爷令）：顶卡右下角的小胶囊——不在当月时才出现，
-    /// 点按回到当月（走 goToCurrentMonth）。排班/工资两页一样。样式跟顶卡角标同款
-    ///（surface2 底 + 主字），轻，不抢顶卡的数字。热区扩到 48pt。
+    /// 回到今天按钮（1.3.2.014，老爷令）：顶卡右下角的小胶囊——不在默认月
+    ///（上个月）时才出现，点按回到默认月（走 goToCurrentMonth）。排班/工资两页
+    /// 一样。样式跟顶卡角标同款（surface2 底 + 主字），轻，不抢顶卡的数字。
+    /// 热区扩到 48pt。
     private var backToTodayButton: some View {
         Button(action: goToCurrentMonth) {
             HStack(spacing: 4) {
@@ -396,6 +426,15 @@ private struct PayCompositionBar: View {
             store.setPayMonth(year: ym.year, month: ym.month)
             store.prewarmPayAround(year: ym.year, month: ym.month, radius: 10)
         }
+        // 切 Tab 回来自动归位（1.3.2.016，老爷令）：切到别的 Tab（排班/设置）再回来，
+        // 工资页回到默认月（上个月）。只认 Tab 选中态变化——弹出的 sheet / 推入的
+        // 明细页回来不触发，不误重置；同页内左右滑、点月份标题跳月、点「回到今天」
+        // 都不受影响。设置页也在切换路径里（切到设置再回来同样触发）。
+        .onChange(of: store.selectedTab) { newTab in
+            if newTab == 1 {
+                goToMonth(defaultMonth)
+            }
+        }
         // 切到别的页面（排班/设置）时，敞着的编辑框自动收起，丢弃未保存的改动。
         .onDisappear { dismissEdit(); hidePaySkeleton() }
         // 骨架延迟 150ms（1.3.2.006）：加载开始计时、结束立刻消失。
@@ -406,18 +445,19 @@ private struct PayCompositionBar: View {
             if store.isLoadingPay { schedulePaySkeleton() }
         }
         .task {
-            // 1.2.6 冷启动回当天：进页先对齐到今天所在的月（不再跟 Store 恢复的月份走）。
+            // 1.3.2.016 冷启动回默认月：进页先对齐到默认月（上个月，不再跟 Store 恢复的月份走）。
             // 切 Tab 闪跳的根因（和排班页同一个 .task 毛病）：.task 在切 Tab 回来时也会重跑，
-            // 原来每次都强制回当月；只第一次跑时回当天（didInitialMonthAlign 标志），
-            // 切 Tab 回来只做刷新/预取，月份保持原地不动。
+            // 原来每次都强制回默认月；只第一次跑时回默认月（didInitialMonthAlign 标志），
+            // 切 Tab 回来只做刷新/预取，月份保持原地不动（归位由 onChange(selectedTab) 管）。
             // 基准月（baseIndex）只在创建时定一次，这里不再重定——动态改基准会让
             // 分页器的 scrollPosition id 错位、跳月。
             if !didInitialMonthAlign {
                 didInitialMonthAlign = true
-                let now = DateUtil.yearMonth(of: Date())
-                pageIndex = Self.monthIndex(year: now.year, month: now.month)
+                // 1.3.2.016：冷启动对齐到默认月（上个月），不是当月。
+                pageIndex = Self.defaultMonthIndex()
                 titleState.update(to: pageIndex)
-                store.setPayMonth(year: now.year, month: now.month)
+                let ym0 = yearMonth(from: pageIndex)
+                store.setPayMonth(year: ym0.year, month: ym0.month)
             }
             let ym = yearMonth(from: pageIndex)
             if store.cachedPay(year: ym.year, month: ym.month) == nil {
