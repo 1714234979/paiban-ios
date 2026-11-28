@@ -37,7 +37,7 @@ struct CalendarView: View {
     /// 每页的格子在父视图提前算好存在这里，页滑过来时直接用，
     /// 不在滑动中现算、现拍快照（慢拖卡顿的根：下一页/上一页原来是现加载的）。
     private static let preloadRadius = 10
-    @State private var preloadedGrids: [Int: [(DaySchedule, MonthPageView.GridDayKind)]] = [:]
+    @State private var preloadedGrids: [Int: [(day: DaySchedule, kind: MonthPageView.GridDayKind)]] = [:]
 
     /// 共享班表页（1.2.7.001，第 24 条）。
     @State private var showShareSchedule = false
@@ -54,7 +54,7 @@ struct CalendarView: View {
     private func preloadAround(_ center: Int) {
         let lo = max(pageRange.lowerBound, center - Self.preloadRadius)
         let hi = min(pageRange.upperBound - 1, center + Self.preloadRadius)
-        var next: [Int: [(DaySchedule, MonthPageView.GridDayKind)]] = [:]
+        var next: [Int: [(day: DaySchedule, kind: MonthPageView.GridDayKind)]] = [:]
         next.reserveCapacity(hi - lo + 1)
         for idx in lo...hi {
             if let cached = preloadedGrids[idx] {
@@ -569,7 +569,7 @@ struct MonthPageView: View {
     /// 父视图预加载好的本页格子（前后 10 个月共 21 页）：有就直接用，不拍快照、
     /// 不等出现时现算；没有（窗口外、刚翻过来的新页）才走原来的快照兜底。
     /// 1.3.2.004（老爷 2026-11-28 11:32 亲口定预加载 21 页）。
-    let preloadedDays: [(DaySchedule, GridDayKind)]?
+    let preloadedDays: [(day: DaySchedule, kind: GridDayKind)]?
     let isSelected: (String) -> Bool
     let onSelectDay: (DaySchedule) -> Void
     /// 点到上月/下月补的日期时跳到对应月。
@@ -598,14 +598,14 @@ struct MonthPageView: View {
     /// 每格固定 64pt、7 列写死，格子永远在固定位置。
     /// 1.3.2.004：格子算法抽成静态纯函数——父视图预加载 21 页时调这一份，
     /// 本页兜底也调这一份，不另写一份算法（两份算法迟早对不上）。
-    static func buildGridDays(year: Int, month: Int, store: AppStore) -> [(DaySchedule, GridDayKind)] {
+    static func buildGridDays(year: Int, month: Int, store: AppStore) -> [(day: DaySchedule, kind: GridDayKind)] {
         let prev = month == 1 ? (year - 1, 12) : (year, month - 1)
         let next = month == 12 ? (year + 1, 1) : (year, month + 1)
         let mondayFirst = store.calendarDisplay.mondayFirst
         let firstWeekday = DateUtil.firstWeekday(year: year, month: month)
         // 每月第一周前面补上月末尾几天（周一为首日时，前导数按周一偏移）。
         let leading = mondayFirst ? (firstWeekday + 6) % 7 : firstWeekday
-        var result: [(DaySchedule, GridDayKind)] = []
+        var result: [(day: DaySchedule, kind: GridDayKind)] = []
         if leading > 0 {
             let prevMonth = store.monthFor(year: prev.0, month: prev.1)
             result += (prevMonth.days ?? []).suffix(leading).map { ($0, GridDayKind.leading) }
