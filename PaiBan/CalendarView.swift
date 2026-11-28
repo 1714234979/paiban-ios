@@ -382,17 +382,22 @@ struct CalendarView: View {
 
     // MARK: 头部
 
-    /// 顶卡（1.3.2.016，Gemini 升级版规格 + 老爷令重构；1.3.3.002 顶卡的
-    /// 「预估今日工资」整块删掉）：TodayOverviewCard，两区紧凑结构
-    /// （日期+徽标+今天 / 班次状态），高度固定。
+    /// 顶卡（1.3.2.016，Gemini 升级版规格 + 老爷令重构）：TodayOverviewCard，
+    /// 两区紧凑结构（日期+徽标+今天 / 班次状态+今日已挣），高度固定。
     /// 徽标点回本班、「今天」按钮回当月（走 goToToday）。
     private var todayOverviewCard: some View {
-        TodayOverviewCard(
+        let inputs = store.todayEstimateInputs
+        return TodayOverviewCard(
             dateText: todayDateLine,
             myTeam: store.myTeam,
             isViewingOtherTeam: store.viewTeam != store.myTeam,
             shiftLine: todayShiftLine,
             day: store.todaySchedule,
+            earlyRate: inputs.earlyRate,
+            midRate: inputs.midRate,
+            inputs: inputs.inputs,
+            payAccess: store.payAccess,
+            hideAmounts: Bindable(store).hideAmounts,
             showBackToToday: pageIndex != currentMonthIndex,
             onTapMyTeamBadge: { store.viewTeam = store.myTeam },
             onBackToToday: goToToday

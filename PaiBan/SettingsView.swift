@@ -1565,6 +1565,10 @@ struct ChangelogView: View {
             }
             if UpdateChecker.installedChannel == "beta" {
                 Section("内测版") {
+                    changelog(version: "1.3.3.003", items: [
+                        "排班页顶卡「预估今日工资」改成「今日工资」，只去掉「预估」两个字",
+                        "顶卡金额与下方「预估 ¥XXX」那行不变",
+                    ])
                     changelog(version: "1.3.3.002", items: [
                         "排班页顶卡「预估今日工资」那块删掉了，顶卡只剩日期、班次和倒计时",
                         "注册页多余提示删掉了",

@@ -1502,6 +1502,11 @@ final class AppStore {
         return (base, global.earlyRate ?? 70, global.midRate ?? 30, base / 21.75, inputs)
     }
 
+    /// 今日预估用的全套输入（estimateInputs 传今天）。
+    var todayEstimateInputs: (baseSalary: Double, earlyRate: Double, midRate: Double, dailyRate: Double, inputs: PayCalc.DayEstimateInputs) {
+        estimateInputs(for: DateUtil.string(from: Date()))
+    }
+
     // MARK: - 工资引导（第 30 条，2026-11-26）
 
     /// 工资引导弹窗（第 30 条，2026-11-26）——已废弃（2026-11-27 10:28 老爷亲口定，

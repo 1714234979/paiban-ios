@@ -2,21 +2,27 @@ import SwiftUI
 import UIKit
 
 /// 顶部「今日排班」卡片（1.3.2.016，Gemini 升级版规格 + 老爷令重构；
-/// 1.3.3.002：老爷 2026-11-29 00:12 亲口令，顶卡的「预估今日工资」整块删掉）：
+/// 1.3.3.003：老爷 2026-11-29 01:18 亲口纠正，顶卡标签「预估今日工资」只去「预估」两字、改成「今日工资」，下方「预估 ¥XXX」那行与大数字不动）：
 /// 上下两区紧凑结构——上行「日期 + 我的班组徽标 | 按需显示的今天按钮」，
-/// 下行「左：班次与状态（实时倒计时）」。卡片高度由剩下内容定，是固定值，
-/// 不随内容变（没有条件行了）。
+/// 下行「左：班次与状态（实时倒计时） | 右：今日工资 + 眼睛 + 大号金额 + 预估小字」。
+/// 高度固定：休息日 / 无工资权限 / 今日数据未到时，金额列用 opacity 0 占位
+/// （看不见但占高度），卡片不因行数变化而一会儿大一会儿小。
 /// 倒计时沿用 TodayLiveState（PayCalc.todayLiveState），每秒走；
 /// 状态圆点色沿用旧映射（上班中/已下班绿，上班前/两班之间橙，休息灰），
 /// 呼吸脉冲只在上班中（.working）时开。
-/// 注意：liveState 只取状态与起止时刻（倒计时用），已挣/总额不再算给界面看——
-/// todayLiveState 用默认费率与默认输入调用，起止时刻与输入无关，不影响倒计时。
+/// 预估小字（1.3.2.018 加回）：上班前/上班中/两班之间显示全日预估「预估 ¥XXX」；
+/// 下班后不显示（金额就是全额），休息/无权限时占位藏起来。
 struct TodayOverviewCard: View {
     let dateText: String           // "2026年11月28日 周六"
     let myTeam: String             // "B"
     let isViewingOtherTeam: Bool   // 当前是否在看其他班组
     let shiftLine: String          // "日班 08:00–16:00" / "休息" / "请假（年假）"
     let day: DaySchedule?          // 今天的日程（nil = 今日数据未到）
+    let earlyRate: Double
+    let midRate: Double
+    let inputs: PayCalc.DayEstimateInputs
+    let payAccess: Bool
+    @Binding var hideAmounts: Bool
     let showBackToToday: Bool      // 当前浏览非本月时为 true
     let onTapMyTeamBadge: () -> Void   // 切回本人班组
     let onBackToToday: () -> Void      // 回到当月
@@ -99,39 +105,41 @@ struct TodayOverviewCard: View {
         }
     }
 
-    // MARK: 下行：班次与状态（实时倒计时）
+    // MARK: 下行：左班次状态 | 右今日工资
 
-    /// 状态共用一个 TimelineView（每秒重绘）；只取状态与起止时刻，
-    /// 金额已在 1.3.3.002 删掉，不再算已挣/总额给界面看。
+    /// 状态与金额共用同一个 TimelineView（同一时刻的 state），不各算各的。
     private var bottomRow: some View {
         TimelineView(.periodic(from: Date(), by: 1)) { context in
             let now = context.date
             let state = liveState(now: now)
-            VStack(alignment: .leading, spacing: 6) {
-                Text(shiftLine)
-                    .font(.system(size: 14, weight: .medium))
-                    .monospacedDigit()
-                    .foregroundStyle(.primary.opacity(0.84))
-                HStack(spacing: 6) {
-                    statusDot(state: state)
-                    Text(statusText(state: state, now: now))
-                        .font(.system(size: 12))
-                        .foregroundStyle(.secondary)
+            HStack(alignment: .bottom, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(shiftLine)
+                        .font(.system(size: 14, weight: .medium))
                         .monospacedDigit()
+                        .foregroundStyle(.primary.opacity(0.84))
+                    HStack(spacing: 6) {
+                        statusDot(state: state)
+                        Text(statusText(state: state, now: now))
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
                 }
+                Spacer()
+                moneyColumn(state: state)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     // MARK: 状态（沿用旧 TodayStatusLine 的逻辑）
 
-    /// 只取状态与起止时刻：班次起止时刻与费率/输入无关，默认调用即可。
     private func liveState(now: Date) -> PayCalc.TodayLiveState? {
         guard let day else { return nil }
         let today = DateUtil.calendar.startOfDay(for: now)
         return PayCalc.todayLiveState(
-            shift: day.shift, onLeave: day.onLeave == true, day: today, now: now
+            shift: day.shift, onLeave: day.onLeave == true, day: today, now: now,
+            earlyRate: earlyRate, midRate: midRate, inputs: inputs
         )
     }
 
@@ -139,6 +147,13 @@ struct TodayOverviewCard: View {
     private func isWorking(_ state: PayCalc.TodayLiveState?) -> Bool {
         guard let state else { return false }
         if case .working = state { return true }
+        return false
+    }
+
+    /// 休息态（含今日数据未到）才算休息；金额列靠它决定占不占位。
+    private func isRestState(_ state: PayCalc.TodayLiveState?) -> Bool {
+        guard let state else { return true }
+        if case .rest = state { return true }
         return false
     }
 
@@ -192,6 +207,65 @@ struct TodayOverviewCard: View {
                 .fill(dotColor(state: state))
                 .frame(width: 6.5, height: 6.5)
                 .frame(width: 10, height: 10)
+        }
+    }
+
+    // MARK: 金额（沿用旧 TodayMoneyRow.moneyParts 的后缀与取整逻辑）
+
+    /// 金额列：整列是一个按钮（点标签/金额都切隐藏），热区 = 整列高度（>32pt），
+    /// 不靠 padding 撑高、不把卡片撑大。休息日 / 无工资权限 / 今日数据未到时，
+    /// 内容照常算、opacity 0 占位 + 禁用，卡片高度纹丝不动。
+    /// 预估小字（1.3.2.018）：上班前/上班中/两班之间显示全日预估；下班后不显示
+    /// （金额就是全额），用 opacity 0 的同字号占位保高度，不直接省掉。
+    private func moneyColumn(state: PayCalc.TodayLiveState?) -> some View {
+        let money = moneyParts(state: state)
+        let visible = payAccess && !isRestState(state)
+        return Button {
+            withAnimation(.easeInOut(duration: 0.18)) {
+                hideAmounts.toggle()
+            }
+        } label: {
+            VStack(alignment: .trailing, spacing: 2) {
+                HStack(spacing: 4) {
+                    Text(money.label)
+                        .font(.system(size: 12))
+                        .foregroundStyle(.secondary)
+                    Image(systemName: hideAmounts ? "eye.slash" : "eye")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                Text(money.amount)
+                    .font(.system(size: 25, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(.primary)
+                    .contentTransition(.numericText())
+                Text(money.sub ?? "预估 ¥0.00")
+                    .font(.system(size: 11))
+                    .foregroundStyle(.secondary)
+                    .opacity(money.sub == nil ? 0 : 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(!visible)
+        .opacity(visible ? 1 : 0)
+        .accessibilityLabel(hideAmounts ? "金额已隐藏，点按显示" : "今日工资 \(money.amount)，点按隐藏金额")
+    }
+
+    /// 金额三件套：标签 / 大号金额 / 预估小字（下班后没预估、休息没钱，返回 nil）。
+    /// 标签（1.3.2.018；1.3.3.003 只去「预估」两字）：固定「今日工资」+ 三薪/加班后缀（原「今日已挣」）。
+    /// 休息日 / 今日数据未到返回占位内容（¥0.00），由调用方 opacity 0 藏起来。
+    private func moneyParts(state: PayCalc.TodayLiveState?) -> (label: String, amount: String, sub: String?) {
+        let suffix = inputs.isTriple ? "（三薪）" : (inputs.isOvertime ? "（加班）" : "")
+        let label = "今日工资" + suffix
+        // 隐藏时金额一律 ¥****（1.3.2.013），三薪/加班后缀照常显示。
+        let m: (Double) -> String = { hideAmounts ? "¥****" : MoneyUtil.money($0) }
+        guard let state else { return (label, m(0), nil) }
+        switch state {
+        case .rest: return (label, m(0), nil)
+        case .before(_, let total): return (label, m(0), "预估 \(m(total))\(suffix)")
+        case .working(_, let earned, let total): return (label, m(earned), "预估 \(m(total))\(suffix)")
+        case .between(_, let earned, let total): return (label, m(earned), "预估 \(m(total))\(suffix)")
+        case .done(let total): return (label, m(total), nil)
         }
     }
 }
