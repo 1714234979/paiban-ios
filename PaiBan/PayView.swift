@@ -24,12 +24,12 @@ struct PayView: View {
     /// 滑页的页码 = 月份绝对序号（年*12 + 月-1），与排班页同一套。
     /// 1.2.6 冷启动回当天：默认当月。
     @State private var pageIndex: Int = PayView.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
-    /// 滑页范围：一次生成 10 年（120 个月），当前月居中（前后各 60 个月），和排班页对齐。
+    /// 滑页范围：一次生成 20 年（240 个月），当前月居中（前后各 120 个月），和排班页对齐。
     @State private var windowStartIndex: Int = {
         let now = DateUtil.yearMonth(of: Date())
-        return PayView.monthIndex(year: now.year, month: now.month) - 60
+        return PayView.monthIndex(year: now.year, month: now.month) - 120
     }()
-    private var pageRange: Range<Int> { windowStartIndex..<(windowStartIndex + 120) }
+    private var pageRange: Range<Int> { windowStartIndex..<(windowStartIndex + 240) }
 
     static func monthIndex(year: Int, month: Int) -> Int { year * 12 + (month - 1) }
     private func yearMonth(from index: Int) -> (year: Int, month: Int) { (index / 12, index % 12 + 1) }
@@ -130,7 +130,7 @@ struct PayView: View {
             // 1.2.6 冷启动回当天：进页先对齐到今天所在的月（不再跟 Store 恢复的月份走），
             // 窗口以当月为中心重定。只在视图第一次创建时跑，从后台切回来不重跑、不强制回当月。
             let now = DateUtil.yearMonth(of: Date())
-            windowStartIndex = Self.monthIndex(year: now.year, month: now.month) - 60
+            windowStartIndex = Self.monthIndex(year: now.year, month: now.month) - 120
             pageIndex = Self.monthIndex(year: now.year, month: now.month)
             store.setPayMonth(year: now.year, month: now.month)
             if store.pay == nil {
@@ -183,7 +183,7 @@ struct PayView: View {
     }
 
     /// 月份步进：标题直接取当前页（跟着滑页走，不用等网络）；左右箭头改页码，
-    /// onChange 里 setPayMonth，同样有滑动动画。滑页范围与排班页一致（120 页窗口，10 年，到边就停）。
+    /// onChange 里 setPayMonth，同样有滑动动画。滑页范围与排班页一致（240 页窗口，20 年，到边就停）。
     private var monthStepper: some View {
         HStack {
             Button {

@@ -23,14 +23,14 @@ struct CalendarView: View {
     // 滑页的页码 = 月份绝对序号（年*12 + 月-1），2026年11月 = 24322。
     // 用原生 TabView 分页滑，切月跟着手指走、左右月预渲染，不再整格闪白重画。
     @State private var pageIndex: Int = CalendarView.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
-    // 滑页范围：一次生成 10 年（120 个月），当前月居中（前后各 60 个月）。
-    // 现在是 2026 年 11 月，窗口就是 2021-11 ~ 2031-10，滑到边就停。
-    // 120 页只渲染附近页（TabView 懒加载），滑页不再为全量页做布局，卡顿的根也去了。
+    // 滑页范围：一次生成 20 年（240 个月），当前月居中（前后各 120 个月）。
+    // 现在是 2026 年 11 月，窗口就是 2016-11 ~ 2036-10，滑到边就停。
+    // 240 页只渲染附近页（TabView 懒加载），滑页不再为全量页做布局，卡顿的根也去了。
     @State private var windowStartIndex: Int = {
         let now = DateUtil.yearMonth(of: Date())
-        return CalendarView.monthIndex(year: now.year, month: now.month) - 60
+        return CalendarView.monthIndex(year: now.year, month: now.month) - 120
     }()
-    private var pageRange: Range<Int> { windowStartIndex..<(windowStartIndex + 120) }
+    private var pageRange: Range<Int> { windowStartIndex..<(windowStartIndex + 240) }
 
     /// 共享班表页（1.2.7.001，第 24 条）。
     @State private var showShareSchedule = false
@@ -95,7 +95,7 @@ struct CalendarView: View {
             store.prefetchMonth(year: prev.year, month: prev.month)
             // 1.1.3：阴历缓存预热 + 工资输入补齐（日历的三薪标与底部统计要用）。
             // 阴历按月分批算（主线程，DateFormatter 不线程安全），每批之间让出主线程，
-            // 避免一次算 120 个月堵住界面；滑到新月时阴历已是缓存，不再现算。
+            // 避免一次算 240 个月堵住界面；滑到新月时阴历已是缓存，不再现算。
             // 工资输入（全年天数 + 配置）后台补，到了 payInputsVersion +1 触发重画。
             Task {
                 for idx in pageRange {
@@ -277,7 +277,7 @@ struct CalendarView: View {
         VStack(spacing: 4) {
             // 周几固定在最上面，不跟月份一起滑（原来在每页里，滑走就没了）。
             weekdayHeader
-            // 120 页 TabView：每页固定高（外框总高不变），行距按行数自适应。
+            // 240 页 TabView：每页固定高（外框总高不变），行距按行数自适应。
             // 滑页时不再重新布局、不再因周数不同伸缩，根治掉帧与页边忽大忽小。
             // 月份数据走 store.monthFor：有缓存直接取，没缓存本地 8 天一轮算好缓存起来，
             // 滑页时不再现算、不再发网络请求。
