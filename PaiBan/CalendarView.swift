@@ -30,10 +30,6 @@ struct CalendarView: View {
     /// 今天格轻高亮（1.3.2.007，iOS.docx §3.2）：点“今天”后目标格一次微闪（边框/底色，不放大）。
     @State private var todayFlashDate: String? = nil
     @State private var todayFlashTask: Task<Void, Never>? = nil
-    /// 班组切换淡出淡入（1.3.2.012，老爷 2026-11-28 亲口令：只有进入动画、没有出去的动画）：
-    /// 换班组时日历内容先淡出、数据换好再淡入，和胶囊滑入对称；减弱动态效果时不淡，直接换。
-    @State private var teamFade = false
-    @State private var teamFadeTask: Task<Void, Never>? = nil
     /// 年月快选弹窗（1.3.2.013）：点月份标题弹出，选年月直接跳过去。
     @State private var showMonthJump = false
     /// 班组胶囊滑动（1.3.2.007，iOS.docx §3.2）：选中底色用 matchedGeometryEffect 在四个 pill 间滑动。
@@ -216,15 +212,11 @@ struct CalendarView: View {
                         MonthJumpSheet(currentIndex: pageIndex, range: pageRange) { goToMonth($0) }
                     }
                 headerCard
-                    .opacity(teamFade ? 0 : 1)
                 // 1.2.7.002：日历只留月视图（周视图已删）。
                 monthPager
-                    .opacity(teamFade ? 0 : 1)
                 teamSwitcher
                 summaryLine
-                    .opacity(teamFade ? 0 : 1)
                 recordsSection
-                    .opacity(teamFade ? 0 : 1)
                 syncTimeFooter
             }
             .padding(.horizontal, 16)
@@ -355,17 +347,11 @@ struct CalendarView: View {
             }
         }
         .onChange(of: store.viewTeam) { _ in
-            // 1.3.2.012：先淡出（0.15s）再换数据、150ms 后淡入——出去的动画和胶囊滑入对称。
-            // 减弱动态效果时不淡，直接换；连点换班组时取消上一次淡入，只淡最后一次。
-            if !reduceMotion {
-                withAnimation(.easeInOut(duration: 0.15)) { teamFade = true }
-                teamFadeTask?.cancel()
-                teamFadeTask = Task { @MainActor in
-                    try? await Task.sleep(nanoseconds: 150_000_000)
-                    guard !Task.isCancelled else { return }
-                    withAnimation(.easeInOut(duration: 0.2)) { teamFade = false }
-                }
-            }
+            // 1.3.2.014：切班闪屏修——.012 的 teamFade（先淡出 0.15s、150ms 后再淡入）
+            // 就是闪屏本身：顶卡、日历、统计、记录四块同时淡到透明再回来，整页 blink 一下。
+            // 删掉淡出淡入，换班组直接换数据——当前页 21 页预加载是同步算好的（buildGridDays
+            // 纯本地轮班算，不走网络），切过去立刻就是新班组的日历，不用先藏起来；
+            // 胶囊滑动（matchedGeometryEffect）本身就是切换动画，够了。
             // 1.3.2.004：换班组立刻按新班组重算 21 页（monthFor 按新班组算），再后台刷新。
             preloadAround(pageIndex, forceRebuild: true)
             Task { await store.refreshMonth() }
@@ -384,57 +370,53 @@ struct CalendarView: View {
 
     // MARK: 头部
 
-    /// 顶栏黑框：今天的年月日、周几、什么班（切到别的月份也照样显示今天）。
-    /// 1.3.2.012（老爷 2026-11-28 亲口令：黑框右半边空着）：左右分栏——
-    /// 左边日期 + 班次 + 倒计时，右边今日已挣当主角（小字标签 + 大号金额 + 预估）。
-    /// 休息/请假没钱可挣、没工资权限也不显示，右列直接不占位；左列恒三行，
-    /// 上班/休息黑卡高度基本不变。倒计时和金额各走自己的 TimelineView 每秒刷新，
-    /// 不带动整页（1.2.7 的隔离还在）。
+    /// 顶卡（1.3.2.014，Gemini 排版 + 白框）：今天的年月日、周几、什么班
+    ///（切到别的月份也照样显示今天）。顶行左大号日期、右角标与眼睛；
+    /// 下面班次行、状态行（带状态圆点）；最底下一行左“今日已挣”+预估、右大号金额。
+    /// 1.3.2.014 老爷令：顶卡从黑底（navyAdaptive）改成白框——浅色白、深色深，
+    /// 跟随系统浅深色变（AppStyle.surface1），字也全改成自适应色（主字 onSurface、
+    /// 次字 secondary），黑底那套白字不再用。倒计时和金额各走自己的 TimelineView
+    /// 每秒刷新，不带动整页（1.2.7 的隔离还在）。
+    /// 顶卡始终显示登录用户自己的今日（看别班时也不变），右上角角标「B班 · 我的今日」
+    /// 点明归属；眼睛开关一键隐藏全部金额（只有有工资权限的人才有金额可藏，
+    /// 没权限时只留角标）。
     private var headerCard: some View {
-        VStack(spacing: 8) {
-            // 顶行（1.3.2.013）：黑卡始终显示登录用户自己的今日（看别班时也不变），
-            // 右上角角标「B班 · 我的今日」点明归属；眼睛开关一键隐藏全部金额（只有
-            // 有工资权限的人才有金额可藏，没权限时只留角标）。
-            HStack {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .center, spacing: 8) {
+                Text(todayDateLine)
+                    .appFont(size: AppFont.titleLarge, weight: 700)
+                    .fadeIn()
+                    .foregroundColor(AppStyle.onSurface)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
                 Spacer()
                 Text("\(store.myTeam)班 · 我的今日")
                     .appFont(size: AppFont.caption)
-                    .foregroundColor(AppStyle.whiteText(opacity: 0.75))
+                    .foregroundColor(.primary)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 3)
-                    .background(Color.white.opacity(0.15))
+                    .background(AppStyle.surface2)
                     .clipShape(Capsule())
                 if store.payAccess {
                     HideAmountsEyeButton()
                 }
             }
-            HStack(alignment: .center, spacing: 12) {
-                VStack(alignment: .leading, spacing: 4) {
-                    Text(todayDateLine)
-                        .appFont(size: AppFont.titleLarge, weight: 700)
-                        .fadeIn()
-                        .foregroundColor(.white)
-                    Text(todayShiftLine)
-                        .appFont(size: AppFont.bodySmall)
-                        .fadeIn()
-                        .foregroundColor(AppStyle.whiteText(opacity: 0.75))
-                    if let day = store.todaySchedule {
-                        let inputs = store.todayEstimateInputs
-                        TodayStatusLine(day: day, earlyRate: inputs.earlyRate, midRate: inputs.midRate, inputs: inputs.inputs)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                if let day = store.todaySchedule, store.payAccess {
-                    let inputs = store.todayEstimateInputs
-                    TodayMoneyHero(day: day, earlyRate: inputs.earlyRate, midRate: inputs.midRate, inputs: inputs.inputs, hideAmounts: store.hideAmounts)
-                }
+            Text(todayShiftLine)
+                .appFont(size: AppFont.bodySmall)
+                .fadeIn()
+                .foregroundColor(.secondary)
+            if let day = store.todaySchedule {
+                let inputs = store.todayEstimateInputs
+                TodayStatusLine(day: day, earlyRate: inputs.earlyRate, midRate: inputs.midRate, inputs: inputs.inputs)
+            }
+            if let day = store.todaySchedule, store.payAccess {
+                let inputs = store.todayEstimateInputs
+                TodayMoneyRow(day: day, earlyRate: inputs.earlyRate, midRate: inputs.midRate, inputs: inputs.inputs, hideAmounts: store.hideAmounts)
             }
         }
         .padding(16)
-        .background(AppStyle.navyAdaptive)
+        .background(AppStyle.surface1)
         .cornerRadius(16)
-        // 1.3.2.007：曲线改成 0.25s ease-in-out（iOS.docx §3.2/§4.1），行为不变。
-        .animation(.easeInOut(duration: 0.25), value: store.viewTeam)
     }
 
     /// 今天的年月日 + 周几，如“2026年11月24日 星期二”。
@@ -460,8 +442,12 @@ struct CalendarView: View {
         return "\(day.shift) \(day.displayTime)"
     }
 
+    /// 班组切换（1.3.2.014，Gemini 排版）：一个灰胶囊里的分段选择器——外框 surface2，
+    /// 选中那格是 surface3 白片（浅色白、深色比框亮一档）+ 轻阴影，matchedGeometryEffect
+    /// 让白片在四格间滑过去；未选中是 secondary 灰字。按压只压暗不缩放（.012 规矩），
+    /// 白片滑得干净。热区 48pt（.005 已做）。
     private var teamSwitcher: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 0) {
             ForEach(TeamInfo.allTeams, id: \.self) { team in
                 Button {
                     // 1.3.2.007（iOS.docx §3.2/P7）：轻冲击触感与动画起点同一帧触发。
@@ -475,19 +461,18 @@ struct CalendarView: View {
                         .background(
                             Group {
                                 if store.viewTeam == team {
-                                    // 选中胶囊底色平滑滑动（1.3.2.007，iOS.docx §3.2）：
-                                    // matchedGeometryEffect 让底色在四个 pill 间滑过去，
+                                    // 选中白片平滑滑动（1.3.2.007，iOS.docx §3.2）：
+                                    // matchedGeometryEffect 让白片在四格间滑过去，
                                     // 不是整块日历横移；减弱动态效果时不滑动。
-                                    RoundedRectangle(cornerRadius: 20)
-                                        .fill(AppStyle.navyAdaptive)
+                                    RoundedRectangle(cornerRadius: 16)
+                                        .fill(AppStyle.surface3)
                                         .matchedGeometryEffect(id: "teamCapsule", in: teamCapsuleNamespace)
-                                } else {
-                                    AppStyle.surface1
+                                        .shadow(color: Color.black.opacity(0.08), radius: 2, y: 1)
                                 }
                             }
                         )
-                        .foregroundColor(store.viewTeam == team ? .white : .primary)
-                        .cornerRadius(20)
+                        .foregroundColor(store.viewTeam == team ? AppStyle.onSurface : .secondary)
+                        .cornerRadius(16)
                         // 1.3.2.005（方案 §3.3）：班组 pill 只有约 37pt 高，透明留白扩到 48pt；
                         // 只加竖向留白，不动四个 pill 之间的横向间距。
                         .touchTarget(vertical: 6)
@@ -500,6 +485,8 @@ struct CalendarView: View {
                 .buttonStyle(DayCellPressStyle())
             }
         }
+        .padding(4)
+        .background(AppStyle.surface2, in: RoundedRectangle(cornerRadius: 20))
         // 胶囊滑动只绑在 viewTeam 这个状态上（iOS.docx §4.1：动画绑具体状态，不绑父容器）；
         // 减弱动态效果时 animation 传 nil，胶囊直接跳过去、不滑动。
         .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: store.viewTeam)
@@ -634,6 +621,9 @@ struct CalendarView: View {
     /// 只在看自己班且算得出时显示数字，算不出（输入没到齐）先显示“—”，输入到了重画。
     /// 其他几项（应出勤、实际出勤、请假、休息）不动。
     /// 第 41 条（2026-11-26）：应出勤后面加「基本天数 N 天」（取当月 BASIC_DAYS，11 月 21 天），随月份变。
+    /// 底部统计卡（1.3.2.014，Gemini 排版）：四列大数字（实际出勤/休息/三薪/加班），
+    /// 下面一行小字放应出勤、基本天数、请假——信息一个不少，只是从一行小字改成
+    /// 四列大数字 + 一行小字，好扫得多。
     private var summaryLine: some View {
         // payInputsVersion 订阅从 MonthPageView.body 挪到这里（Gemini 1.3.2.011）：
         // 工资输入到齐时底部统计（三薪 X 天 / 加班 X 天）要重算，这里订阅就够了；
@@ -641,34 +631,56 @@ struct CalendarView: View {
         let _ = store.payInputsVersion
         return Group {
             if let stats = displayedMonth?.stats {
-                Text(summaryText(stats: stats))
-                    .appFont(size: AppFont.bodySmall).monospacedDigit()
-                    .multilineTextAlignment(.center)
-                    .padding(AppStyle.cardPadding)
-                    .frame(maxWidth: .infinity)
-                    .background(AppStyle.surface1)
-                    .cornerRadius(AppStyle.cardRadius)
+                // 第 44 条（2026-11-26）：应出勤是排班算的出勤（基础轮班天数，
+                // PayCalc.countBaseWork：数 baseShift 不是休息的天数，调班请假不影响），
+                // 基本天数是法定口径（PayCalc.basicDays，与工资页同表），两个数不一样。
+                // 之前应出勤那格误用了 stats.basicDays（那是法定基本天数），10 月/11 月
+                // 和基本天数撞成两个一样的数（18/18、21/21）。
+                let ym = yearMonth(from: pageIndex)
+                var triple = "—"
+                var overtime = "—"
+                if let info = store.triplePayInfo(year: ym.year, month: ym.month) {
+                    triple = formatDays(info.tripleDays)
+                    overtime = formatDays(info.overtimeDays)
+                }
+                let baseWorkDays = PayCalc.countBaseWork(yearDays: displayedMonth?.days ?? [], year: ym.year, month: ym.month)
+                let statutoryBasicDays = PayCalc.basicDays(year: ym.year, month: ym.month)
+                VStack(spacing: 8) {
+                    HStack(spacing: 0) {
+                        statCell(value: "\(MoneyUtil.int(stats.actualShifts))班", label: "实际出勤")
+                        Divider().frame(height: 30)
+                        statCell(value: "\(MoneyUtil.int(stats.restDays))天", label: "休息")
+                        Divider().frame(height: 30)
+                        statCell(value: triple == "—" ? "—" : "\(triple)天", label: "三薪")
+                        Divider().frame(height: 30)
+                        statCell(value: overtime == "—" ? "—" : "\(overtime)天", label: "加班")
+                    }
+                    Text("当月应出勤 \(baseWorkDays) 天 · 基本天数 \(statutoryBasicDays) 天 · 请假 \(MoneyUtil.int(stats.leaveDays)) 天")
+                        .appFont(size: AppFont.caption)
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+                .padding(AppStyle.cardPadding)
+                .frame(maxWidth: .infinity)
+                .background(AppStyle.surface1)
+                .cornerRadius(AppStyle.cardRadius)
             }
         }
     }
 
-    private func summaryText(stats: MonthStats) -> String {
-        // 1.1.5：跟当前页走（见 displayedMonth），不跟 store.currentYearMonth。
-        let ym = yearMonth(from: pageIndex)
-        var triple = "—"
-        var overtime = "—"
-        if let info = store.triplePayInfo(year: ym.year, month: ym.month) {
-            triple = formatDays(info.tripleDays)
-            overtime = formatDays(info.overtimeDays)
+    /// 统计卡里的一列：上面大号数字 + 单位，下面小字标签。
+    private func statCell(value: String, label: String) -> some View {
+        VStack(spacing: 2) {
+            Text(value)
+                .appFont(size: AppFont.headline, weight: 700).monospacedDigit()
+                .foregroundColor(AppStyle.onSurface)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text(label)
+                .appFont(size: AppFont.caption)
+                .foregroundColor(.secondary)
         }
-        // 第 44 条（2026-11-26）：应出勤是排班算的出勤（基础轮班天数，
-        // PayCalc.countBaseWork：数 baseShift 不是休息的天数，调班请假不影响），
-        // 基本天数是法定口径（PayCalc.basicDays，与工资页同表），两个数不一样。
-        // 之前应出勤那格误用了 stats.basicDays（那是法定基本天数），10 月/11 月
-        // 和基本天数撞成两个一样的数（18/18、21/21）。
-        let baseWorkDays = PayCalc.countBaseWork(yearDays: displayedMonth?.days ?? [], year: ym.year, month: ym.month)
-        let statutoryBasicDays = PayCalc.basicDays(year: ym.year, month: ym.month)
-        return "当月应出勤 \(baseWorkDays) 天 · 基本天数 \(statutoryBasicDays) 天 · 实际出勤 \(MoneyUtil.int(stats.actualShifts)) 个班 · 三薪 \(triple) 天 · 加班 \(overtime) 天 · 请假 \(MoneyUtil.int(stats.leaveDays)) 天 · 休息 \(MoneyUtil.int(stats.restDays)) 天"
+        .frame(maxWidth: .infinity)
     }
 
     /// 天数显示：整数不带小数（如 0、1），小数保留 1 位。
@@ -1270,7 +1282,10 @@ struct DayCell: View {
         .padding(2)
         .frame(height: calendarCellHeight)
         // 选中底色用圆角矩形画，不用 .cornerRadius() 裁剪——圆角背景只画底色，不裁内容。
-        .background(RoundedRectangle(cornerRadius: 8).fill(isSelected ? Color.blue.opacity(0.12) : Color.clear))
+        // 1.3.2.014：选中色从系统蓝改成 navyAdaptive（老爷说蓝色框别扭）——系统蓝
+        // 又亮又艳，跟红班次 pill、红节气字撞在一起很扎眼；navy 是全站选中态的
+        // 颜色（班组 pill、按钮、本月胶囊都是它），选中格跟全站统一，低调耐看。
+        .background(RoundedRectangle(cornerRadius: 8).fill(isSelected ? AppStyle.navyAdaptive.opacity(0.10) : Color.clear))
         // 今天格微闪（1.3.2.007，iOS.docx §3.2）：底色微闪一次，0.55s 淡出，不放大；
         // 描边那层在上面，不会被闪盖住。
         .overlay(
@@ -1280,7 +1295,7 @@ struct DayCell: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(isToday ? Color.green : (isSelected ? Color.blue : Color.clear), lineWidth: isToday ? 2 : 1.5)
+                .stroke(isToday ? Color.green : (isSelected ? AppStyle.navyAdaptive : Color.clear), lineWidth: isToday ? 2 : 1.5)
         )
         // 选中框切换（1.3.2.007，iOS.docx §3.3）：克制的高阻尼弹簧，禁止过冲。
         .animation(.spring(response: 0.28, dampingFraction: 0.86), value: isSelected)
@@ -1421,6 +1436,9 @@ struct DayCell: View {
 /// 今日倒计时（1.2.7）：只这一行每秒刷新（TimelineView 1 秒一格），不带动整页。
 /// 上班前：距上班 HH:MM:SS；上班中：距下班；双班间隔：距下一班；下班后：今日已下班；
 /// 休息/请假：今日休息/今日请假。
+/// 今日状态行（1.3.2.014，Gemini 排版）：状态圆点 + 倒计时文案。
+/// 圆点颜色看状态——上班中/已下班绿（进行中/已完成），上班前/两班之间橙
+///（等着上班），休息/请假灰。白框上用自适应主字色，不再是黑底白字。
 private struct TodayStatusLine: View {
     let day: DaySchedule
     let earlyRate: Double
@@ -1438,9 +1456,25 @@ private struct TodayStatusLine: View {
             // 2026-11-28 慢滑卡顿修：倒计时每秒重画一次，上面挂 .fadeIn 等于每秒
             // 多走一次离屏模糊；字本来就是等宽、宽度不动，模糊入场效果在每秒刷新的
             // 文字上根本看不出来，直接去掉，只留等宽数字。
-            Text(countdownText(state: state, now: now))
-                .appFont(size: AppFont.bodySmall).monospacedDigit()
-                .foregroundColor(.white)
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(dotColor(state: state))
+                    .frame(width: 8, height: 8)
+                Text(countdownText(state: state, now: now))
+                    .appFont(size: AppFont.bodySmall).monospacedDigit()
+                    .foregroundColor(AppStyle.onSurface)
+            }
+        }
+    }
+
+    /// 状态圆点色：上班中/已下班绿，上班前/两班之间橙，休息/请假灰。
+    private func dotColor(state: PayCalc.TodayLiveState) -> Color {
+        switch state {
+        case .rest: return .gray
+        case .before: return .orange
+        case .working: return .green
+        case .between: return .orange
+        case .done: return .green
         }
     }
 
@@ -1470,12 +1504,13 @@ private struct TodayStatusLine: View {
     }
 }
 
-/// 今日已挣大号金额（1.3.2.012）：黑卡右列当主角——上面小字标签、中间大号金额、
-/// 下面预估一行；每秒刷新，只这一小块，不带动整页。
+/// 今日已挣底行（1.3.2.014，Gemini 排版）：顶卡最底下一行——左边小字标签 +
+/// 预估，右边大号金额；每秒刷新，只这一小块，不带动整页。
 /// 上班中/上班前显示已挣 + 预估；下班后显示今日已挣；休息/请假没钱可挣，
-/// 这一列直接不渲染（headerCard 里不放它）。
+/// 这一行直接不渲染（headerCard 里不放它）。
 /// 三薪那天标签/预估行带「（三薪）」，加班那天带「（加班）」。
-private struct TodayMoneyHero: View {
+/// 白框上用自适应色（主字 onSurface、次字 secondary），不再是黑底白字。
+private struct TodayMoneyRow: View {
     let day: DaySchedule
     let earlyRate: Double
     let midRate: Double
@@ -1492,18 +1527,21 @@ private struct TodayMoneyHero: View {
                 earlyRate: earlyRate, midRate: midRate, inputs: inputs
             )
             if let money = moneyParts(state: state) {
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(money.label)
-                        .appFont(size: AppFont.caption)
-                        .foregroundColor(AppStyle.whiteText(opacity: 0.75))
+                HStack(alignment: .bottom, spacing: 8) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(money.label)
+                            .appFont(size: AppFont.caption)
+                            .foregroundColor(.secondary)
+                        if let sub = money.sub {
+                            Text(sub)
+                                .appFont(size: AppFont.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    Spacer()
                     Text(money.amount)
                         .appFont(size: 24, weight: 700).monospacedDigit()
-                        .foregroundColor(.white)
-                    if let sub = money.sub {
-                        Text(sub)
-                            .appFont(size: AppFont.caption)
-                            .foregroundColor(AppStyle.whiteText(opacity: 0.75))
-                    }
+                        .foregroundColor(AppStyle.onSurface)
                 }
             }
         }

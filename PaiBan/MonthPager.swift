@@ -450,6 +450,9 @@ struct SmoothMonthPager<Content: View>: View {
 /// 下次进 App 还在。极轻量：白字 0.85 透明度、无底块，只一个小眼睛。
 /// 放这里不用放 DesignSystem.swift——DesignSystem 同时编进小组件扩展，
 /// 那边没有 AppStore，写 @Environment(AppStore.self) 编不过。
+/// 金额一键隐藏的眼睛按钮（1.3.2.013 建，1.3.2.014 改色）：顶卡从黑底改成
+/// 白框（跟随浅深色）后，眼睛不能再是纯白，改成自适应的 secondary——浅色深灰、
+/// 深色浅灰，在白卡和深卡上都看得清。只用在排班/工资两张顶卡上。
 struct HideAmountsEyeButton: View {
     @Environment(AppStore.self) private var store: AppStore
 
@@ -460,7 +463,7 @@ struct HideAmountsEyeButton: View {
         } label: {
             Image(systemName: store.hideAmounts ? "eye.slash" : "eye")
                 .font(.system(size: 15))
-                .foregroundColor(AppStyle.whiteText(opacity: 0.85))
+                .foregroundColor(.secondary)
                 .padding(6)
                 .contentShape(Rectangle())
         }

@@ -87,45 +87,112 @@ struct PayView: View {
 
     /// 黑卡（Gemini 整改模块 4d，老爷 2026-11-28 14:49 亲口改回）：上一轮按 14:31 的意思
     /// 把只写「预估工资」四个字的黑卡删掉了，现在恢复——当月实发合计作为大号核心数据
-    /// 放进去，和排班页顶部黑卡视觉统一（AppStyle.navyAdaptive + 16pt 圆角）。
+    /// 放进去，和排班页顶部顶卡视觉统一（1.3.2.014 起是白框 AppStyle.surface1 + 16pt 圆角，
+    /// 不再是黑底 navyAdaptive）。
     /// 数从当月工资数据里取已有的 grandTotal（下面合计行同一个数），不重算、不改公式；
     /// 当月工资还没算出来显示“—”；12h/6h 方式工资口径待定时也显示“—”并注一句。
     /// 2026-11-28 改：从固定在分页器上方改成每个月页面的页眉（见 body），
     /// 跟着月份一起翻页；所以改成函数、按页面的年月取数，不再读 pageIndex。
     /// 1.3.2.010：页眉放在页内、纵向 ScrollView 外（之前在 ScrollView 顶部，
     /// 嵌套 ScrollView 的竖向偏移一漂移就把黑卡顶出可视区、顶部横切）。
+    /// 顶卡（1.3.2.014，Gemini 排版 + 白框）：本月实发合计 + 眼睛；下面大号总数；
+    /// 再下面三段进度条（实发工资绿 / 实发奖金蓝 / 餐贴灰，按三者之和归一化）；
+    /// 最下面三列小字（实发工资 / 实发奖金 / 餐贴）。
+    /// 1.3.2.014 老爷令：顶卡从黑底（navyAdaptive）改成白框——浅色白、深色深，
+    /// 跟随系统浅深色变（AppStyle.surface1），字也全改成自适应色（主字 onSurface、
+    /// 次字 secondary），黑底那套白字不再用。隐藏金额时总数与三列变 ¥****，
+    /// 进度条只露一条中性灰条、不露占比。
     private func headerCard(for ym: (year: Int, month: Int)) -> some View {
         let pay = store.cachedPay(year: ym.year, month: ym.month)
-        return VStack(alignment: .leading, spacing: 4) {
+        return VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("本月实发合计")
                     .appFont(size: AppFont.bodySmall)
-                    .foregroundColor(AppStyle.whiteText(opacity: 0.75))
+                    .foregroundColor(.secondary)
                 Spacer()
                 // 金额一键隐藏（1.3.2.013）：右上角眼睛，点一下本页全部金额脱敏为 ¥****。
                 HideAmountsEyeButton()
             }
             if let pay = pay, !isPayTBD {
                 Text(store.moneyText(pay.grandTotal))
-                    .appFont(size: AppFont.titleLarge, weight: 700)
-                    .foregroundColor(.white)
+                    .appFont(size: 32, weight: 700).monospacedDigit()
+                    .foregroundColor(AppStyle.onSurface)
+                PayCompositionBar(
+                    salary: pay.salaryNet ?? 0,
+                    bonus: pay.bonusAfterTax ?? 0,
+                    meal: pay.mealAllowance ?? 0,
+                    hidden: store.hideAmounts
+                )
+                HStack(spacing: 0) {
+                    payMiniColumn(label: "实发工资", value: store.moneyText(pay.salaryNet))
+                    Divider().frame(height: 28)
+                    payMiniColumn(label: "实发奖金", value: store.moneyText(pay.bonusAfterTax))
+                    Divider().frame(height: 28)
+                    payMiniColumn(label: "餐贴", value: store.moneyText(pay.mealAllowance))
+                }
             } else {
                 Text("—")
-                    .appFont(size: AppFont.titleLarge, weight: 700)
-                    .foregroundColor(.white)
+                    .appFont(size: 32, weight: 700).monospacedDigit()
+                    .foregroundColor(AppStyle.onSurface)
                 if isPayTBD {
                     Text("工资口径待定，金额暂不算")
                         .appFont(size: AppFont.bodySmall)
-                        .foregroundColor(AppStyle.whiteText(opacity: 0.75))
+                        .foregroundColor(.secondary)
                 }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
-        .background(AppStyle.navyAdaptive)
+        .background(AppStyle.surface1)
         .cornerRadius(16)
         .padding(.horizontal, 16)
     }
+
+    /// 顶卡底下三列小字里的一列：上面小灰标签，下面大号金额。
+    private func payMiniColumn(label: String, value: String) -> some View {
+        VStack(spacing: 2) {
+            Text(label)
+                .appFont(size: AppFont.caption)
+                .foregroundColor(.secondary)
+            Text(value)
+                .appFont(size: AppFont.bodySmall, weight: 700).monospacedDigit()
+                .foregroundColor(AppStyle.onSurface)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+/// 本月实发构成条（1.3.2.014，Gemini 排版）：实发工资（绿）+ 实发奖金（蓝）+
+/// 餐贴（灰）三段，按三者之和归一化，拼成一条 6pt 圆角横条；三者都为 0 时不画。
+/// 隐藏金额时只露一条中性灰条，不露占比（比例本身就是金额信息）。
+private struct PayCompositionBar: View {
+    let salary: Double
+    let bonus: Double
+    let meal: Double
+    let hidden: Bool
+
+    var body: some View {
+        if hidden {
+            Capsule()
+                .fill(AppStyle.surface2)
+                .frame(height: 6)
+        } else {
+            let total = max(0, salary) + max(0, bonus) + max(0, meal)
+            if total > 0 {
+                GeometryReader { geo in
+                    HStack(spacing: 0) {
+                        Color.green.frame(width: geo.size.width * (max(0, salary) / total))
+                        Color.blue.frame(width: geo.size.width * (max(0, bonus) / total))
+                        Color.gray.frame(width: geo.size.width * (max(0, meal) / total))
+                    }
+                }
+                .frame(height: 6)
+                .clipShape(Capsule())
+            }
+        }
+    }
+}
 
     static func monthIndex(year: Int, month: Int) -> Int { year * 12 + (month - 1) }
     private func yearMonth(from index: Int) -> (year: Int, month: Int) { (index / 12, index % 12 + 1) }
@@ -433,9 +500,13 @@ struct PayView: View {
                 ])
                 }
                 if let tripleDates = pay.tripleDates, !tripleDates.isEmpty {
+                    // 1.3.2.014：标题小灰字放白卡外面（Gemini 排版，与工资/奖金明细同款）。
                     VStack(alignment: .leading, spacing: 6) {
                         Text("三薪明细")
-                            .appFont(size: AppFont.headline, weight: 600)
+                            .appFont(size: AppFont.bodySmall)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 16)
+                        VStack(alignment: .leading, spacing: 6) {
                         ForEach(tripleDates, id: \.date) { item in
                             HStack {
                                 Text(item.date ?? "")
@@ -446,11 +517,12 @@ struct PayView: View {
                             }
                             .appFont(size: AppFont.bodySmall)
                         }
+                        }
+                        .padding(AppStyle.cardPadding)
+                        .background(AppStyle.surface1)
+                        .cornerRadius(AppStyle.cardRadius)
+                        .padding(.horizontal, 16)
                     }
-                    .padding(AppStyle.cardPadding)
-                    .background(AppStyle.surface1)
-                    .cornerRadius(AppStyle.cardRadius)
-                    .padding(.horizontal, 16)
                 }
             }
         } else if store.isLoadingPay || store.isComputingPay(year: year, month: month) {
@@ -498,38 +570,48 @@ struct PayView: View {
         .padding(.horizontal, 16)
     }
 
+    /// 明细分区（1.3.2.014，Gemini 排版）：标题是小灰字、放在白卡外面、上面，
+    /// 卡片里只留行——原来标题是 17pt 粗体在卡片里面，又占地方又抢眼。
+    /// 合计/出勤/三薪明细都走这套，标题字不变（合计、出勤），工资/奖金那两张
+    /// 标题改成“工资明细”“奖金明细”。
     private func paySection(title: String, rows: [(String, String)]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 6) {
             Text(title)
-                .appFont(size: AppFont.headline, weight: 600)
-                .padding(.bottom, 8)
-            ForEach(rows, id: \.0) { row in
-                HStack {
-                    Text(row.0)
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Text(row.1)
-                        .appFont(size: AppFont.bodySmall, weight: row.0.hasPrefix("实发") || row.0.hasPrefix("应发") || row.0.hasPrefix("税前") || row.0.contains("合计") ? 700 : 400)
-                        .monospacedDigit()
-                }
                 .appFont(size: AppFont.bodySmall)
-                .padding(.vertical, 5)
-                Divider()
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 16)
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(rows, id: \.0) { row in
+                    HStack {
+                        Text(row.0)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Text(row.1)
+                            .appFont(size: AppFont.bodySmall, weight: row.0.hasPrefix("实发") || row.0.hasPrefix("应发") || row.0.hasPrefix("税前") || row.0.contains("合计") ? 700 : 400)
+                            .monospacedDigit()
+                    }
+                    .appFont(size: AppFont.bodySmall)
+                    .padding(.vertical, 5)
+                    Divider()
+                }
             }
+            .padding(AppStyle.cardPadding)
+            .background(AppStyle.surface1)
+            .cornerRadius(AppStyle.cardRadius)
+            .padding(.horizontal, 16)
         }
-        .padding(AppStyle.cardPadding)
-        .background(AppStyle.surface1)
-        .cornerRadius(AppStyle.cardRadius)
-        .padding(.horizontal, 16)
     }
 
     /// 奖金区：科室绩效、绩效系数、奖金系数、加班天数四行点一下就能改当月那个数
     ///（只有老爷能改，改完存服务端、本地立刻重算）。其余行只看。行顺序跟原来一样。
+    /// 1.3.2.014：标题“奖金明细”是小灰字、放在白卡外面（Gemini 排版），卡片里只留行。
     private func bonusSection(pay: PayMonth) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("奖金")
-                .appFont(size: AppFont.headline, weight: 600)
-                .padding(.bottom, 8)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("奖金明细")
+                .appFont(size: AppFont.bodySmall)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 16)
+            VStack(alignment: .leading, spacing: 0) {
             editableRow(title: "科室绩效", valueText: store.moneyText(pay.deptPerf), field: .deptPerf,
                         currentValue: pay.deptPerf.map { String(format: "%.2f", $0) } ?? "4000",
                         placeholder: "科室绩效（如 3800）")
@@ -562,11 +644,12 @@ struct PayView: View {
             }
             staticRow(title: "个税（累计预扣，税从奖金里扣）", valueText: store.moneyText(pay.incomeTax), bold: false, dimmed: (pay.incomeTax ?? 0) == 0)
             staticRow(title: "实发奖金", valueText: store.moneyText(pay.bonusAfterTax), bold: true)
+            }
+            .padding(AppStyle.cardPadding)
+            .background(AppStyle.surface1)
+            .cornerRadius(AppStyle.cardRadius)
+            .padding(.horizontal, 16)
         }
-        .padding(AppStyle.cardPadding)
-        .background(AppStyle.surface1)
-        .cornerRadius(AppStyle.cardRadius)
-        .padding(.horizontal, 16)
     }
 
     /// 公积金标题（1.3.2.013）：费率是反推的（公积金金额 ÷ 缴费基数），不是存量——
@@ -584,11 +667,14 @@ struct PayView: View {
 
     /// 工资区：水电费那行点一下就能改当月那个数（只有老爷能改），其余行只看。
     /// 行顺序跟原来 paySection 那张表一样。
+    /// 1.3.2.014：标题“工资明细”是小灰字、放在白卡外面（Gemini 排版），卡片里只留行。
     private func salarySection(pay: PayMonth) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("工资")
-                .appFont(size: AppFont.headline, weight: 600)
-                .padding(.bottom, 8)
+        VStack(alignment: .leading, spacing: 6) {
+            Text("工资明细")
+                .appFont(size: AppFont.bodySmall)
+                .foregroundColor(.secondary)
+                .padding(.horizontal, 16)
+            VStack(alignment: .leading, spacing: 0) {
             staticRow(title: "基本工资", valueText: store.moneyText(pay.baseSalary), bold: false)
             staticRow(title: "岗位", valueText: pay.position ?? "—", bold: false)
             staticRow(title: "早夜班补贴", valueText: store.moneyText(pay.allowance), bold: false, dimmed: (pay.allowance ?? 0) == 0)
@@ -605,11 +691,12 @@ struct PayView: View {
                         currentValue: pay.utilities.map { String(format: "%.2f", $0) } ?? "0",
                         placeholder: "水电费（如 60）", deduction: true)
             staticRow(title: "实发工资", valueText: store.moneyText(pay.salaryNet), bold: true)
+            }
+            .padding(AppStyle.cardPadding)
+            .background(AppStyle.surface1)
+            .cornerRadius(AppStyle.cardRadius)
+            .padding(.horizontal, 16)
         }
-        .padding(AppStyle.cardPadding)
-        .background(AppStyle.surface1)
-        .cornerRadius(AppStyle.cardRadius)
-        .padding(.horizontal, 16)
     }
 
     /// 只看的行（标签 + 值 + 分隔线），样式跟原来 paySection 里的一致。
