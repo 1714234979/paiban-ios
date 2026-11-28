@@ -302,9 +302,10 @@ private struct PayCompositionBar: View {
         // 纵向 ScrollView 嵌在横向分页器里时，系统会按 safe-area 给内容加顶边距，
         // 是竖向偏移漂移的头号嫌疑；显式写 0，不让它自己加。
         .contentMargins(.top, 0)
-        // 1.3.0.013：滚动指示条常显（老爷 19:24 说「没有滑动框」）——.visible 没用，
-        // 画廊实拍证明它根本不画出来，改走自绘滑块 AlwaysVisibleScrollIndicator。
-        .modifier(AlwaysVisibleScrollIndicator())
+        // 1.3.2.020：自绘常显滑块 AlwaysVisibleScrollIndicator 拿掉（老爷 22:28 说
+        // 竖向拖动条不要跟着左右移动）——那条滑块画在页内、切月横滑时跟着页面一起
+        // 横移，看着在两页中间跑。系统指示条也隐藏，竖滚照常、只是不再有竖条。
+        .scrollIndicators(.hidden)
     }
 
     /// 骨架延迟 150ms（1.3.2.006）：加载开始后 150ms 再现骨架，数据快回来就不闪；

@@ -704,7 +704,7 @@ struct DayDetailView: View {
                 .font(.headline)
                 .frame(maxWidth: .infinity)
                 .frame(height: AppStyle.buttonHeight)
-                .background(prominent ? AppStyle.navyAdaptive : Color(.secondarySystemBackground))
+                .background(prominent ? AppStyle.navyAdaptive : AppStyle.surface1)
                 .foregroundColor(prominent ? .white : .primary)
                 .cornerRadius(AppStyle.buttonRadius)
         }
