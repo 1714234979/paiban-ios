@@ -332,4 +332,25 @@ extension View {
     func iconAligned() -> some View {
         baselineOffset(-2)
     }
+    /// 最小触控热区（1.3.2.005，方案 §3.3 车间戴手套点得准）：
+    /// 透明留白把点击范围扩到 48pt，视觉大小不变（图标不做大）。
+    /// vertical / horizontal 分开给：横排并列的按钮只加竖向留白，不动横向间距。
+    func touchTarget(vertical: CGFloat, horizontal: CGFloat = 0) -> some View {
+        padding(.vertical, vertical)
+            .padding(.horizontal, horizontal)
+            .contentShape(Rectangle())
+    }
+}
+
+/// 骨架占位块（1.3.2.005，方案 §4.4 列表加载、§5.4 弱网与离线）：
+/// 加载时按真实布局排的灰色块，不转圈、不闪烁；数据到了直接换真内容。
+/// 灰用 surface2（浅 #E9E9EE / 深 #1A1A1B），两端都看得见、不刺眼。
+struct SkeletonBar: View {
+    var width: CGFloat? = nil
+    var height: CGFloat
+    var body: some View {
+        RoundedRectangle(cornerRadius: 6)
+            .fill(AppStyle.surface2)
+            .frame(width: width, height: height)
+    }
 }

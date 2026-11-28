@@ -121,6 +121,7 @@ struct PayView: View {
                         VStack(spacing: 16) {
                             monthBreakdown(year: ym.year, month: ym.month)
                             noteCard
+                            syncTimeFooter
                         }
                         // 点编辑框以外的地方就收起（丢弃未保存的改动）。Tap 手势只认轻点，
                         // 拖动（滚动/横滑）不会触发，不跟左右滑切月、上下滚动冲突。
@@ -219,6 +220,8 @@ struct PayView: View {
                     .frame(width: 36, height: 36)
                     .background(AppStyle.surface1)
                     .clipShape(Circle())
+                    // 1.3.2.005（方案 §3.3）：36pt 圆按钮，透明留白扩到 48pt，视觉不变。
+                    .touchTarget(vertical: 6, horizontal: 6)
             }
             Spacer()
             Text(DateUtil.yearMonthTitle(year: yearMonth(from: pageIndex).year, month: yearMonth(from: pageIndex).month))
@@ -233,6 +236,8 @@ struct PayView: View {
                     .frame(width: 36, height: 36)
                     .background(AppStyle.surface1)
                     .clipShape(Circle())
+                    // 1.3.2.005（方案 §3.3）：36pt 圆按钮，透明留白扩到 48pt，视觉不变。
+                    .touchTarget(vertical: 6, horizontal: 6)
             }
         }
         .padding(.horizontal, 16)
@@ -311,8 +316,16 @@ struct PayView: View {
                 }
             }
         } else if store.isLoadingPay {
-            ProgressView("正在加载…")
-                .padding()
+            // 骨架屏（1.3.2.005，方案 §4.4/§5.4）：四块灰卡，按真布局排
+            //（工资 / 奖金 / 合计 / 出勤四张卡的个头），不转圈、不闪烁；
+            // 输入到了直接换真内容。加载逻辑本身没动。
+            VStack(spacing: 16) {
+                SkeletonBar(height: 450)
+                SkeletonBar(height: 420)
+                SkeletonBar(height: 120)
+                SkeletonBar(height: 210)
+            }
+            .padding(.horizontal, 16)
         } else {
             Text("暂无工资数据，稍后再试")
                 .foregroundColor(.secondary)
@@ -486,6 +499,9 @@ struct PayView: View {
                         .padding(.vertical, 2)
                         .background(Color.blue.opacity(0.08))
                         .cornerRadius(6)
+                        // 1.3.2.005（方案 §3.3）：徽标只有约 20pt 高，透明留白扩到 48pt；
+                        // 行会跟着变高一点（可改的 5 行），换点得准，值。
+                        .touchTarget(vertical: 14, horizontal: 4)
                 }
                 .buttonStyle(.plain)
             }
@@ -504,9 +520,13 @@ struct PayView: View {
                             .focused($editFieldFocused)
                         Button("保存") { Task { await saveEdit() } }
                             .buttonStyle(.borderedProminent)
+                            // 1.3.2.005（方案 §3.3）：系统按钮只有约 34pt 高，透明留白扩到 48pt。
+                            .touchTarget(vertical: 7)
                             .disabled(editSaving)
                         Button("取消") { dismissEdit() }
                             .buttonStyle(.bordered)
+                            // 1.3.2.005（方案 §3.3）：同上，透明留白扩到 48pt。
+                            .touchTarget(vertical: 7)
                     }
                     if let editError {
                         Text(editError)
@@ -585,4 +605,23 @@ struct PayView: View {
             .padding(.horizontal, 24)
             .padding(.top, 4)
     }
+
+    /// 数据更新时间（1.3.2.005，方案 §9 第四条）：本地缓存最后一次成功取数的时间；
+    /// 冷启动读磁盘缓存时是缓存的写入时间。没取到过就不显示。
+    private var syncTimeFooter: some View {
+        Group {
+            if let at = store.lastSyncAt {
+                Text("数据更新于 \(Self.syncTimeFormatter.string(from: at))")
+                    .appFont(size: AppFont.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+        }
+    }
+
+    private static let syncTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
 }

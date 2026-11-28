@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit // 1.3.2.005：保存成功轻震动用 UIImpactFeedbackGenerator（iOS 16 可用，不用 iOS 17 的 sensoryFeedback）
 
 /// 某天的详情（点日历弹出的 sheet）：班次、时间、双班、请假、节假日、调班，
 /// 以及调班 / 请假 / 取消的操作。连班禁令在界面上写明，服务端拒绝时原样显示中文错误。
@@ -1366,6 +1367,8 @@ struct DayDetailView: View {
             _ = try await store.submitSwap(date: shownDay.date, partner: partner, partnerShift: pShift,
                                            note: swapNote.isEmpty ? nil : swapNote,
                                            paybackDate: payback, paybackMyShift: pbShift)
+            // 1.3.2.005（方案 §6 车间噪音环境）：调班保存成功，轻震一下确认。
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
             doneMessage = payback == nil ? "调班已保存（待还班，以后再补还班日）" : "调班已保存"
             showSwapFlow = false
             swapPartner = nil
@@ -1423,6 +1426,8 @@ struct DayDetailView: View {
         doneMessage = nil
         await store.submitLeave(date: shownDay.date, type: leaveType,
                                 note: leaveNote.isEmpty ? nil : leaveNote)
+        // 1.3.2.005（方案 §6 车间噪音环境）：请假保存成功，轻震一下确认。
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
         doneMessage = "请假已保存"
         showLeaveForm = false
     }
@@ -1432,6 +1437,9 @@ struct DayDetailView: View {
         doneMessage = nil
         await store.submitLeave(date: shownDay.date, type: leaveType,
                                 note: leaveNote.isEmpty ? nil : leaveNote)
+        // 1.3.2.005（方案 §6 车间噪音环境）：请假本身保存成功，轻震一下确认
+        //（顶岗安排是后一步，安排不上也不影响请假已保存这个确认）。
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
         if let partner = leaveCoverPartner,
            let result = leaveCoverCandidates.first(where: { $0.team == partner })?.ev.result {
             do {
@@ -1474,6 +1482,8 @@ struct DayDetailView: View {
                                      end: DateUtil.string(from: rangeEnd),
                                      type: leaveType,
                                      note: leaveNote.isEmpty ? nil : leaveNote)
+        // 1.3.2.005（方案 §6 车间噪音环境）：请假（一段）保存成功，轻震一下确认。
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
         doneMessage = "请假已保存"
         showLeaveRangeForm = false
     }

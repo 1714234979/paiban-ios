@@ -77,6 +77,7 @@ struct CalendarView: View {
                 monthPager
                 summaryLine
                 recordsSection
+                syncTimeFooter
             }
             .padding(.horizontal, 16)
         }
@@ -241,6 +242,9 @@ struct CalendarView: View {
                         .background(store.viewTeam == team ? AppStyle.navyAdaptive : AppStyle.surface1)
                         .foregroundColor(store.viewTeam == team ? .white : .primary)
                         .cornerRadius(20)
+                        // 1.3.2.005（方案 §3.3）：班组 pill 只有约 37pt 高，透明留白扩到 48pt；
+                        // 只加竖向留白，不动四个 pill 之间的横向间距。
+                        .touchTarget(vertical: 6)
                 }
             }
         }
@@ -257,6 +261,8 @@ struct CalendarView: View {
                     .frame(width: 36, height: 36)
                     .background(AppStyle.surface1)
                     .clipShape(Circle())
+                    // 1.3.2.005（方案 §3.3）：36pt 圆按钮，透明留白扩到 48pt，视觉不变。
+                    .touchTarget(vertical: 6, horizontal: 6)
             }
             Spacer()
             Text(pagerTitle)
@@ -272,6 +278,8 @@ struct CalendarView: View {
                     .padding(.vertical, 6)
                     .background(AppStyle.surface1)
                     .cornerRadius(14)
+                    // 1.3.2.005（方案 §3.3）：小 pill 只有约 31pt 高，透明留白扩到 48pt。
+                    .touchTarget(vertical: 9)
             }
             Spacer()
             Button {
@@ -283,6 +291,8 @@ struct CalendarView: View {
                     .frame(width: 36, height: 36)
                     .background(AppStyle.surface1)
                     .clipShape(Circle())
+                    // 1.3.2.005（方案 §3.3）：36pt 圆按钮，透明留白扩到 48pt，视觉不变。
+                    .touchTarget(vertical: 6, horizontal: 6)
             }
         }
     }
@@ -448,9 +458,19 @@ struct CalendarView: View {
             Text("本月调班 / 请假")
                 .appFont(size: AppFont.headline, weight: 600)
             if displayedSwaps == nil || displayedLeaves == nil {
-                Text("正在加载…")
-                    .appFont(size: AppFont.bodySmall)
-                    .foregroundColor(.secondary)
+                // 骨架屏（1.3.2.005，方案 §4.4/§5.4）：两行灰条，按记录行的样子排
+                //（日期 + 内容），不转圈、不闪烁；数据到了直接换真内容。
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        SkeletonBar(width: 86, height: 14)
+                        SkeletonBar(width: 150, height: 14)
+                    }
+                    HStack(spacing: 8) {
+                        SkeletonBar(width: 86, height: 14)
+                        SkeletonBar(width: 110, height: 14)
+                    }
+                }
+                .padding(.vertical, 4)
             } else if displayedSwapRows.isEmpty && (displayedLeaves ?? []).isEmpty {
                 Text("本月没有调班请假")
                     .appFont(size: AppFont.bodySmall)
@@ -484,6 +504,25 @@ struct CalendarView: View {
         .background(AppStyle.surface1)
         .cornerRadius(AppStyle.cardRadius)
     }
+
+    /// 数据更新时间（1.3.2.005，方案 §9 第四条）：本地缓存最后一次成功取数的时间；
+    /// 冷启动读磁盘缓存时是缓存的写入时间。没取到过就不显示。
+    private var syncTimeFooter: some View {
+        Group {
+            if let at = store.lastSyncAt {
+                Text("数据更新于 \(Self.syncTimeFormatter.string(from: at))")
+                    .appFont(size: AppFont.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+        }
+    }
+
+    private static let syncTimeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
 
     /// 调班记录按“替班日 + 还班日”并成一条：coverDate / paybackDate 互相指向的算一对。
     private struct SwapRow: Identifiable {

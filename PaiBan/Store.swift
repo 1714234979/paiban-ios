@@ -124,6 +124,12 @@ final class AppStore: ObservableObject {
     // 离线：服务器连不上时用缓存顶着，界面上显示“离线缓存”。
     @Published var isOffline = false
     @Published var cacheSavedAt: Date?
+    /// 数据最后一次成功取数的时间（1.3.2.005，方案 §9 第四条）：
+    /// 排班页/工资页显示“数据更新于 HH:mm”用。只在联网取数成功时更新
+    ///（refreshMonth / refreshPayInputs / /me/pay 兜底）；本地重算成功但没取数
+    /// 时不更新——时间是取数时间，不是重算时间。冷启动读磁盘缓存时是缓存的
+    /// 写入时间（cache.savedAt）。不为这个时间多发一次网络请求。
+    @Published var lastSyncAt: Date?
 
     // 排班
     @Published var currentMonth = Date()              // 当前看的月份（Date 取当月 1 号即可）
@@ -469,6 +475,7 @@ final class AppStore: ObservableObject {
         localMonthCache = [:]
         userMonths = [:]
         cacheSavedAt = nil
+        lastSyncAt = nil
         selectedTab = 0
         pendingDeepLinkTab = nil
         // 退出后小组件没数据可显示：清掉共享区的快照，让它显示占位。
@@ -529,6 +536,8 @@ final class AppStore: ObservableObject {
             pay = cachedPay // 旧版缓存兼容
         }
         cacheSavedAt = cache.savedAt
+        // 1.3.2.005：冷启动读磁盘缓存，更新时间就是缓存的写入时间。
+        lastSyncAt = cache.savedAt
     }
 
     private func persistCache() {
@@ -769,6 +778,8 @@ final class AppStore: ObservableObject {
                 applyCachedMonth()
                 if monthCache[key] != nil && swapsCache[monthKey] != nil && leavesCache[monthKey] != nil {
                     isOffline = false
+                    // 1.3.2.005：这趟取数成功了（预取回来的），更新“数据更新于”时间。
+                    lastSyncAt = Date()
                     calendarVersion += 1
                     persistCache()
                     return
@@ -795,6 +806,8 @@ final class AppStore: ObservableObject {
                 isOffline = false
                 // 1.1.5：刷新成功才让日历各页重拍快照（滑页防抖保证这时已经落定）。
                 calendarVersion += 1
+                // 1.3.2.005：这趟取数成功了，更新“数据更新于”时间。
+                lastSyncAt = Date()
                 AppLogger.shared.log("排班 \(ym.year)-\(ym.month) 联网刷新成功", tag: "Cache")
             } catch {
                 AppLogger.shared.log("排班 \(ym.year)-\(ym.month) 联网刷新失败：\((error as? APIError)?.message ?? error.localizedDescription)，用缓存顶着", tag: "Cache")
@@ -851,9 +864,12 @@ final class AppStore: ObservableObject {
         let daysInYear = DateUtil.isLeapYear(year) ? 366 : 365
         async let daysTask: [DaySchedule]? = try? await api.fetchRangeDays(
             start: String(format: "%04d-01-01", year), days: daysInYear)
-        if let cfg = await configTask { payConfig = cfg }
+        // 1.3.2.005：输入取回来了就是一次成功取数，更新“数据更新于”时间；
+        // 两趟都没取到（没网）就不更新，时间还停在上次取数成功那次。
+        if let cfg = await configTask { payConfig = cfg; lastSyncAt = Date() }
         if let days = await daysTask, !days.isEmpty {
             yearDaysCache[String(year)] = days
+            lastSyncAt = Date()
             // 全年天数变了，本地算好的工资可能过时：只清当年已算的月份。
             for m in 1...12 { payCache.removeValue(forKey: payCacheKey(year: year, month: m)) }
         }
@@ -973,6 +989,8 @@ final class AppStore: ObservableObject {
         do {
             pay = try await api.fetchPay(year: payYearMonth.year, month: payYearMonth.month)
             isOffline = false
+            // 1.3.2.005：服务端兜底取数成功了，更新“数据更新于”时间。
+            lastSyncAt = Date()
         } catch {
             if (error as? APIError)?.message == APIError.unreachable.message {
                 isOffline = true

@@ -495,6 +495,9 @@ struct SettingsView: View {
             .padding(.vertical, 8)
             .background(selected ? AppStyle.surface1 : Color.clear)
             .clipShape(RoundedRectangle(cornerRadius: 8))
+            // 1.3.2.005（方案 §3.3）：渠道按钮只有约 35pt 高，透明留白扩到 48pt；
+            // 只加竖向留白，不动两个按钮之间的横向间距。
+            .touchTarget(vertical: 7)
         }
         .buttonStyle(.borderless)
         .disabled(isFetchingChannelVersion)
@@ -1016,6 +1019,8 @@ struct PaySettingsView: View {
         }
         do {
             try await store.saveProfile(paySettings: settings)
+            // 1.3.2.005（方案 §6 车间噪音环境）：工资设置保存成功，轻震一下确认。
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
             saveMessage = "已保存，下个月的工资按新设置算"
             await store.refreshPay()
         } catch {
@@ -1432,6 +1437,12 @@ struct ChangelogView: View {
     var body: some View {
         Form {
             Section {
+                changelog(version: "1.3.2.005（内测）", items: [
+                    "戴手套也点得中：月份箭头、今天按钮、班组按钮、保存取消和验证码按钮，点击范围都扩到 48，样子没变",
+                    "加载时不再转圈：排班页的调班/请假卡、工资页加载中显示灰色骨架占位，数据来了直接换上",
+                    "排班页和工资页底下多了一行「数据更新于几点」，一眼能看出数据是不是最新的",
+                    "调班、请假、工资设置保存成功时手机轻震一下，确认收到了",
+                ])
                 changelog(version: "1.3.2.004（内测）", items: [
                     "排班页预加载 21 页：每翻一页，前后 10 个月的格子都提前算好，滑过来直接显示，慢拖不再一顿一顿",
                     "调班/请假那张卡一直都在：本月没有就显示“本月没有调班请假”，不再忽有忽无、页面不再往上跳；当月出勤和这张卡跟排班页一起预加载",
@@ -1833,6 +1844,8 @@ struct BindPhoneSheet: View {
                             Text(countdown > 0 ? "\(countdown) 秒后重发" : "获取验证码")
                         }
                         .disabled(sending || countdown > 0 || !PhoneUtil.isValid(phone))
+                        // 1.3.2.005（方案 §3.3）：验证码按钮只有一行字高，透明留白扩到 48pt。
+                        .touchTarget(vertical: 14)
                     }
                 } footer: {
                     if isChange {
@@ -1999,6 +2012,8 @@ struct ChangePasswordSheet: View {
                                 Text(countdown > 0 ? "\(countdown) 秒后重发" : "获取验证码")
                             }
                             .disabled(sending || countdown > 0)
+                            // 1.3.2.005（方案 §3.3）：验证码按钮只有一行字高，透明留白扩到 48pt。
+                            .touchTarget(vertical: 14)
                         }
                     } footer: {
                         Text("验证码发到已绑的手机号；不限次数，随时能改。")
