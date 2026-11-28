@@ -996,113 +996,8 @@ struct DayCell: View {
 
     var body: some View {
         VStack(spacing: 2) {
-            // 日期行（三栏，互不重叠）：左 法定假/班 + 请假标上下叠（11pt，没有留空）
-            // + 中 阳历大数字（居中） + 右 阴历/节气/节日小字（竖排两字，节气/节日红字、阴历灰字）。
-            // 请假标放左列：之前跟在号数后面，号数+红标比中间栏宽、压着右边阴历字（11-02、11-03 就是这么叠上的）。
-            // 1.2.2：左列 12→11、右列 9→8，给中间阳历数字多腾 2pt（窄屏两位数的号不再截成「…」）。
-            HStack(alignment: .top, spacing: 1) {
-                VStack(alignment: .leading, spacing: 1) {
-                    // 法定假/班标（1.2.7.001）：显示开关关了就不显示；服务端节假日数据优先。
-                    if display.showHolidays, let mark = holidayMark, !isAdjacent {
-                        if mark == "假" {
-                            // 1.1.5：放假的「假」用白色字体——白字得配绿底 pill 才看得见
-                            //（原来是绿字无底；只改字色会白底白字看不见，所以底色跟着换成绿，
-                            // 位置/大小/布局不动）。请假的「假」见下面，用红色字体。
-                            Text("假")
-                                .appFont(size: 9, weight: 700)
-                                .foregroundColor(.white)
-                                .padding(.horizontal, 1)
-                                .padding(.vertical, 1)
-                                .background(Color.green)
-                                .cornerRadius(3)
-                        } else {
-                            Text("班")
-                                .appFont(size: 9, weight: 700)
-                                .foregroundColor(.red)
-                        }
-                    } else {
-                        Color.clear.frame(width: 11, height: 9)
-                    }
-                    if day.onLeave == true && !isAdjacent {
-                        // 1.1.5：请假的「假」用红色字体——红字配红底看不见，底色去掉变透明
-                        //（位置/大小/布局不动，只换字色和底色，和放假的白字绿底区分开）。
-                        Text("假")
-                            .appFont(size: 8, weight: 700)
-                            .foregroundColor(.red)
-                            .padding(.horizontal, 2)
-                            .padding(.vertical, 1)
-                    }
-                }
-                .frame(width: 11, alignment: .leading)
-                Text("\(day.dayNumber)")
-                    .appFont(size: dayNumberFontSize, weight: isToday ? 700 : 600).monospacedDigit()
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-                    .foregroundColor(isAdjacent ? .secondary : .primary)
-                    .frame(maxWidth: .infinity, alignment: .center)
-                // 阴历/节气/节日小字（1.2.7.001）：显示农历关了就留空（占位不变，布局不抖）。
-                VStack(spacing: 0) {
-                    if display.showLunar {
-                        ForEach(Array(displayLunarText.enumerated()), id: \.offset) { _, ch in
-                            Text(String(ch))
-                                .appFont(size: 9, weight: 400)
-                                .foregroundColor(extra.isRedText ? .red : AppStyle.tinySecondary)
-                        }
-                    }
-                }
-                .frame(width: 8, alignment: .leading)
-                .padding(.top, 1)
-            }
-            .frame(height: 26)
-
-            // 班次 pill：固定 24pt；三薪不塞进色块，改右上角 "三薪" 橙色小角标（重做，
-            // 老爷 2026-11-28 14:30 亲口令：录屏里三薪和班次挤在同一个色块里又小又挤，
-            // 格子高度还不一致）。所有格子的 pill 同高，视觉节奏一致。
-            // 双班：两个 11pt 小 pill 上下叠（11 + 2 + 11 = 24）；单班：一个 24pt pill。
-            Group {
-                if day.isDouble == true {
-                    VStack(spacing: 2) {
-                        ForEach(ShiftStyle.parts(of: day.shift), id: \.self) { part in
-                            Text(TeamInfo.shortName(part))
-                                .appFont(size: 9, weight: 700)
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity)
-                                .frame(height: 11)
-                                .background(ShiftStyle.color(for: part))
-                                .cornerRadius(4)
-                        }
-                    }
-                    .frame(height: pillHeight)
-                } else {
-                    Text(day.isRest ? "休" : TeamInfo.shortName(day.shift))
-                        .appFont(size: 13, weight: 700)
-                        .foregroundColor(day.isRest ? ShiftStyle.color(for: "休息") : .white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: pillHeight)
-                        .background(day.isRest ? ShiftStyle.background(for: "休息") : ShiftStyle.color(for: day.shift))
-                        .cornerRadius(6)
-                }
-            }
-            // 三薪角标：右上角小橙 capsule "三薪"，不占 pill 内的地方、不撑高格子。
-            // offset 只向右伸 2pt（不用老爷示例里的 4pt）：页有 .clipped() 裁剪，
-            // 周六那列的角标伸 4pt 会被页边裁掉 2pt，伸 2pt 正好贴着格边、完整显示。
-            .overlay(alignment: .topTrailing) {
-                if isTriplePay && !isAdjacent {
-                    Text("三薪")
-                        .font(.system(size: 8, weight: .black))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 3)
-                        .padding(.vertical, 1)
-                        .background(Color.orange, in: Capsule())
-                        .offset(x: 2, y: -5)
-                }
-            }
-            // 班次标签变化（1.3.2.007，iOS.docx §3.2）：换班组时标签快速轻微缩放加交叉淡入，
-            // 0.2s easeInOut，不整块日历横移；减弱动态效果时只做 0.15s 淡入、不缩放。
-            .id(pillKey)
-            .transition(reduceMotion ? .opacity : .scale(scale: 0.92).combined(with: .opacity))
-            .animation(reduceMotion ? .easeInOut(duration: 0.15) : .easeInOut(duration: 0.2), value: pillKey)
-            .opacity(isAdjacent ? (colorScheme == .dark ? 0.65 : 0.5) : 1.0)
+            dateRow
+            shiftPill
         }
         .padding(2)
         .frame(height: calendarCellHeight)
@@ -1128,6 +1023,139 @@ struct DayCell: View {
         .onAppear {
             if isFlashing { startFlash() }
         }
+    }
+
+    /// 日期行（三栏，互不重叠）：左 法定假/班 + 请假标上下叠（11pt，没有留空）
+    /// + 中 阳历大数字（居中） + 右 阴历/节气/节日小字（竖排两字，节气/节日红字、阴历灰字）。
+    /// 请假标放左列：之前跟在号数后面，号数+红标比中间栏宽、压着右边阴历字（11-02、11-03 就是这么叠上的）。
+    /// 1.2.2：左列 12→11、右列 9→8，给中间阳历数字多腾 2pt（窄屏两位数的号不再截成「…」）。
+    private var dateRow: some View {
+        HStack(alignment: .top, spacing: 1) {
+            leftMarkColumn
+            Text("\(day.dayNumber)")
+                .appFont(size: dayNumberFontSize, weight: isToday ? 700 : 600).monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .foregroundColor(isAdjacent ? .secondary : .primary)
+                .frame(maxWidth: .infinity, alignment: .center)
+            // 阴历/节气/节日小字（1.2.7.001）：显示农历关了就留空（占位不变，布局不抖）。
+            lunarColumn
+        }
+        .frame(height: 26)
+    }
+
+    /// 左列：法定假/班标 + 请假标上下叠（11pt 宽）。
+    private var leftMarkColumn: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            // 法定假/班标（1.2.7.001）：显示开关关了就不显示；服务端节假日数据优先。
+            if display.showHolidays, let mark = holidayMark, !isAdjacent {
+                if mark == "假" {
+                    // 1.1.5：放假的「假」用白色字体——白字得配绿底 pill 才看得见
+                    //（原来是绿字无底；只改字色会白底白字看不见，所以底色跟着换成绿，
+                    // 位置/大小/布局不动）。请假的「假」见下面，用红色字体。
+                    Text("假")
+                        .appFont(size: 9, weight: 700)
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 1)
+                        .padding(.vertical, 1)
+                        .background(Color.green)
+                        .cornerRadius(3)
+                } else {
+                    Text("班")
+                        .appFont(size: 9, weight: 700)
+                        .foregroundColor(.red)
+                }
+            } else {
+                Color.clear.frame(width: 11, height: 9)
+            }
+            if day.onLeave == true && !isAdjacent {
+                // 1.1.5：请假的「假」用红色字体——红字配红底看不见，底色去掉变透明
+                //（位置/大小/布局不动，只换字色和底色，和放假的白字绿底区分开）。
+                Text("假")
+                    .appFont(size: 8, weight: 700)
+                    .foregroundColor(.red)
+                    .padding(.horizontal, 2)
+                    .padding(.vertical, 1)
+            }
+        }
+        .frame(width: 11, alignment: .leading)
+    }
+
+    /// 右列：阴历/节气/节日小字（竖排两字，节气/节日红字、阴历灰字），8pt 宽。
+    private var lunarColumn: some View {
+        VStack(spacing: 0) {
+            if display.showLunar {
+                ForEach(Array(displayLunarText.enumerated()), id: \.offset) { _, ch in
+                    Text(String(ch))
+                        .appFont(size: 9, weight: 400)
+                        .foregroundColor(extra.isRedText ? .red : AppStyle.tinySecondary)
+                }
+            }
+        }
+        .frame(width: 8, alignment: .leading)
+        .padding(.top, 1)
+    }
+
+    /// 班次 pill + 三薪角标 + 换组动画（1.3.2.007，iOS.docx §3.2）：
+    /// pill 固定 24pt；三薪不塞进色块，改右上角 "三薪" 橙色小角标（重做，
+    /// 老爷 2026-11-28 14:30 亲口令：录屏里三薪和班次挤在同一个色块里又小又挤，
+    /// 格子高度还不一致）。所有格子的 pill 同高，视觉节奏一致。
+    /// 双班：两个 11pt 小 pill 上下叠（11 + 2 + 11 = 24）；单班：一个 24pt pill。
+    private var shiftPill: some View {
+        shiftPillContent
+            // 三薪角标：右上角小橙 capsule "三薪"，不占 pill 内的地方、不撑高格子。
+            // offset 只向右伸 2pt（不用老爷示例里的 4pt）：页有 .clipped() 裁剪，
+            // 周六那列的角标伸 4pt 会被页边裁掉 2pt，伸 2pt 正好贴着格边、完整显示。
+            .overlay(alignment: .topTrailing) {
+                if isTriplePay && !isAdjacent {
+                    triplePayBadge
+                }
+            }
+            // 班次标签变化（1.3.2.007，iOS.docx §3.2）：换班组时标签快速轻微缩放加交叉淡入，
+            // 0.2s easeInOut，不整块日历横移；减弱动态效果时只做 0.15s 淡入、不缩放。
+            .id(pillKey)
+            .transition(reduceMotion ? .opacity : .scale(scale: 0.92).combined(with: .opacity))
+            .animation(reduceMotion ? .easeInOut(duration: 0.15) : .easeInOut(duration: 0.2), value: pillKey)
+            .opacity(isAdjacent ? (colorScheme == .dark ? 0.65 : 0.5) : 1.0)
+    }
+
+    /// 班次 pill 本体：双班两个 11pt 小 pill 上下叠，单班一个 24pt pill。
+    private var shiftPillContent: some View {
+        Group {
+            if day.isDouble == true {
+                VStack(spacing: 2) {
+                    ForEach(ShiftStyle.parts(of: day.shift), id: \.self) { part in
+                        Text(TeamInfo.shortName(part))
+                            .appFont(size: 9, weight: 700)
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 11)
+                            .background(ShiftStyle.color(for: part))
+                            .cornerRadius(4)
+                    }
+                }
+                .frame(height: pillHeight)
+            } else {
+                Text(day.isRest ? "休" : TeamInfo.shortName(day.shift))
+                    .appFont(size: 13, weight: 700)
+                    .foregroundColor(day.isRest ? ShiftStyle.color(for: "休息") : .white)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: pillHeight)
+                    .background(day.isRest ? ShiftStyle.background(for: "休息") : ShiftStyle.color(for: day.shift))
+                    .cornerRadius(6)
+            }
+        }
+    }
+
+    /// 三薪角标：8pt 黑体白字 "三薪"，橙色 capsule，右上角 offset x:2、y:-5。
+    private var triplePayBadge: some View {
+        Text("三薪")
+            .font(.system(size: 8, weight: .black))
+            .foregroundColor(.white)
+            .padding(.horizontal, 3)
+            .padding(.vertical, 1)
+            .background(Color.orange, in: Capsule())
+            .offset(x: 2, y: -5)
     }
 }
 

@@ -138,6 +138,45 @@ struct SmoothMonthPager<Content: View>: View {
     }
 
     var body: some View {
+        // onScrollPhaseChange 只要 iOS 18+（部署目标 17.0，不能升到 18）：
+        // 18 走系统原生的落定信号，17 走等效的防抖落定判断，两边标题都只跟落定页走。
+        if #available(iOS 18.0, *) {
+            pagerView
+                // 落定才提交：滚动停稳（idle）时，才把当前页写回 selectedOffset，标题与数据
+                // 一起换。拖一半松手弹回去时，scrollOffset 自己回到原页，等于没提交过。
+                // 快速猛滑一次滑过两页是系统原生分页行为，可以接受；标题跟落定页严格一致。
+                .onScrollPhaseChange { _, newPhase in
+                    if newPhase == .idle, scrollOffset != selectedOffset {
+                        withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : .snappy(duration: 0.25)) {
+                            selectedOffset = scrollOffset
+                        }
+                    }
+                }
+        } else {
+            pagerView
+                // iOS 17 等效落定判断（.task(id:) 防抖）：scrollOffset 一变，旧任务取消、
+                // 新任务重算 0.3 秒；位置停稳 0.3 秒才提交，中途再变（继续拖、松手弹回）
+                // 就作废重算，标题不动。0.3 秒约等于分页落定的弹回时长：正常轻滑落定后
+                // 标题正好跟上；拖一半松手弹回去时 scrollOffset 回到原页，等于没提交过。
+                // 手指按住中途停顿超过 0.3 秒的极端情况标题会提前跟到拖向的那一页，
+                // 松手/拖回后立刻纠正——17 上没有系统落定信号，这是能做到的最近似做法，
+                // 标题最终永远跟落定页一致。
+                .task(id: scrollOffset) {
+                    let captured = scrollOffset
+                    try? await Task.sleep(for: .milliseconds(300))
+                    guard !Task.isCancelled else { return }
+                    if scrollOffset == captured, scrollOffset != selectedOffset {
+                        withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : .snappy(duration: 0.25)) {
+                            selectedOffset = scrollOffset
+                        }
+                    }
+                }
+        }
+    }
+
+    /// 分页器本体（两条分支共用）：原生分页 ScrollView + scrollPosition 跟踪 +
+    /// 程序切页同步。落定提交不在这里，两条分支各用各的落定信号。
+    private var pagerView: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             LazyHStack(spacing: 0) {
                 ForEach(monthOffsets, id: \.self) { offset in
@@ -160,16 +199,6 @@ struct SmoothMonthPager<Content: View>: View {
         .onChange(of: selectedOffset) { newValue in
             if scrollOffset != newValue {
                 scrollOffset = newValue
-            }
-        }
-        // 落定才提交：滚动停稳（idle）时，才把当前页写回 selectedOffset，标题与数据
-        // 一起换。拖一半松手弹回去时，scrollOffset 自己回到原页，等于没提交过。
-        // 快速猛滑一次滑过两页是系统原生分页行为，可以接受；标题跟落定页严格一致。
-        .onScrollPhaseChange { _, newPhase in
-            if newPhase == .idle, scrollOffset != selectedOffset {
-                withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : .snappy(duration: 0.25)) {
-                    selectedOffset = scrollOffset
-                }
             }
         }
     }
