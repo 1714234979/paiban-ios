@@ -5,7 +5,7 @@ import SwiftUI
 /// 下面一个班次色块（休息=青色、白班=绿、夜班=紫、早班=橙、中班=粉）；
 /// 选中的那天描绿边；今天那格底色淡黄；底部是班次按钮 + 右边橙色「完成」。
 struct ManualScheduleView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var year: Int

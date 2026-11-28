@@ -8,7 +8,7 @@ import SwiftUI
 /// 第 2 步：周期 → 选倒班方式 + 班组 + 基准日；手动 → 只选班组。
 /// 最后 PUT /me/profile 保存 rotation + team 并标记 onboardingDone=true。
 struct OnboardingView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
 
     @State private var step = 0
     @State private var method: String = "periodic"   // manual / periodic
@@ -293,7 +293,7 @@ struct OnboardingView: View {
 /// 「以后再说」可跳过，但不记完成——下次进软件还会再弹，直到走完为止（见 Store.skipPayGuide）。
 /// 完成时记完成（Store.completePayGuide），不再弹。
 struct PayGuideView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
     /// 引导现在从工资页的空状态按钮打开（2026-11-27 10:28，取代第 30 条自动弹窗）：
     /// 完成/跳过时自己关掉这页（以前是 ContentView 的 needsPayGuide 绑定在关）。
     @Environment(\.dismiss) private var dismiss
@@ -577,7 +577,7 @@ struct PayGuideView: View {
 /// 保存走 store.saveProfile(paySettings:)（和设置页同一条路，服务端合并、不洗掉其他设定）。
 /// 「以后再说」只关掉这次弹窗，不记完成——下次进软件还会再弹，直到填了为止。
 struct HousingFundPromptView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
 
     @State private var housingFundText = ""
     @State private var errorText: String?

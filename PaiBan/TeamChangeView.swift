@@ -3,7 +3,7 @@ import SwiftUI
 /// 更换班组（不是单日调班）：选新班组 + 生效日，从生效日零点起排班按新班组算，工资也跟着变。
 /// 历史可多条、可删（至少保留一条）。走 POST / DELETE /api/v1/me/team-history。
 struct TeamChangeView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
 
     @State private var history: [TeamHistoryEntry] = []
     @State private var newTeam = "A"

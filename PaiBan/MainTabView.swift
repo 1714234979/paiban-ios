@@ -24,11 +24,13 @@ import SwiftUI
 /// 本来就是原生 TabView（1.3.0.015 已撤掉全部自定义底栏），这次只做三件事——
 /// ① 删掉 PaiBanApp.init 里 UITabBar.appearance() 的全局改色（改 appearance 的全删掉，
 /// 未选中态改回系统默认）；② 删掉两页为躲底栏垫的 88pt 大额留白（见 CalendarView /
-/// PayView），安全区交由原生底栏自动处理；③ iOS 26+ 加上往下滚自动收起底栏
-///（.tabBarMinimizeBehavior(.onScrollDown)，见下面 iOS26TabBarEnhancement）。
+/// PayView），安全区交由原生底栏自动处理；③ iOS 26+ 底栏永不收起
+///（.tabBarMinimizeBehavior(.never)，见下面 iOS26TabBarEnhancement）——
+/// .onScrollDown 收起后缩成左下角一个小圆球，盖住「本月调班 / 请假」卡的标题和
+/// 第一条记录（2026-11-28 实拍），所以改成永不收起，底栏一直在、内容不被盖。
 /// 只有三个 Tab，不加第四个“统计”Tab（示例代码里的第四个只是模板）。
 struct MainTabView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
 
     var body: some View {
         TabView(selection: $store.selectedTab) {
@@ -69,6 +71,9 @@ struct MainTabView: View {
         .tint(Color.accentColor)
         // iOS 26+ 底栏往下滚自动收起（老爷 2026-11-28 14:36 亲口令）：滑到底看统计栏、
         // 奖金卡时底栏自己让开，不挡内容；往回滚就恢复。iOS 17–25 没有这个 API，原样显示。
+        // 2026-11-28 改回 .never：收起后缩成左下角一个小圆球，盖住调班/请假卡的
+        // 标题和第一条记录（实拍为证），还像个来路不明的悬浮按钮；底栏永不收起，
+        // 安全区仍由原生底栏自动处理，内容不被盖。
         .modifier(iOS26TabBarEnhancement())
         // 没登录时点小组件进来的深链：登录后进主界面再跳（store.handleDeepLink 先记下来）。
         .task {
@@ -92,14 +97,15 @@ struct MainTabView: View {
 }
 
 /// iOS 26 底栏增强（老爷 2026-11-28 14:36 亲口令）：原生 TabView 在 iOS 26+ 上
-/// 自动渲染液态玻璃；往下滚动时底栏自动收起（.onScrollDown），滑到底看统计栏、
-/// 奖金卡时不挡内容；往回滚就恢复。iOS 17–25 没有这个 API，直接原样显示。
+/// 自动渲染液态玻璃；底栏永不收起（.never）——往下滚自动收起（.onScrollDown）会缩成
+/// 左下角一个小圆球，盖住「本月调班 / 请假」卡的标题和第一条记录（2026-11-28 实拍），
+/// 所以改成永不收起。iOS 17–25 没有这个 API，直接原样显示。
 /// 注意：.tabBarMinimizeBehavior 是 iOS 26 SDK 的 API，必须包在 #available 里，
 /// 不然部署目标 iOS 17 的包编不过。
 private struct iOS26TabBarEnhancement: ViewModifier {
     func body(content: Content) -> some View {
         if #available(iOS 26.0, *) {
-            content.tabBarMinimizeBehavior(.onScrollDown)
+            content.tabBarMinimizeBehavior(.never)
         } else {
             content
         }

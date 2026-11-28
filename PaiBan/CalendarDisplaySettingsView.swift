@@ -4,7 +4,7 @@ import SwiftUI
 /// 改了立刻生效（保存到本地 + 同步到服务端 profile，换设备也能同步）。
 /// 「适配第2班次展示」不做——没有第2班次。
 struct CalendarDisplaySettingsView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
 
     @State private var settings: CalendarDisplaySettings
     @State private var isSaving = false

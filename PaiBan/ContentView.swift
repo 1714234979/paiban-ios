@@ -104,7 +104,7 @@ struct SplashView: View {
 /// 启动时先读缓存、后台刷新；服务器全不通且无缓存时显示离线页。
 /// 新版本提示（Alert）也挂在这里：启动检查或设置页手动检查到新版时弹出。
 struct ContentView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
     /// 1.2.7：回到前台时再查一次更新（第 16 条 iOS 一半；启动时已查过，见 startup）。
     /// 安卓 1.2.7 同款（ON_RESUME 再查）；当天已点「稍后」的不重复弹（checkAfterLaunch 里拦）。
     @Environment(\.scenePhase) private var scenePhase
@@ -307,7 +307,7 @@ struct OfflineView: View {
 /// 不是给用户的跳过；配好后下次打开自动变严格，不用等 App 更新）；
 /// 查不到状态（离线）→ 也不硬拦，先进 App。
 struct ForcedBindGateView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
     var onEnterAnyway: () -> Void
     @State private var smsConfigured: Bool?
     @State private var loadFailed = false

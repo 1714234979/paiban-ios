@@ -4,7 +4,7 @@ import SwiftUI
 /// 用户名就是手机号（11 位大陆手机号，1 开头）；昵称是显示名，可空，空着就用手机号当显示名；
 /// 验证码发到注册的手机号，服务端核验通过才建账号（1.2.6）。
 struct RegisterView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var nickname = ""

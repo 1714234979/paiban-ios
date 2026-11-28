@@ -53,12 +53,19 @@ enum DateUtil {
         return f
     }()
 
+    /// ISO 时间戳解析器（localDateTime 用）：带毫秒和不带毫秒各一份静态单例，
+    /// 不再每次调用都新建（ISO8601DateFormatter 新建不便宜，设置页每次显示更新时间都调一次）。
+    private static let isoParserWithFraction: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
+    private static let isoParserPlain = ISO8601DateFormatter()
+
     /// ISO 时间戳（如服务端 holidaysUpdatedAt "2026-11-27T07:36:10.262Z"）转本地
     /// "yyyy-MM-dd HH:mm"；解析不出就原样截一段显示（FeedbackView.displayTime 同款兜底）。
     static func localDateTime(fromISO iso: String) -> String {
-        let parser = ISO8601DateFormatter()
-        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let date = parser.date(from: iso) ?? ISO8601DateFormatter().date(from: iso)
+        let date = isoParserWithFraction.date(from: iso) ?? isoParserPlain.date(from: iso)
         guard let date else {
             return String(iso.prefix(16)).replacingOccurrences(of: "T", with: " ")
         }

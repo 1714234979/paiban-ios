@@ -33,7 +33,7 @@ private final class RefreshRateBoost: NSObject {
 
 @main
 struct PaiBanApp: App {
-    @StateObject private var store = AppStore()
+    @State private var store = AppStore()
 
     init() {
         // 1.3.0.006：刷新率适配（第 34 条）——显式声明 10–120Hz 自适应刷新，最高 120Hz。
@@ -52,7 +52,7 @@ struct PaiBanApp: App {
                 WidgetPreviewGallery(kind: kind)
             } else {
                 ContentView()
-                    .environmentObject(store)
+                    .environment(store)
                     // 1.2.8.001：外观跟设置走（跟随系统传 nil；改完立刻生效，不用重启）。
                     .preferredColorScheme(store.appearance.colorScheme)
                     // 1.2.7：小组件深链（paiban://schedule 进排班页、paiban://pay 进工资页）。
@@ -60,7 +60,7 @@ struct PaiBanApp: App {
             }
             #else
             ContentView()
-                .environmentObject(store)
+                .environment(store)
                 // 1.2.8.001：外观跟设置走（跟随系统传 nil；改完立刻生效，不用重启）。
                 .preferredColorScheme(store.appearance.colorScheme)
                 // 1.2.7：小组件深链（paiban://schedule 进排班页、paiban://pay 进工资页）。

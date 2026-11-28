@@ -6,7 +6,7 @@ import UIKit
 /// 三步：① 分享给同事排班表 → ② 同事完成排班 → ③ 查看对应日期班次以协商调换班。
 /// 入口在排班页；收到同事的分享自动进「同事分享给我的」（这就是导入，不用再点）。
 struct ShareScheduleView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
 
     @State private var toUsername = ""
     @State private var note = ""
@@ -222,7 +222,7 @@ private struct ShareLinkItem: Identifiable {
 /// 想调班回自己日历上改（调班只改自己的日历，不改对方的）。
 private struct SharedMonthView: View {
     var share: ScheduleShare
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
 
     @State private var yearMonth: (year: Int, month: Int) = DateUtil.yearMonth(of: Date())
     @State private var days: [ShareMonthDay] = []

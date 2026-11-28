@@ -139,7 +139,7 @@ struct WidgetPreviewGallery: View {
 /// 只在 DEBUG 包里编进（Release 包没有）。
 private struct AppPagePreview: View {
     let kind: String // app-calendar-dark / app-pay-dark / app-settings-dark / …-light
-    @StateObject private var store: AppStore = AppPagePreview.makeDemoStore()
+    @State private var store: AppStore = AppPagePreview.makeDemoStore()
 
     private var isDark: Bool { kind.hasSuffix("-dark") }
     private var tabIndex: Int {
@@ -157,18 +157,18 @@ private struct AppPagePreview: View {
             } else if kind.hasPrefix("app-payguide") {
                 // 工资引导（1.2.9.001，第 30 条）：演示账号刚开通工资权限，弹窗走一遍 3 步引导。
                 PayGuideView()
-                    .environmentObject(store)
+                    .environment(store)
             } else if kind.contains("-daydetail-") {
                 // 当天详情（1.2.8.002）：2026-11-24 早班那天的详情页直接渲染，
                 // 验深色下调班/请假入口、提示文字、选中描边清不清楚。
                 NavigationStack {
                     DayDetailView(day: Self.demoDay())
                 }
-                .environmentObject(store)
+                .environment(store)
                 .onAppear { store.selectedTab = tabIndex }
             } else {
                 MainTabView()
-                    .environmentObject(store)
+                    .environment(store)
                     .onAppear { store.selectedTab = tabIndex }
             }
         }

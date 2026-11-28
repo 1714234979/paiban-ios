@@ -8,7 +8,7 @@ import SwiftUI
 /// 验证码（60 秒倒计时）→ 输 6 位码 → 登录；新手机号会自动建账号（用户名是
 /// 「手机+后 4 位」），昵称在设置页改。错误中文原样展示。
 struct LoginView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
 
     /// 登录方式：password = 账号密码，sms = 手机号验证码。
     @State private var loginMode: LoginMode = .password
@@ -331,7 +331,7 @@ struct LoginView: View {
 /// 成功后只改密码，不自动登录；回登录页时账号框已填好这个手机号，用户只输新密码就行。
 /// 样式和登录页同一套：下划线输入框 + 藏青全圆角胶囊按钮。
 struct ForgotPasswordView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
     @Environment(\.dismiss) private var dismiss
 
     /// 重置成功后回登录页：把手机号带回去填进账号框。

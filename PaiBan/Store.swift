@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import SwiftUI
 import WidgetKit
 
@@ -56,13 +57,14 @@ enum CacheStore {
 
 /// 全 App 唯一的状态容器：当前用户、月份、缓存的月排班/工资/调班/请假、登录态。
 @MainActor
-final class AppStore: ObservableObject {
+@Observable
+final class AppStore {
 
     let api = APIClient.shared
 
     // 登录态
-    @Published var isLoggedIn = false
-    @Published var user: UserProfile? {
+    var isLoggedIn = false
+    var user: UserProfile? {
         didSet {
             // 服务端 profile 里的显示设置是跨设备同步的源：有就采用（本地也存一份）。
             if let ds = user?.displaySettings, ds != calendarDisplay {
@@ -80,8 +82,8 @@ final class AppStore: ObservableObject {
             checkHousingFundPrompt()
         }
     }
-    @Published var isStarting = true          // 启动中（正在选路 / 试登录）
-    @Published var startupError: String?
+    var isStarting = true          // 启动中（正在选路 / 试登录）
+    var startupError: String?
 
     // 1.2.7.001：倒班设置（方式 + 班组 + 基准日 + 班组名 + 手动逐日班次），来自 profile；
     // 没拿到时按现有分休式（mode 4-3-b、基准日 2026-11-01）算，与旧数据逐日一致。
@@ -104,92 +106,92 @@ final class AppStore: ObservableObject {
             || ps.hireYear == nil || ps.hireMonth == nil || ps.annualLeaveRemaining == nil
     }
     /// 1.2.7.001：日历显示设置（本地 UserDefaults + 服务端 profile 同步）。
-    @Published var calendarDisplay: CalendarDisplaySettings = CalendarDisplaySettings.loadLocal()
+    var calendarDisplay: CalendarDisplaySettings = CalendarDisplaySettings.loadLocal()
     /// 1.2.8.001：外观（跟随系统/浅色/深色，本地 UserDefaults；改完立刻生效，不用重启）。
-    @Published var appearance: AppearanceMode = AppearanceMode.loadLocal() {
+    var appearance: AppearanceMode = AppearanceMode.loadLocal() {
         didSet { appearance.saveLocal() }
     }
     /// 1.2.7.001：节假日缓存（key 日期，value 节假日一天；服务端拉取，挂了用内置表）。
-    @Published var holidays: [String: HolidayDay] = [:]
-    @Published var holidaysUpdatedAt: String?
+    var holidays: [String: HolidayDay] = [:]
+    var holidaysUpdatedAt: String?
     /// 1.2.7.001：共享班表（我分享的 + 同事分享给我的）。
-    @Published var sharesSent: [ScheduleShare] = []
-    @Published var sharesReceived: [ScheduleShare] = []
+    var sharesSent: [ScheduleShare] = []
+    var sharesReceived: [ScheduleShare] = []
 
     // 服务器
-    @Published var serverBaseURL: String?
-    @Published var serverKind: ServerKind = .cloud
-    @Published var serverReachable = false
+    var serverBaseURL: String?
+    var serverKind: ServerKind = .cloud
+    var serverReachable = false
 
     // 离线：服务器连不上时用缓存顶着，界面上显示“离线缓存”。
-    @Published var isOffline = false
-    @Published var cacheSavedAt: Date?
+    var isOffline = false
+    var cacheSavedAt: Date?
     /// 数据最后一次成功取数的时间（1.3.2.005，方案 §9 第四条）：
     /// 排班页/工资页显示“数据更新于 HH:mm”用。只在联网取数成功时更新
     ///（refreshMonth / refreshPayInputs / /me/pay 兜底）；本地重算成功但没取数
     /// 时不更新——时间是取数时间，不是重算时间。冷启动读磁盘缓存时是缓存的
     /// 写入时间（cache.savedAt）。不为这个时间多发一次网络请求。
-    @Published var lastSyncAt: Date?
+    var lastSyncAt: Date?
 
     // 排班
-    @Published var currentMonth = Date()              // 当前看的月份（Date 取当月 1 号即可）
-    @Published var viewTeam: String = "B"             // 日历顶部的班组切换（可看别的班）
-    @Published var month: MonthSchedule?
-    @Published var swaps: [SwapRecord] = []
-    @Published var leaves: [LeaveRecord] = []
-    @Published var overtime: [OvertimeRecord] = []
-    @Published var isLoadingMonth = false
+    var currentMonth = Date()              // 当前看的月份（Date 取当月 1 号即可）
+    var viewTeam: String = "B"             // 日历顶部的班组切换（可看别的班）
+    var month: MonthSchedule?
+    var swaps: [SwapRecord] = []
+    var leaves: [LeaveRecord] = []
+    var overtime: [OvertimeRecord] = []
+    var isLoadingMonth = false
 
     // 工资（1.2.6 冷启动回当天：默认看当月；本地算，服务端只给原始数据）
-    @Published var payYearMonth: (year: Int, month: Int) = DateUtil.yearMonth(of: Date())
-    @Published var pay: PayMonth?
-    @Published var isLoadingPay = false
+    var payYearMonth: (year: Int, month: Int) = DateUtil.yearMonth(of: Date())
+    var pay: PayMonth?
+    var isLoadingPay = false
 
     // 本地算工资的输入（内存里一份，磁盘缓存里也有一份）
-    var payConfig: PayConfigData?
-    var yearDaysCache: [String: [DaySchedule]] = [:]   // key: "yyyy"
-    var payCache: [String: PayMonth] = [:]             // key: "yyyy-MM"，本地算好的工资
+    @ObservationIgnored var payConfig: PayConfigData?
+    @ObservationIgnored var yearDaysCache: [String: [DaySchedule]] = [:]   // key: "yyyy"
+    @ObservationIgnored var payCache: [String: PayMonth] = [:]             // key: "yyyy-MM"，本地算好的工资
     /// 1.2.7：同事自己的单月录入（各改各的；老爷的仍走全局 payConfig.months）。
     /// 服务端存 user.payMonths，GET /me 回传；离线时走磁盘缓存里的 userMonths。
-    var userMonths: [String: PayMonthRecord] = [:]
+    @ObservationIgnored var userMonths: [String: PayMonthRecord] = [:]
     /// 小组件深链要跳的 Tab（0 排班 / 1 工资）：MainTabView 跟着它切。
-    @Published var selectedTab = 0
+    var selectedTab = 0
     /// 没登录时点小组件进来的深链：先记下来，登录后进主界面再跳。
-    var pendingDeepLinkTab: Int?
+    @ObservationIgnored var pendingDeepLinkTab: Int?
     /// 上次发给小组件的快照（内容不变时不重复写、不重复刷新，WidgetCenter 刷新有系统预算）。
-    private var lastPublishedSnapshot: WidgetSnapshot?
+    @ObservationIgnored private var lastPublishedSnapshot: WidgetSnapshot?
 
     // 按月缓存（内存里一份，磁盘缓存里也有一份）
-    // monthCache 是 @Published：滑页时每页直接读它，数据到了页面自己刷新，不用等整页重载。
-    @Published var monthCache: [String: MonthSchedule] = [:]      // key: "班组-yyyy-MM"
-    var swapsCache: [String: [SwapRecord]] = [:]       // key: "yyyy-MM"
-    var leavesCache: [String: [LeaveRecord]] = [:]     // key: "yyyy-MM"
-    var overtimeCache: [String: [OvertimeRecord]] = [:] // key: "yyyy-MM"
+    // monthCache 是 @Observable 追踪的属性：滑页时每页直接读它，数据到了页面自己刷新，不用等整页重载。
+    var monthCache: [String: MonthSchedule] = [:]      // key: "班组-yyyy-MM"
+    @ObservationIgnored var swapsCache: [String: [SwapRecord]] = [:]       // key: "yyyy-MM"
+    @ObservationIgnored var leavesCache: [String: [LeaveRecord]] = [:]     // key: "yyyy-MM"
+    @ObservationIgnored var overtimeCache: [String: [OvertimeRecord]] = [:] // key: "yyyy-MM"
     // 本地算好的月排班（8 天一轮）备忘：monthFor 每调一次就重算一次是 1.1.2 掉帧的主因，
     // 这里按班组+年月记下来，只算一次；真数据到了走 monthCache 覆盖，不影响预取。
-    var localMonthCache: [String: MonthSchedule] = [:]  // key 同 monthCacheKey
+    @ObservationIgnored var localMonthCache: [String: MonthSchedule] = [:]  // key 同 monthCacheKey
     /// 工资输入（payConfig / 全年天数）版本号：日历要靠它重画三薪标与底部统计，
-    /// 输入到齐就 +1 触发重画（yearDaysCache / payConfig 本身不是 @Published）。
-    @Published var payInputsVersion = 0
+    /// 输入到齐就 +1 触发重画（yearDaysCache / payConfig 本身是 @ObservationIgnored，不触发重画）。
+    var payInputsVersion = 0
     /// 日历数据版本号（1.1.5）：日历每页只存一份数据快照，滑动中不读 store；
     /// 只有真正的数据变更才 +1 让各页重拍快照——调班/请假保存、刷新成功、换班组。
     /// 滑页中的 prefetch / setCurrentMonth 不碰它，滑稳之前快照一动不动。
-    @Published var calendarVersion = 0
+    var calendarVersion = 0
     /// 调班/请假缓存版本号（1.3.2.004）：预取回来新数据就 +1——排班页的记录框直接读
     /// 月缓存（swapsCache/leavesCache），靠它重画，不用等整月刷新。
-    @Published var recordsVersion = 0
+    var recordsVersion = 0
     /// 正在后台取的月份，按「班组-yyyy-MM」记在途的 Task：同一个月只发一次请求，
     /// 再有人要这个月就直接复用正在跑的那个 Task（等它写完缓存），不要重复发请求。
     /// 1.1.4 只用一个 Set 记 key，只能“跳过”重复请求；现在记 Task，refreshMonth
     /// 能 await 它、读它写好的缓存，是真正的复用。isLoadingMonth 还是只表示
     /// “当前月正在刷新”（UI 转圈用），去重逻辑全在这里。
-    private var monthLoadTasks: [String: Task<Void, Never>] = [:]
+    @ObservationIgnored private var monthLoadTasks: [String: Task<Void, Never>] = [:]
 
     // App 内更新提示
-    @Published var pendingUpdate: VersionInfo?
-    @Published var updateNotice: String?
+    var pendingUpdate: VersionInfo?
+    var updateNotice: String?
 
-    @Published var errorMessage: String?
+    var errorMessage: String?
 
     private let lastUserIdKey = "paiban.lastUserId"
 
@@ -786,9 +788,9 @@ final class AppStore: ObservableObject {
                 }
             }
             do {
-                // 先把四趟取完（各在自己的 await 里），再一次性把结果写进 @Published：
+                // 先把四趟取完（各在自己的 await 里），再一次性把结果写进追踪属性：
                 // 1.1.2 是取一趟写一次，每次写都触发一次整页重绘，滑页时连着重绘好几次才卡。
-                // 同步连续写多个 @Published，SwiftUI 只算一次重绘。
+                // 同步连续写多个追踪属性，SwiftUI 只算一次重绘。
                 // 1.1.4：fetchMonth 失败重试 3 次（fetchMonthWithRetry），别让一次网络
                 // 抖动就让落定那月的 store.month 一直是旧数；取消（滑走了）不重试。
                 let fetchedMonth = try await fetchMonthWithRetry(year: ym.year, month: ym.month)
@@ -894,8 +896,8 @@ final class AppStore: ObservableObject {
     ///（日历每页、底部统计、工资页都调），滑页时几页一起算、主线程被占满就掉帧。
     /// 现在走 payCache 备忘，同一月只算一次；输入变了（refreshPayInputs 清年缓存、
     /// updatePayMonthField 走 refreshPay 重算）缓存跟着失效，不会拿旧数。
-    /// 注意 payCache 不是 @Published，写缓存本身不触发重绘；真正要重画时靠
-    /// pay / monthCache / payInputsVersion 这些 @Published 驱动。
+    /// 注意 payCache 是 @ObservationIgnored，写缓存本身不触发重绘；真正要重画时靠
+    /// pay / monthCache / payInputsVersion 这些追踪属性驱动。
     func payFor(year: Int, month: Int) -> PayMonth? {
         let key = payCacheKey(year: year, month: month)
         if let cached = payCache[key] { return cached }
@@ -1288,10 +1290,10 @@ final class AppStore: ObservableObject {
 
     /// 公积金弹窗（第 47 条，1.3.0.001）：公积金没填时，更新后首次打开 App 弹一次窗让用户填。
     /// 开关就是「公积金为空就弹」：内测版没填的弹，正式版出来没填的还会再弹一次。
-    @Published var needsHousingFundPrompt = false
+    var needsHousingFundPrompt = false
     /// 本次启动里已经评过一次公积金弹窗（评过就不再评，免得后台同步又弹出来；
     /// 下次启动重新评，没填的再弹，直到填了为止）。
-    private var housingFundPromptEvaluatedThisSession = false
+    @ObservationIgnored private var housingFundPromptEvaluatedThisSession = false
 
     private static func userKey(for profile: UserProfile?) -> String {
         profile?.id ?? profile?.username ?? ""
@@ -1314,7 +1316,7 @@ final class AppStore: ObservableObject {
         set { UserDefaults.standard.set(newValue, forKey: specialDeductionAskedKey) }
     }
     /// 专项扣除询问弹窗开关（PayView 第一次进工资页时触发，见 PayView）。
-    @Published var needsSpecialDeductionAsk = false
+    var needsSpecialDeductionAsk = false
     /// 问过了：不管选有还是没有，都记问过、不再弹。
     func markSpecialDeductionAsked() {
         specialDeductionAsked = true

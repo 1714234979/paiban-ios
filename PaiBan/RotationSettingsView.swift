@@ -5,7 +5,7 @@ import SwiftUI
 /// 才显示选择班次（选哪个班 + 基准日）；班组名可改。
 /// 样式：精美、简约；循环示意图二风格但紧凑（横排卡片 + 箭头 +「第 N+1 天回到第 1 天」）。
 struct RotationSettingsView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
 
     @State private var modeId: String
     @State private var team: String

@@ -13,7 +13,7 @@ import UIKit // 1.3.2.005：保存成功轻震动用 UIImpactFeedbackGenerator�
 /// 调班/请假/记加班入口全部不出现；能改的班 = 设置页设定的班组（跟着设置走，不是写死 B 班）。
 /// 手动排班时：点一天直接设当天班次（日/中/早/休），不用走调班。
 struct DayDetailView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
     @Environment(\.dismiss) private var dismiss
 
     let day: DaySchedule
@@ -1343,12 +1343,17 @@ struct DayDetailView: View {
         .cornerRadius(AppStyle.cardRadius)
     }
 
+    /// 加班起止时间的格式器（"HH:mm"）：静态单例，不再每次算时长/每次提交都新建一个。
+    private static let timeFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        return f
+    }()
+
     /// 表单里当场算出的时长（跟服务端同一规则）。
     private var overtimeDurationText: String {
-        let fmt = DateFormatter()
-        fmt.dateFormat = "HH:mm"
-        let start = fmt.string(from: overtimeStart)
-        let end = fmt.string(from: overtimeEnd)
+        let start = Self.timeFormatter.string(from: overtimeStart)
+        let end = Self.timeFormatter.string(from: overtimeEnd)
         if start == end { return "开始和结束不能一样" }
         return OvertimeCalc.text(minutes: OvertimeCalc.minutes(start: start, end: end))
     }
@@ -1499,10 +1504,8 @@ struct DayDetailView: View {
     private func submitOvertime() async {
         errorText = nil
         doneMessage = nil
-        let fmt = DateFormatter()
-        fmt.dateFormat = "HH:mm"
-        let start = fmt.string(from: overtimeStart)
-        let end = fmt.string(from: overtimeEnd)
+        let start = Self.timeFormatter.string(from: overtimeStart)
+        let end = Self.timeFormatter.string(from: overtimeEnd)
         if start == end {
             errorText = "开始和结束时间不能一样"
             return

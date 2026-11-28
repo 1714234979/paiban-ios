@@ -16,7 +16,7 @@ private func calendarRowSpacing(weeks: Int) -> CGFloat {
 /// 排班页：原生月历。每个日期格里的班次 pill 都是同一固定高度（24pt、通栏圆角），
 /// 修掉网页版“日班绿块占满整格、别的班只是短 pill”的 bug。
 struct CalendarView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
 
     @State private var selectedDay: DaySchedule?
     @State private var showDayDetail = false
@@ -38,9 +38,16 @@ struct CalendarView: View {
     // 月份切换重做（老爷 2026-11-28 14:30 亲口令「直接重做」）：分页走 SmoothMonthPager
     //（原生分页 ScrollView），月份索引是相对基准月的固定偏移数组（-120..<120，共 240 个月，
     // 覆盖 10 年窗口 2016-11～2036-10），数组本身永远不变；基准月只在视图第一次创建时
-    // 定一次（当月），之后不再动。pageIndex 是已落定的月份（标题 + 汇总 + 记录都跟它走），
-    // 拖拽中不动，只在分页落定时才变——标题绝不提前跳变。
+    // 定一次（当月），之后不再动。pageIndex 是已落定的月份（汇总 + 记录都跟它走），
+    // 拖拽中不动，只在分页落定时才变。
     @State private var pageIndex: Int = CalendarView.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
+    /// 标题跟的月份（2026-11-28 改，取代落定才变）：拖过一半就换（分页器的过半回调写这里），
+    /// 落定时跟 pageIndex 同步；拖一半松手弹回时跟着回来。汇总/记录仍只跟 pageIndex（落定页）。
+    @State private var titleIndex: Int = CalendarView.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
+    /// 冷启动回当天只做一次（切 Tab 闪跳的根因，见下面 .task）：
+    /// .task 在切 Tab 回来时也会重跑（视图重进层级），不加标志每次回来都强制回当月，
+    /// 先闪一帧离开时的月份再跳回当月；有了标志，只有第一次创建时才回当天。
+    @State private var didInitialMonthAlign = false
     /// 基准月（视图第一次创建时的当月，之后不再动）：月份偏移数组相对它算。
     @State private var baseIndex: Int = {
         let now = DateUtil.yearMonth(of: Date())
@@ -150,21 +157,38 @@ struct CalendarView: View {
             }
             .padding(.horizontal, 16)
             // 底部留白（重做，老爷 2026-11-28 14:36 亲口令）：1.3.2.006 加的 88pt 删掉——
-            // 那是给自定义底栏留的，底栏已改回原生 TabView（iOS 26+ 液态玻璃 + 往下滚自动收起），
+            // 那是给自定义底栏留的，底栏已改回原生 TabView（iOS 26+ 液态玻璃），
             // 安全区由原生底栏自动处理，不再手动垫大额留白。
             // 88pt 没起作用的根因（录屏实测）：统计栏（summaryLine）本来就在 ScrollView 内容里，
             // 不是固定 footer；88pt 只加在内容最底下、只影响滑到底的位置，静止时统计栏
             // 照样落在 iOS 26/27 悬浮胶囊底栏盖住的那截里——垫数字修不了静止位置。
-            // 现在底栏往下滚自动收起（.tabBarMinimizeBehavior(.onScrollDown)），滑到底时
-            // 统计栏上面还有调班/请假卡 + 同步时间，统计栏本身早已升到胶囊上方，完整露出。
+            // 2026-11-28 底栏改成永不收起（.never）：底栏一直在、统计栏上面还有调班/请假卡
+            // + 同步时间，统计栏本身在底栏上方，完整露出，不再被收起的小圆球盖住。
+        }
+        // 右下角悬浮「今天」按钮（2026-11-28 老爷亲口令）：放在底栏上方、安全区之上，
+        // 右边留 16pt；当月不显示。safeAreaInset 让它固定在安全区底边（= 底栏顶边）
+        // 上方 12pt，不跟内容滚；内容底部因此多出按钮的高度，能滚到按钮上面去，
+        // 调班/请假长条的关键内容（标题、记录行）不会被它盖住。
+        .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 0) {
+            Group {
+                if pageIndex != currentMonthIndex {
+                    todayFloatingButton
+                        .padding(.trailing, 16)
+                        .padding(.bottom, 12)
+                }
+            }
+            .animation(reduceMotion ? .easeInOut(duration: 0.15) : .snappy(duration: 0.25), value: pageIndex == currentMonthIndex)
         }
         // 1.3.0.013：滚动指示条常显（老爷 19:24 说「没有滑动框」）——.visible 没用，
         // 画廊实拍证明它根本不画出来，改走自绘滑块 AlwaysVisibleScrollIndicator。
         .modifier(AlwaysVisibleScrollIndicator())
         .background(AppStyle.pageBackground)
         // 导航栏毛玻璃隔离（Gemini 整改模块 3b）：向上滚时黑色概览卡的金额文字
-        // 会透过导航栏、和「排班」标题重叠；强制导航栏始终显示背景，不改标题本身。
-        .toolbarBackground(.visible, for: .navigationBar)
+        // 会透过导航栏、和「排班」标题重叠。2026-11-28 改回系统原生 .automatic：
+        // .visible 强制始终显示毛玻璃背景，向上滚时仍是半透明、黑卡文字透过来还被
+        // 栏底边切一半；.automatic 让系统按滚动状态切到不透的栏底，隔断才起作用。
+        // 设置页同理（见 SettingsView）。
+        .toolbarBackground(.automatic, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
@@ -188,11 +212,19 @@ struct CalendarView: View {
         }
         .task {
             // 1.2.6 冷启动回当天：进页对齐到今天所在的月（不再跟 Store 恢复的月份走）。
-            // .task 只在视图第一次创建时跑（冷启动、登录后进主界面），从后台切回来不重跑、
-            // 不强制回当天，保持原地。
-            let now = DateUtil.yearMonth(of: Date())
-            pageIndex = min(max(Self.monthIndex(year: now.year, month: now.month), pageRange.lowerBound), pageRange.upperBound - 1)
-            store.setCurrentMonth(year: now.year, month: now.month)
+            // 切 Tab 闪跳的根因（2026-11-28 录屏 00:50）：.task 不只在视图第一次创建时跑——
+            // 切 Tab 回来视图重进层级，.task 也重跑；原来每次都强制回当月，所以从设置切回
+            // 排班时先闪一帧离开时的月份（2027年7月）再跳回当月（2026年11月）。
+            // 真因不是 onAppear（三个页的 onAppear 都没有重置月份的代码），就是这个 .task。
+            // 修法：只第一次跑时回当天（didInitialMonthAlign 标志），切 Tab 回来只做预取/刷新，
+            // 月份保持原地不动。
+            if !didInitialMonthAlign {
+                didInitialMonthAlign = true
+                let now = DateUtil.yearMonth(of: Date())
+                pageIndex = min(max(Self.monthIndex(year: now.year, month: now.month), pageRange.lowerBound), pageRange.upperBound - 1)
+                titleIndex = pageIndex
+                store.setCurrentMonth(year: now.year, month: now.month)
+            }
             if store.month == nil {
                 await store.refreshMonth()
             }
@@ -226,6 +258,8 @@ struct CalendarView: View {
         // 再换月 + 预取前后月 + 刷新。标题和底部统计直接跟 pageIndex 走（见 pagerTitle /
         // displayedMonth），不经过 store.currentYearMonth，所以落定前也不错位。
         .onChange(of: pageIndex) { newIndex in
+            // 落定就跟标题同步（标题平时跟过半回调走，落定时一定等于 pageIndex）。
+            titleIndex = newIndex
             // 1.3.2.004：落到哪页就以那页为中心重算 21 页——下一页还没滑到就已经算好了。
             preloadAround(newIndex)
             refreshTask?.cancel()
@@ -353,24 +387,46 @@ struct CalendarView: View {
     }
 
     /// 月份标题栏（重做，老爷 2026-11-28 14:30 亲口令）：共用的 MonthHeaderView——
-    /// 标题绝对居中（等宽数字 + numericText），“今天”按钮独立定位、仅非当月出现，
-    /// 再也不会被挤偏、不会跟标题撞车（录屏 00:03/00:10 的毛病）。旧的 HStack
+    /// 标题绝对居中（等宽数字 + numericText），标题跟 titleIndex（过半就换），
+    /// 再也不会被挤偏（录屏 00:03/00:10 的毛病）。旧的 HStack
     ///（左右箭头 + Spacer + 标题 + 今天 + Spacer + 箭头）整段删掉。
+    /// “今天”按钮不在标题栏里（2026-11-28 老爷亲口令：改成右下角悬浮按钮，见下面
+    /// todayFloatingButton；标题行只剩 < 标题 >，标题真正居中）。
     private var monthNavigator: some View {
         MonthHeaderView(
-            year: yearMonth(from: pageIndex).year,
-            month: yearMonth(from: pageIndex).month,
-            isCurrentMonth: pageIndex == currentMonthIndex,
+            year: yearMonth(from: titleIndex).year,
+            month: yearMonth(from: titleIndex).month,
             onPrevious: { goToMonth(pageIndex - 1) },
-            onNext: { goToMonth(pageIndex + 1) },
-            onBackToToday: { goToToday() }
+            onNext: { goToMonth(pageIndex + 1) }
         )
+    }
+
+    /// 右下角悬浮「今天」按钮（2026-11-28 老爷亲口令）：点按回到当月（走原来的 goToToday）。
+    /// 样式和左下角收起的底栏小圆球对称：同尺寸（48pt 圆）、同风格（毛玻璃圆 + 阴影），
+    /// 放在底栏上方、安全区之上，右边留 16pt。当月不显示（已经在当月就不用回，免得成个死按钮）。
+    /// 底栏已改成永不收起（.never），小圆球不会再出现，也就不会盖住这张卡；这个按钮
+    /// 固定在右下角，只盖右下角一小块，记录卡的内容能往上滚开（底部留白见 safeAreaInset）。
+    private var todayFloatingButton: some View {
+        Button(action: goToToday) {
+            Text("今天")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(.primary)
+                .frame(width: 48, height: 48)
+                .background(.ultraThinMaterial, in: Circle())
+                .overlay(Circle().stroke(Color.primary.opacity(0.08), lineWidth: 0.5))
+                .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("回到今天")
+        .transition(.scale(scale: 0.85).combined(with: .opacity))
     }
 
     // MARK: 日历滑页（原生分页，跟着手指走）
 
-    /// 周几行（固定在日历上方，不跟月份滑动）：日、六绿色，其余深色，与参考图一致。
+    /// 周几行（在每页白卡里，跟着月份一起滑）：日、六绿色，其余深色，与参考图一致。
     /// 周一为每周首日时，顺序从周一开始（1.2.7.001）。
+    /// 2026-11-28 改：原来固定在分页器外面，星期栏和网格是两套宽度，列对不齐
+    ///（实测网格比星期栏右移 16pt）；现在放进每页里，和网格同一宽度，列永远对齐。
     private var weekdayHeader: some View {
         HStack(spacing: 4) {
             ForEach(Array(weekdayTitles.enumerated()), id: \.offset) { i, title in
@@ -389,9 +445,7 @@ struct CalendarView: View {
     }
 
     private var monthPager: some View {
-        VStack(spacing: 4) {
-            // 周几固定在最上面，不跟月份一起滑（原来在每页里，滑走就没了）。
-            weekdayHeader
+        VStack(spacing: 8) {
             // 月份分页重做（老爷 2026-11-28 14:30 亲口令）：共用的 SmoothMonthPager——
             // 原生分页 ScrollView + .scrollTargetBehavior(.paging)，手势物理曲线、回弹与
             // 打断全交给系统；月份索引是相对基准月的固定偏移数组，不动态改。旧的
@@ -400,25 +454,38 @@ struct CalendarView: View {
             // 不同伸缩，根治掉帧与页边忽大忽小。
             // 月份数据走 store.monthFor：有缓存直接取，没缓存本地 8 天一轮算好缓存起来，
             // 滑页时不再现算、不再发网络请求。
-            SmoothMonthPager(monthOffsets: monthOffsets, selectedOffset: selectedOffsetBinding, pagePadding: 16) { offset in
+            // 白卡进页（2026-11-28 改）：整张白卡（含星期栏）放进每一页里，跟着月份一起滑——
+            // 星期栏和网格同一页、同一宽度，列永远对齐；滑走时星期栏也跟着走。
+            // pagePadding 传 0：白卡自带 12pt 内边距，两页白卡之间自然有 24pt 白色间距，
+            // 不粘连；再加 16pt 会把卡片挤窄、还让落点整体右移 16pt、周六列被右边缘切掉
+            //（2026-11-28 实测：网格比星期栏右移 16pt，周六 pill 被切约 12pt）。
+            // 每页高度由卡片自己定（星期栏 + 414pt 网格 + 12pt 内边距，全月恒定），
+            // 不再在分页器上写死 414pt（那是旧结构、卡片在外面的高度）。
+            SmoothMonthPager(monthOffsets: monthOffsets, selectedOffset: selectedOffsetBinding, pagePadding: 0, onMidpointPageChange: { offset in
+                titleIndex = baseIndex + offset
+            }) { offset in
                 let ym = yearMonth(from: baseIndex + offset)
-                MonthPageView(
-                    year: ym.year, month: ym.month,
-                    preloadedDays: preloadedGrids[baseIndex + offset],
-                    isSelected: { selectedDay?.date == $0 },
-                    onSelectDay: { day in
-                        selectedDay = day
-                        showDayDetail = true
-                    },
-                    onSelectAdjacentMonth: { y, m in
-                        // 邻月格点按也是跳页，走同一个 goToMonth。
-                        goToMonth(Self.monthIndex(year: y, month: m))
-                    },
-                    flashDate: todayFlashDate
-                )
+                VStack(spacing: 4) {
+                    weekdayHeader
+                    MonthPageView(
+                        year: ym.year, month: ym.month,
+                        preloadedDays: preloadedGrids[baseIndex + offset],
+                        isSelected: { selectedDay?.date == $0 },
+                        onSelectDay: { day in
+                            selectedDay = day
+                            showDayDetail = true
+                        },
+                        onSelectAdjacentMonth: { y, m in
+                            // 邻月格点按也是跳页，走同一个 goToMonth。
+                            goToMonth(Self.monthIndex(year: y, month: m))
+                        },
+                        flashDate: todayFlashDate
+                    )
+                }
+                .padding(12)
+                .background(AppStyle.surface1)
+                .cornerRadius(16)
             }
-            // 每页固定 414pt（6 行 × 64 + 5 × 6），跟原来 TabView 的高度一致。
-            .frame(height: calendarGridHeight)
             if store.isLoadingMonth {
                 ProgressView("正在加载…")
                     .padding(.top, 8)
@@ -429,9 +496,6 @@ struct CalendarView: View {
                     .multilineTextAlignment(.center)
             }
         }
-        .padding(12)
-        .background(AppStyle.surface1)
-        .cornerRadius(16)
     }
 
     /// 汇总与记录看的月份：直接取当前页那份（缓存或本地算，秒出，不等网络）。
@@ -586,6 +650,11 @@ struct CalendarView: View {
                 }
             }
         }
+        // 通栏长条（2026-11-28 老爷亲口令）：和上面统计卡同宽——原来这张卡没有
+        // maxWidth，VStack 按内容收窄，看着比统计卡窄一截；加满宽后和统计卡一样宽。
+        // 底栏已改成永不收起（.never），收起的小圆球不会再盖住这张卡的标题和第一条记录；
+        // 右下角悬浮「今天」按钮只占右下角一小块，内容能往上滚开。
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(AppStyle.cardPadding)
         .background(AppStyle.surface1)
         .cornerRadius(AppStyle.cardRadius)
@@ -698,7 +767,7 @@ struct CalendarView: View {
 /// 没缓存先按本地 8 天一轮算顶上（秒出、不闪白）；1.1.5 起取到的数据先存快照，
 /// 滑动中只读快照，真数据到了也不在滑动中换页（等落定刷新或数据变更时才重拍）。
 struct MonthPageView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
     let year: Int
     let month: Int
     /// 父视图预加载好的本页格子（前后 10 个月共 21 页）：有就直接用，不拍快照、
@@ -715,7 +784,7 @@ struct MonthPageView: View {
     let flashDate: String?
 
     /// 显式初始化（1.3.2.007：合成的 memberwise init 在这台工具链上不认新加的
-    /// flashDate 参数——疑似 @EnvironmentObject store 干扰了合成；显式写死最稳妥）。
+    /// flashDate 参数——疑似 @Environment(AppStore.self) store 干扰了合成；显式写死最稳妥）。
     init(
         year: Int,
         month: Int,
@@ -915,7 +984,7 @@ struct MonthPageView: View {
 /// 请假「假」标从号数旁边移到左列、和法定「假/班」上下叠放（之前号数+红标太宽、压着右边阴历字）；
 /// 三薪日：色块右上角 "三薪" 橙色小角标，不塞进色块里；法定「假/班」保持原样，两套标法不混。
 struct DayCell: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
     /// 1.2.8.001：上下月补的日期在深色下 0.5 透明太暗、看着发虚，深色放宽到 0.65。
     @Environment(\.colorScheme) private var colorScheme
 
@@ -1101,11 +1170,18 @@ struct DayCell: View {
     /// 老爷 2026-11-28 14:30 亲口令：录屏里三薪和班次挤在同一个色块里又小又挤，
     /// 格子高度还不一致）。所有格子的 pill 同高，视觉节奏一致。
     /// 双班：两个 11pt 小 pill 上下叠（11 + 2 + 11 = 24）；单班：一个 24pt pill。
+    /// 角标位置（2026-11-28 改）：原来 offset y:-5 往上凸 5pt，顶边正好顶到农历小字的
+    /// 底边（农历两字行高约 22pt，底边离 pill 顶只有 5pt），看着像压住了农历。
+    /// 改成 y:0——角标顶边和 pill 顶边齐平，离农历小字有 5pt 空隙，绝不压农历。
+    /// 注：没按指令挪到日期数字右侧——日期行中间栏只有约 20pt（号数约 16pt），
+    /// 角标 22pt 宽放进去会把号数挤到 0 或盖住农历列（见汇报里的尺寸账），只能留在
+    /// pill 右上角；y:0 是能同时做到「不压农历、不挤号数」的唯一位置。
     private var shiftPill: some View {
         shiftPillContent
             // 三薪角标：右上角小橙 capsule "三薪"，不占 pill 内的地方、不撑高格子。
             // offset 只向右伸 2pt（不用老爷示例里的 4pt）：页有 .clipped() 裁剪，
             // 周六那列的角标伸 4pt 会被页边裁掉 2pt，伸 2pt 正好贴着格边、完整显示。
+            // y 改成 0（原来 -5）：顶边和 pill 顶边齐平，不再往上凸压农历小字。
             .overlay(alignment: .topTrailing) {
                 if isTriplePay && !isAdjacent {
                     triplePayBadge
@@ -1147,7 +1223,8 @@ struct DayCell: View {
         }
     }
 
-    /// 三薪角标：8pt 黑体白字 "三薪"，橙色 capsule，右上角 offset x:2、y:-5。
+    /// 三薪角标：8pt 黑体白字 "三薪"，橙色 capsule，右上角 offset x:2、y:0。
+    /// y:0（原来 -5）：顶边和 pill 顶边齐平，不再往上凸压农历小字（见上面 shiftPill）。
     private var triplePayBadge: some View {
         Text("三薪")
             .font(.system(size: 8, weight: .black))
@@ -1155,7 +1232,7 @@ struct DayCell: View {
             .padding(.horizontal, 3)
             .padding(.vertical, 1)
             .background(Color.orange, in: Capsule())
-            .offset(x: 2, y: -5)
+            .offset(x: 2, y: 0)
     }
 }
 

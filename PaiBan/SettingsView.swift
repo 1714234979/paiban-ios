@@ -7,7 +7,7 @@ import WidgetKit
 /// 各开一个二级页面改细项；换班、管理后台、服务器、更新、反馈留在主界面。
 /// 服务器那节只给老爷（张晓文）看，同事看不到。
 struct SettingsView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
 
     @State private var isCheckingUpdate = false
     @State private var showFeedback = false
@@ -301,6 +301,10 @@ struct SettingsView: View {
         }
         .modifier(AlwaysVisibleScrollIndicator())
         .navigationTitle("设置")
+        // 导航栏毛玻璃隔离（2026-11-28，和排班页同一毛病）：向上滚时卡片文字透过导航栏、
+        // 和「设置」标题打架；设置页之前没写 toolbarBackground，走系统默认就是 .automatic，
+        // 这里显式写出来，和排班页/工资页保持一致。
+        .toolbarBackground(.automatic, for: .navigationBar)
         .alert("检查更新", isPresented: updateNoticeBinding) {
             Button("知道了", role: .cancel) {
                 store.updateNotice = nil
@@ -556,7 +560,7 @@ struct SettingsView: View {
 /// 修改昵称、修改密码、切换账号、退出登录。退出登录放最下面，切换账号在它上面；
 /// 退出只清登录状态，离线缓存保留。
 struct AccountSecurityView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
 
     @State private var showBindPhone = false
     @State private var showChangePhone = false
@@ -688,7 +692,7 @@ struct AccountSecurityView: View {
 /// 工资设置（二级页面）：基本工资、奖金系数、养老月扣（反推缴费基数）、
 /// 岗位、水电费、科室绩效奖金。保存走服务端接口，立即落盘，管理端即是最新。
 struct PaySettingsView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
 
     @State private var baseSalaryText = ""
     @State private var bonusCoefText = ""
@@ -1038,7 +1042,7 @@ struct PaySettingsView: View {
 /// 从设置 → 工资设置 → 专项附加扣除进来，也从工资页「有没有专项附加扣除」弹窗的
 /// 「有，去填写」进来；第一次打开且还没问过时，onAppear 里触发一次询问弹窗（见 Store）。
 struct SpecialDeductionsView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
 
     @State private var infantCareAmounts: [String] = []
     @State private var childEduText = ""
@@ -1438,6 +1442,14 @@ struct ChangelogView: View {
     var body: some View {
         Form {
             Section {
+                changelog(version: "1.3.2.009（内测）", items: [
+                    "卡顿根治了：状态改成细粒度观察，一个地方变了不再牵着整页重画；月份和工资只算一次记下来，滑过去直接显示",
+                    "标题拖过一半就换，不用等滑停了才变；底栏不再缩成左下角小圆球盖字",
+                    "日历白卡整张跟着月份滑，星期栏和日期永远对齐，不再错位、切边",
+                    "工资黑卡跟着月份一起翻页、一起滚动，不再上面停在 11 月、下面已经滑到 12 月",
+                    "「今天」按钮改成右下角悬浮按钮，标题行只剩箭头和月份；调班/请假那张卡改成通栏长条",
+                    "三薪角标不再往上凸压农历字；排班页、工资页、设置页向上滚时导航栏不再透字",
+                ])
                 changelog(version: "1.3.2.008（内测）", items: [
                     "排班页重做了：月份滑动是系统原生的分页，标题只跟着落定的那一页走，不再错位、重叠、跳月；「今天」按钮只在非当月出现",
                     "底栏改回系统原生：iOS 26 上是液态玻璃，低版本是标准底栏；所有二级页面都藏起底栏，倒班方式设置的保存按钮和关于页的版权信息不再被压住；管理后台也从设置页点进去，左上角是系统返回",
@@ -1805,7 +1817,7 @@ enum BindPhoneMode {
 struct BindPhoneSheet: View {
     var mode: BindPhoneMode = .bind
     var forced: Bool = false
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
     @Environment(\.dismiss) private var dismiss
     @State private var phone = ""
     @State private var code = ""
@@ -1942,7 +1954,7 @@ struct BindPhoneSheet: View {
 /// 改昵称：改的是显示名（displayName），随意改、不限次数、不用验证码；
 /// 登录用的账号名（username）不动。留空保存 = 清回登录账号名。
 struct ChangeNameSheet: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
     @Environment(\.dismiss) private var dismiss
     @State private var name = ""
     @State private var saving = false
@@ -1999,7 +2011,7 @@ struct ChangeNameSheet: View {
 ///（老爷 2026-11-24 04:54 改口：之前「一个月只能改一次」作废，改绑手机号才一月一次）。
 /// 验证码发到已绑的手机号。
 struct ChangePasswordSheet: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
     @Environment(\.dismiss) private var dismiss
     @State private var code = ""
     @State private var newPassword = ""
@@ -2113,7 +2125,7 @@ struct ChangePasswordSheet: View {
 /// 数据状态是实测的：点「立即同步小组件」就当场跑一次设备直连拉数，
 /// 成功失败、当场显示，不再只让老爷去桌面看。
 struct WidgetsView: View {
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
     @State private var syncing = false
     @State private var syncMessage: String?
     @State private var syncOK = false

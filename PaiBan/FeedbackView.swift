@@ -20,7 +20,7 @@ struct FeedbackView: View {
 
     static let locations = ["排班页", "工资页", "设置页", "登录/注册", "管理后台", "其他"]
 
-    @EnvironmentObject private var store: AppStore
+    @Environment(AppStore.self) private var store: AppStore
     @Environment(\.dismiss) private var dismiss
 
     @State private var type: FeedbackType = .bug
