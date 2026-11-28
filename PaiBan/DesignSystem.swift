@@ -1,5 +1,6 @@
 import SwiftUI
 import UIKit // 自适应色用 UIColor 动态色（1.2.8.001）
+import CoreText // 字重桥接：UIFont → CTFont → SwiftUI Font
 
 /// 全 App 设计规范（1.1.4 统一，老爷 2026-11-24 06:09 定「统一整个软件的 UI 设计」）。
 ///
@@ -235,9 +236,10 @@ enum AppFont {
     static let captionSmall: CGFloat = 12
 
     /// CSS 字重（100–900）→ iOS 字重值（regular 0 / medium 0.23 / semibold 0.3 /
-    /// bold 0.4），分段线性插值。SwiftUI Font.Weight 没有 360/460/560 这档，
-    /// 所以按 CSS 值换算后再用 Font.Weight(rawValue:) 桥接。
-    static func iosWeight(css: CGFloat) -> Font.Weight {
+    /// bold 0.4），分段线性插值。SwiftUI Font.Weight 没有公开初始化器，不能直接
+    /// 构造任意值；所以先算出 UIFont.Weight（有 rawValue 初始化器），再经 CTFont
+    /// 桥接成 SwiftUI Font（见 font(size:cssWeight:scheme:)）。
+    static func iosWeight(css: CGFloat) -> UIFont.Weight {
         let stops: [(CGFloat, CGFloat)] = [
             (100, -0.8), (200, -0.6), (300, -0.4), (400, 0.0),
             (500, 0.23), (600, 0.3), (700, 0.4), (800, 0.56), (900, 0.62),
@@ -248,7 +250,7 @@ enum AppFont {
             let (x1, y1) = stops[i + 1]
             if c >= x0 && c <= x1 {
                 let t = (c - x0) / (x1 - x0)
-                return Font.Weight(rawValue: y0 + t * (y1 - y0))
+                return UIFont.Weight(rawValue: y0 + t * (y1 - y0))
             }
         }
         return .regular
@@ -256,8 +258,13 @@ enum AppFont {
 
     /// 统一字体：字号 + CSS 字重；深色自动 -40（视频细节 2：400→360、500→460、
     /// 600→560、700→660），浅色保持原字重。
+    /// UIFont 与 CTFont 是 toll-free 桥接，先取 UIFont.systemFont 再转 CTFont，
+    /// 才能把 UIFont.Weight 的任意值带进 SwiftUI Font。
     static func font(size: CGFloat, cssWeight: CGFloat, scheme: ColorScheme) -> Font {
-        .system(size: size, weight: iosWeight(css: scheme == .dark ? cssWeight - 40 : cssWeight))
+        Font(UIFont.systemFont(
+            ofSize: size,
+            weight: iosWeight(css: scheme == .dark ? cssWeight - 40 : cssWeight)
+        ) as CTFont)
     }
 }
 
@@ -268,15 +275,6 @@ struct AppFontModifier: ViewModifier {
     let cssWeight: CGFloat
     func body(content: Content) -> some View {
         content.font(AppFont.font(size: size, cssWeight: cssWeight, scheme: scheme))
-    }
-}
-
-/// 只改字重（深色自动 -40），字号沿用已有的 .font(...)。
-struct AppWeightModifier: ViewModifier {
-    @Environment(\.colorScheme) private var scheme
-    let cssWeight: CGFloat
-    func body(content: Content) -> some View {
-        content.fontWeight(AppFont.iosWeight(css: scheme == .dark ? cssWeight - 40 : cssWeight))
     }
 }
 
@@ -319,10 +317,6 @@ extension View {
     /// 统一字号 + 字重（深色自动 -40）。
     func appFont(size: CGFloat, weight cssWeight: CGFloat = 400) -> some View {
         modifier(AppFontModifier(size: size, cssWeight: cssWeight))
-    }
-    /// 只改字重（深色自动 -40），字号沿用已有的 .font(...)。
-    func appWeight(_ cssWeight: CGFloat) -> some View {
-        modifier(AppWeightModifier(cssWeight: cssWeight))
     }
     /// 水墨晕染式出现：blur 6→0、120ms；delay 逐行错开 30ms。
     func blurIn(delay: Double = 0) -> some View {

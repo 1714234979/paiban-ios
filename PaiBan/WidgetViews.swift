@@ -514,7 +514,7 @@ struct LockWidgetView: View {
                 } else {
                     VStack(spacing: 0) {
                         Text(MoneyUtil.money0(earnedAmount))
-                            .font(.title3).appWeight(700).monospacedDigit()
+                            .appFont(size: 20, weight: 700).monospacedDigit()
                             .foregroundColor(shiftPillColor(today.shift))
                             .minimumScaleFactor(0.6)
                         Text("已挣")

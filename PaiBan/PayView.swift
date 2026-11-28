@@ -198,7 +198,7 @@ struct PayView: View {
             }
             Spacer()
             Text(DateUtil.yearMonthTitle(year: yearMonth(from: pageIndex).year, month: yearMonth(from: pageIndex).month))
-                .font(.title3).appWeight(700).monospacedDigit()
+                .appFont(size: 20, weight: 700).monospacedDigit()
             Spacer()
             Button {
                 withAnimation(AppMotion.standard()) {
@@ -330,7 +330,7 @@ struct PayView: View {
                         .foregroundColor(.secondary)
                     Spacer()
                     Text(row.1)
-                        .appWeight(row.0.hasPrefix("实发") || row.0.hasPrefix("应发") || row.0.hasPrefix("税前") || row.0.contains("合计") ? 700 : 400)
+                        .appFont(size: AppFont.bodySmall, weight: row.0.hasPrefix("实发") || row.0.hasPrefix("应发") || row.0.hasPrefix("税前") || row.0.contains("合计") ? 700 : 400)
                         .monospacedDigit()
                 }
                 .appFont(size: AppFont.bodySmall)
@@ -427,7 +427,7 @@ struct PayView: View {
                     .foregroundColor(.secondary)
                 Spacer()
                 Text(valueText)
-                    .appWeight(bold ? 700 : 400)
+                    .appFont(size: AppFont.bodySmall, weight: bold ? 700 : 400)
                     .monospacedDigit()
             }
             .appFont(size: AppFont.bodySmall)

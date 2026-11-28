@@ -194,7 +194,7 @@ struct CalendarView: View {
                     store.viewTeam = team
                 } label: {
                     Text("\(team)班")
-                        .appWeight(store.viewTeam == team ? 700 : 400)
+                        .appFont(size: AppFont.headline, weight: store.viewTeam == team ? 700 : 400)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
                         .background(store.viewTeam == team ? AppStyle.navyAdaptive : AppStyle.surface1)
@@ -219,7 +219,7 @@ struct CalendarView: View {
             }
             Spacer()
             Text(pagerTitle)
-                .font(.title3).appWeight(700).monospacedDigit()
+                .appFont(size: 20, weight: 700).monospacedDigit()
             Button {
                 withAnimation(AppMotion.standard()) {
                     pageIndex = Self.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
@@ -260,7 +260,7 @@ struct CalendarView: View {
         HStack(spacing: 4) {
             ForEach(Array(weekdayTitles.enumerated()), id: \.offset) { i, title in
                 Text(title)
-                    .font(.caption).appWeight(400)
+                    .appFont(size: AppFont.caption, weight: 400)
                     .foregroundColor(weekdayTitles[i] == "日" || weekdayTitles[i] == "六" ? .green : .primary)
                     .frame(maxWidth: .infinity)
             }
@@ -720,7 +720,7 @@ struct DayCell: View {
                             //（原来是绿字无底；只改字色会白底白字看不见，所以底色跟着换成绿，
                             // 位置/大小/布局不动）。请假的「假」见下面，用红色字体。
                             Text("假")
-                                .font(.system(size: 9)).appWeight(700)
+                                .appFont(size: 9, weight: 700)
                                 .foregroundColor(.white)
                                 .padding(.horizontal, 1)
                                 .padding(.vertical, 1)
@@ -728,7 +728,7 @@ struct DayCell: View {
                                 .cornerRadius(3)
                         } else {
                             Text("班")
-                                .font(.system(size: 9)).appWeight(700)
+                                .appFont(size: 9, weight: 700)
                                 .foregroundColor(.red)
                         }
                     } else {
@@ -738,7 +738,7 @@ struct DayCell: View {
                         // 1.1.5：请假的「假」用红色字体——红字配红底看不见，底色去掉变透明
                         //（位置/大小/布局不动，只换字色和底色，和放假的白字绿底区分开）。
                         Text("假")
-                            .font(.system(size: 8)).appWeight(700)
+                            .appFont(size: 8, weight: 700)
                             .foregroundColor(.red)
                             .padding(.horizontal, 2)
                             .padding(.vertical, 1)
@@ -746,7 +746,7 @@ struct DayCell: View {
                 }
                 .frame(width: 11, alignment: .leading)
                 Text("\(day.dayNumber)")
-                    .font(.system(size: dayNumberFontSize)).appWeight(isToday ? 700 : 600).monospacedDigit()
+                    .appFont(size: dayNumberFontSize, weight: isToday ? 700 : 600).monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
                     .foregroundColor(isAdjacent ? .secondary : .primary)
@@ -756,7 +756,7 @@ struct DayCell: View {
                     if display.showLunar {
                         ForEach(Array(displayLunarText.enumerated()), id: \.offset) { _, ch in
                             Text(String(ch))
-                                .font(.system(size: 9)).appWeight(400)
+                                .appFont(size: 9, weight: 400)
                                 .foregroundColor(extra.isRedText ? .red : AppStyle.tinySecondary)
                         }
                     }
@@ -776,7 +776,7 @@ struct DayCell: View {
                             HStack(spacing: 2) {
                                 ForEach(ShiftStyle.parts(of: day.shift), id: \.self) { part in
                                     Text(TeamInfo.shortName(part))
-                                        .font(.system(size: 10)).appWeight(700)
+                                        .appFont(size: 10, weight: 700)
                                         .foregroundColor(.white)
                                         .frame(maxWidth: .infinity)
                                         .frame(height: 15)
@@ -785,7 +785,7 @@ struct DayCell: View {
                                 }
                             }
                             Text("三薪")
-                                .font(.system(size: 9)).appWeight(700)
+                                .appFont(size: 9, weight: 700)
                                 .foregroundColor(AppStyle.whiteText(opacity: 0.9))
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 13)
@@ -797,7 +797,7 @@ struct DayCell: View {
                         VStack(spacing: 2) {
                             ForEach(ShiftStyle.parts(of: day.shift), id: \.self) { part in
                                 Text(TeamInfo.shortName(part))
-                                    .font(.system(size: 10)).appWeight(700)
+                                    .appFont(size: 10, weight: 700)
                                     .foregroundColor(.white)
                                     .frame(maxWidth: .infinity)
                                     .frame(height: 13)
@@ -810,12 +810,12 @@ struct DayCell: View {
                 } else if isTriplePay && !isAdjacent {
                     VStack(spacing: 0) {
                         Text(day.isRest ? "休" : TeamInfo.shortName(day.shift))
-                            .font(.system(size: 12)).appWeight(700)
+                            .appFont(size: 12, weight: 700)
                             .foregroundColor(day.isRest ? ShiftStyle.color(for: "休息") : .white)
                             .frame(maxWidth: .infinity)
                             .frame(height: 15)
                         Text("三薪")
-                            .font(.system(size: 9)).appWeight(700)
+                            .appFont(size: 9, weight: 700)
                             .foregroundColor(AppStyle.whiteText(opacity: 0.85))
                             .frame(maxWidth: .infinity)
                             .frame(height: 13)
@@ -826,7 +826,7 @@ struct DayCell: View {
                     .cornerRadius(7)
                 } else {
                     Text(day.isRest ? "休" : TeamInfo.shortName(day.shift))
-                        .font(.system(size: 12)).appWeight(700)
+                        .appFont(size: 12, weight: 700)
                         .foregroundColor(day.isRest ? ShiftStyle.color(for: "休息") : .white)
                         .frame(maxWidth: .infinity)
                         .frame(height: pillHeight)
