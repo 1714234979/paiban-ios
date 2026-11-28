@@ -3,7 +3,7 @@ import Foundation
 /// 服务器地址配置 — 全 App 唯一的服务器地址来源。
 /// 主备两条（老爷 2026-11-24 定）：
 ///   ① 云服务器 http://47.97.168.14:3003（主用，平时只走它）
-///   ② NAS 公网隧道 https://warrant-maternity-fathers-idle.trycloudflare.com（备份，只有云连不上时才切）
+///   ② 域名 https://paiban-space.xyz（备份，只有云连不上时才切，走 NAS 命名隧道 paiban-nas）
 /// Tailscale（100.66.88.28:3003）与局域网（192.168.1.101:3003）不再进地址链。
 /// 选路：先试云（10 秒探活），云超时或明确失败才试 NAS 隧道；两条都不通就置离线、走本地缓存。
 /// 云优先：每次选路都先试云，所以切到 NAS 后云一恢复，下次启动/下次选路就切回云；平时不来回跳。
@@ -14,11 +14,11 @@ enum ServerConfig {
     // 阿里云试用服务器（2026-11-24），排班 API 已搬上云。
     static let cloudBaseURL = "http://47.97.168.14:3003"
 
-    // MARK: - ★★★ NAS 公网隧道（备份）★★★
-    // 溟月的容器隧道（paiban-tunnel，随 NAS 重启自动起），只有云连不上时才用。
-    // Quick Tunnel（临时地址）：cloudflared 一重启地址就变，变了再改这里。
+    // MARK: - ★★★ 域名（备份）★★★
+    // paiban-space.xyz（2026-11-28 域名通了后换成它），走 NAS 命名隧道 paiban-nas，只有云连不上时才用。
+    // 旧的 trycloudflare 临时地址已不用，Quick Tunnel 已停。
     // 注意：不要带末尾斜杠，不要带 /app 之类的路径，只要根地址。
-    static let nasTunnelBaseURL: String? = "https://warrant-maternity-fathers-idle.trycloudflare.com"
+    static let nasTunnelBaseURL: String? = "https://paiban-space.xyz"
 
     // MARK: - App 内更新提示（版本清单）
     // canonical 接口：GET <baseURL>/api/v1/version（公开，不用认证），
