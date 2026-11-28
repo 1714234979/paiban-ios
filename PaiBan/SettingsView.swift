@@ -501,9 +501,6 @@ struct AccountSecurityView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("登录手机号")
-                            Text("用于登录和接收验证码")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
                         }
                         Spacer()
                         Text(PhoneUtil.masked(store.user?.phone) ?? "未绑定")
@@ -596,7 +593,7 @@ struct AccountSecurityView: View {
             BindPhoneSheet()
         }
         .sheet(isPresented: $showChangePhone) {
-            BindPhoneSheet(mode: .change)
+            ChangePhoneSheet()
         }
         .sheet(isPresented: $showChangeName) {
             ChangeNameSheet()
@@ -1567,6 +1564,11 @@ struct ChangelogView: View {
                 Section("内测版") {
                     changelog(version: "1.3.3.004", items: [
                         "排班页顶卡班次名移到时间上方并放大",
+                        "更换手机号改成四步流程：验证原手机、输入新手机号、验证新手机、更换成功",
+                        "找回密码页改成白卡表单：手机号（+86）、新密码一张卡，验证码一张卡，下面大号「提交」按钮",
+                        "修改密码页改成白卡表单，新密码、再输一次新密码加小眼睛，可切换显示/隐藏",
+                        "修改密码页、修改昵称页、账号与安全页多余的提示删了",
+                        "输入框底下两条杠改成一条线，修改昵称输入框底下的线去掉了",
                     ])
                     changelog(version: "1.3.3.003", items: [
                         "排班页顶卡「预估今日工资」改成「今日工资」，只去掉「预估」两个字",
@@ -1895,19 +1897,11 @@ struct ChangelogView: View {
 
 // MARK: - 绑定手机号 / 改昵称 / 改密码（1.1.3）
 
-/// 绑定手机号的两种模式：首次绑定 / 更换手机号。
-enum BindPhoneMode {
-    case bind
-    case change
-}
-
-/// 绑定手机号：输手机号 → 发验证码（60 秒倒计时）→ 输 6 位码 → 绑定。
+/// 绑定手机号（首次绑定）：输手机号 → 发验证码（60 秒倒计时）→ 输 6 位码 → 绑定。
 /// 绑完就能用手机号 + 验证码登录；服务端立即落盘，管理端即是最新。
-/// 更换模式：验证码发到新号，换完旧号不能再登录；一个月只能换一次，
-/// 发码前先按上次换号时间算，限期内不发码、直接报下次可换时间。
+/// 更换手机号走 ChangePhoneSheet（1.3.3.004 四步流程），不在这里。
 /// forced = 强制绑定（1.1.3 升级门）：没有取消按钮，绑完才走。
 struct BindPhoneSheet: View {
-    var mode: BindPhoneMode = .bind
     var forced: Bool = false
     @Environment(AppStore.self) private var store: AppStore
     @Environment(\.dismiss) private var dismiss
@@ -1919,47 +1913,15 @@ struct BindPhoneSheet: View {
     @State private var message: String?
     @State private var isError = false
 
-    private var isChange: Bool { mode == .change }
-
-    /// 上次换号时间（服务端记的 ISO 时间戳）。
-    private var lastPhoneChangeDate: Date? {
-        guard let last = store.user?.lastPhoneChangeAt, !last.isEmpty else { return nil }
-        let parser = ISO8601DateFormatter()
-        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return parser.date(from: last)
-    }
-
-    /// 上次换号 + 30 天 = 下次可换时间（与服务端算法一致）。
-    private var nextChangeDate: String? {
-        guard let date = lastPhoneChangeDate else { return nil }
-        let out = DateFormatter()
-        out.dateFormat = "yyyy-MM-dd"
-        return out.string(from: date.addingTimeInterval(30 * 86400))
-    }
-
-    /// 还在 30 天换号窗口内（没到下次可换时间）。
-    private var withinChangeLimit: Bool {
-        guard let date = lastPhoneChangeDate else { return false }
-        return Date().timeIntervalSince(date) < 30 * 86400
-    }
-
     var body: some View {
         NavigationStack {
             Form {
-                if isChange, let current = store.user?.phone, !current.isEmpty {
-                    Section {
-                        HStack {
-                            Text("当前绑定")
-                            Spacer()
-                            Text(PhoneUtil.masked(current) ?? current)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
                 Section {
-                    TextField(isChange ? "新手机号（11 位大陆手机号）" : "手机号（11 位大陆手机号）", text: $phone)
+                    TextField("手机号（11 位大陆手机号）", text: $phone)
                         .keyboardType(.numberPad)
                         .fieldBackground()
+                        // 1.3.3.004：这行只留 fieldBackground 那一条线，Form 系统分隔线藏掉。
+                        .listRowSeparator(.hidden)
                     HStack {
                         TextField("6 位验证码", text: $code)
                             .keyboardType(.numberPad)
@@ -1973,12 +1935,7 @@ struct BindPhoneSheet: View {
                         // 1.3.2.005（方案 §3.3）：验证码按钮只有一行字高，透明留白扩到 48pt。
                         .touchTarget(vertical: 14)
                     }
-                } footer: {
-                    if isChange {
-                        Text("验证码发到新手机号；换完旧号不能再登录。一个月只能换一次" + (nextChangeDate.map { "，下次可换时间：\($0)" } ?? "") + "。")
-                    } else {
-                        Text("绑完就能用手机号 + 验证码登录；一个手机号只能绑一个账号。")
-                    }
+                    .listRowSeparator(.hidden)
                 }
                 if let message {
                     Section {
@@ -1986,7 +1943,7 @@ struct BindPhoneSheet: View {
                     }
                 }
             }
-            .navigationTitle(isChange ? "更换手机号" : "绑定手机号")
+            .navigationTitle("绑定手机号")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 if !forced {
@@ -1995,7 +1952,7 @@ struct BindPhoneSheet: View {
                     }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button(isChange ? "更换" : "绑定") { Task { await bind() } }
+                    Button("绑定") { Task { await bind() } }
                         .disabled(saving || !PhoneUtil.isValid(phone) || code.count != 6)
                 }
             }
@@ -2005,13 +1962,6 @@ struct BindPhoneSheet: View {
     private func sendCode() async {
         message = nil
         isError = false
-        // 换号限流先在本地算：限期内不发码（省一条短信），直接报下次可换时间；
-        // 服务端还会再拦一道（429），报错原样透传。
-        if isChange, withinChangeLimit {
-            message = "手机号一个月只能换一次" + (nextChangeDate.map { "，下次可换时间：\($0)" } ?? "")
-            isError = true
-            return
-        }
         sending = true
         defer { sending = false }
         do {
@@ -2047,6 +1997,385 @@ struct BindPhoneSheet: View {
     }
 }
 
+/// 更换手机号：四步流程（1.3.3.004，老爷 2026-11-29 01:34 亲口令，按参考图重写）。
+/// ① 验证原手机 → ② 输入新手机号 → ③ 验证新手机 → ④ 更换成功。
+/// 接口还是原来的（旧号发码后用短信登录接口只验码，不走 Store 登录流程；
+/// 新号发码 + bindPhone 提交），不动服务端。一个月只能换一次，
+/// 第二步先按上次换号时间算，限期内不往下走、直接报下次可换时间。
+/// 步骤条、卡片、按钮都用咱们自己的配色（navy 主按钮、步骤高亮），
+/// 不照搬参考图里的深蓝品牌头。白卡表单，不用 Form。
+struct ChangePhoneSheet: View {
+    @Environment(AppStore.self) private var store: AppStore
+    @Environment(\.dismiss) private var dismiss
+
+    private enum Step: Int, CaseIterable {
+        case verifyOld, enterNew, verifyNew, done
+        var title: String {
+            switch self {
+            case .verifyOld: return "验证原手机"
+            case .enterNew: return "输入新手机号"
+            case .verifyNew: return "验证新手机"
+            case .done: return "更换成功"
+            }
+        }
+    }
+
+    @State private var step: Step = .verifyOld
+    @State private var oldCode = ""
+    @State private var oldCountdown = 0
+    @State private var oldSending = false
+    @State private var newPhone = ""
+    @State private var newCode = ""
+    @State private var newCountdown = 0
+    @State private var newSending = false
+    @State private var newCodeSent = false
+    @State private var working = false
+    @State private var message: String?
+    @State private var isError = false
+    @State private var showCantUseAlert = false
+
+    /// 上次换号时间（服务端记的 ISO 时间戳）。
+    private var lastPhoneChangeDate: Date? {
+        guard let last = store.user?.lastPhoneChangeAt, !last.isEmpty else { return nil }
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return parser.date(from: last)
+    }
+
+    /// 上次换号 + 30 天 = 下次可换时间（与服务端算法一致）。
+    private var nextChangeDate: String? {
+        guard let date = lastPhoneChangeDate else { return nil }
+        let out = DateFormatter()
+        out.dateFormat = "yyyy-MM-dd"
+        return out.string(from: date.addingTimeInterval(30 * 86400))
+    }
+
+    /// 还在 30 天换号窗口内（没到下次可换时间）。
+    private var withinChangeLimit: Bool {
+        guard let date = lastPhoneChangeDate else { return false }
+        return Date().timeIntervalSince(date) < 30 * 86400
+    }
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 20) {
+                    stepBar
+                    switch step {
+                    case .verifyOld: verifyOldBody
+                    case .enterNew: enterNewBody
+                    case .verifyNew: verifyNewBody
+                    case .done: doneBody
+                    }
+                    if let message {
+                        Text(message)
+                            .font(.subheadline)
+                            .foregroundColor(isError ? .red : .green)
+                            .multilineTextAlignment(.center)
+                    }
+                }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 24)
+            }
+            .background(Color(.systemGroupedBackground))
+            .navigationTitle("更换手机号")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("取消") { dismiss() }
+                }
+            }
+            .alert("无法使用该手机", isPresented: $showCantUseAlert) {
+                Button("知道了", role: .cancel) { }
+            } message: {
+                Text("旧手机号收不到验证码时，请联系管理员协助更换。")
+            }
+            .onChange(of: step) { _, new in
+                if new == .verifyNew && !newCodeSent {
+                    Task { await sendNewCode() }
+                }
+            }
+        }
+    }
+
+    // MARK: 步骤条（当前/已完成 navy，待办灰；圆点盖住底线）
+
+    private var stepBar: some View {
+        ZStack(alignment: .top) {
+            Rectangle()
+                .fill(Color(.systemGray4))
+                .frame(height: 1)
+                .padding(.top, 13)
+                .padding(.horizontal, 44)
+            HStack(spacing: 0) {
+                ForEach(Step.allCases, id: \.self) { s in
+                    VStack(spacing: 6) {
+                        stepCircle(s)
+                        Text(s.title)
+                            .font(.system(size: 11))
+                            .foregroundStyle(s == step ? .primary : .secondary)
+                            .multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity)
+                }
+            }
+        }
+    }
+
+    private func stepCircle(_ s: Step) -> some View {
+        let completed = s.rawValue < step.rawValue || (s == .done && step == .done)
+        let current = s == step
+        return ZStack {
+            Circle()
+                .fill(completed || current ? AppStyle.navyAdaptive : Color(.systemGray4))
+                .frame(width: 26, height: 26)
+            if completed {
+                Image(systemName: "checkmark")
+                    .font(.system(size: 12, weight: .bold))
+                    .foregroundStyle(.white)
+            } else {
+                Text("\(s.rawValue + 1)")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(current ? .white : .secondary)
+            }
+        }
+    }
+
+    // MARK: 第一步：验证原手机
+
+    private var verifyOldBody: some View {
+        VStack(spacing: 16) {
+            Text("请验证手机以确认是你本人操作")
+                .font(.system(size: 17, weight: .semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(PhoneUtil.masked(store.user?.phone) ?? store.user?.phone ?? "")
+                .font(.system(size: 22, weight: .bold))
+                .monospacedDigit()
+                .frame(maxWidth: .infinity, alignment: .leading)
+            WhiteCard {
+                HStack(spacing: 12) {
+                    TextField("6 位验证码", text: $oldCode)
+                        .keyboardType(.numberPad)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    filledCodeButton(title: oldCountdown > 0 ? "\(oldCountdown) 秒后重发" : "获取验证码",
+                                     disabled: oldSending || oldCountdown > 0) {
+                        Task { await sendOldCode() }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+            }
+            bigButton(title: "下一步", enabled: oldCode.count == 6 && !working) {
+                Task { await verifyOld() }
+            }
+            Button("无法使用该手机？") { showCantUseAlert = true }
+                .font(.subheadline)
+                .foregroundStyle(AppStyle.navyAdaptive)
+        }
+    }
+
+    // MARK: 第二步：输入新手机号
+
+    private var enterNewBody: some View {
+        VStack(spacing: 16) {
+            Text("请输入新手机号")
+                .font(.system(size: 17, weight: .semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            WhiteCard {
+                TextField("新手机号（11 位大陆手机号）", text: $newPhone)
+                    .keyboardType(.numberPad)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 13)
+            }
+            bigButton(title: "下一步", enabled: PhoneUtil.isValid(newPhone) && !working) {
+                Task { await goVerifyNew() }
+            }
+            Button("返回上一步") { step = .verifyOld }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: 第三步：验证新手机
+
+    private var verifyNewBody: some View {
+        VStack(spacing: 16) {
+            Text("请输入新手机号收到的验证码")
+                .font(.system(size: 17, weight: .semibold))
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Text(PhoneUtil.masked(newPhone) ?? newPhone)
+                .font(.system(size: 20, weight: .bold))
+                .monospacedDigit()
+                .frame(maxWidth: .infinity, alignment: .leading)
+            WhiteCard {
+                HStack(spacing: 12) {
+                    TextField("6 位验证码", text: $newCode)
+                        .keyboardType(.numberPad)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    filledCodeButton(title: newCountdown > 0 ? "\(newCountdown) 秒后重发" : "获取验证码",
+                                     disabled: newSending || newCountdown > 0) {
+                        Task { await sendNewCode() }
+                    }
+                }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+            }
+            bigButton(title: "确认更换", enabled: newCode.count == 6 && !working) {
+                Task { await submitChange() }
+            }
+            Button("返回上一步") { step = .enterNew }
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+        }
+    }
+
+    // MARK: 第四步：更换成功
+
+    private var doneBody: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 56))
+                .foregroundStyle(.green)
+            Text("更换成功")
+                .font(.system(size: 20, weight: .bold))
+            Text("新手机号 \(PhoneUtil.masked(newPhone) ?? newPhone)")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            bigButton(title: "完成", enabled: true) { dismiss() }
+        }
+        .padding(.top, 32)
+    }
+
+    // MARK: 小件
+
+    /// 大号底部按钮：满宽 48 高 navy 胶囊，未填灰置。
+    private func bigButton(title: String, enabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .frame(height: AppStyle.buttonHeight)
+                .background(enabled ? AppStyle.navyAdaptive : Color(.systemGray3))
+                .foregroundColor(.white)
+                .cornerRadius(AppStyle.buttonHeight / 2)
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+    }
+
+    /// 蓝色胶囊发码按钮：navy 底白字，未到重发时间时灰置。
+    private func filledCodeButton(title: String, disabled: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 14, weight: .medium))
+                .monospacedDigit()
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .foregroundStyle(.white)
+                .background(disabled ? Color(.systemGray3) : AppStyle.navyAdaptive)
+                .clipShape(Capsule())
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+    }
+
+    // MARK: 接口（全是现成的，不动服务端）
+
+    private func sendOldCode() async {
+        guard let oldPhone = store.user?.phone else { return }
+        message = nil
+        isError = false
+        oldSending = true
+        defer { oldSending = false }
+        do {
+            try await store.api.sendSmsCode(phone: oldPhone)
+            oldCountdown = 60
+            Task {
+                while oldCountdown > 0 {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    oldCountdown -= 1
+                }
+            }
+        } catch {
+            message = (error as? APIError)?.message ?? error.localizedDescription
+            isError = true
+        }
+    }
+
+    /// 验旧号：短信登录接口只核对旧号验证码，成功就换发 session；
+    /// 不走 Store 登录流程，不动本地状态、不刷新数据。
+    private func verifyOld() async {
+        guard let oldPhone = store.user?.phone else { return }
+        message = nil
+        isError = false
+        working = true
+        defer { working = false }
+        do {
+            _ = try await store.api.loginWithSms(phone: oldPhone, code: oldCode.trimmingCharacters(in: .whitespaces))
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            step = .enterNew
+        } catch {
+            message = (error as? APIError)?.message ?? error.localizedDescription
+            isError = true
+        }
+    }
+
+    private func goVerifyNew() async {
+        message = nil
+        isError = false
+        // 换号限流先在本地算：限期内不往下走（省一条短信），直接报下次可换时间；
+        // 服务端还会再拦一道（429），报错原样透传。
+        if withinChangeLimit {
+            message = "手机号一个月只能换一次" + (nextChangeDate.map { "，下次可换时间：\($0)" } ?? "")
+            isError = true
+            return
+        }
+        step = .verifyNew
+    }
+
+    private func sendNewCode() async {
+        message = nil
+        isError = false
+        newSending = true
+        defer { newSending = false }
+        do {
+            try await store.api.sendSmsCode(phone: newPhone.trimmingCharacters(in: .whitespaces))
+            newCodeSent = true
+            newCountdown = 60
+            Task {
+                while newCountdown > 0 {
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                    newCountdown -= 1
+                }
+            }
+        } catch {
+            message = (error as? APIError)?.message ?? error.localizedDescription
+            isError = true
+        }
+    }
+
+    private func submitChange() async {
+        message = nil
+        isError = false
+        working = true
+        defer { working = false }
+        do {
+            try await store.bindPhone(phone: newPhone.trimmingCharacters(in: .whitespaces),
+                                      code: newCode.trimmingCharacters(in: .whitespaces))
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            step = .done
+        } catch {
+            message = (error as? APIError)?.message ?? error.localizedDescription
+            isError = true
+        }
+    }
+}
+
 /// 改昵称：改的是显示名（displayName），随意改、不限次数、不用验证码；
 /// 登录用的账号名（username）不动。留空保存 = 清回登录账号名。
 struct ChangeNameSheet: View {
@@ -2063,7 +2392,6 @@ struct ChangeNameSheet: View {
                 Section {
                     HStack(spacing: 8) {
                         TextField("昵称（最多 10 个字）", text: $name)
-                            .fieldBackground()
                             .onChange(of: name) { _, new in
                                 if new.count > 10 { name = String(new.prefix(10)) }
                             }
@@ -2071,8 +2399,8 @@ struct ChangeNameSheet: View {
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
-                } footer: {
-                    Text("改的是昵称，登录用的账号名不变；留空保存会清回账号名。")
+                    // 1.3.3.004：这个字段不要线了——下划线删掉，Form 系统分隔线也藏掉。
+                    .listRowSeparator(.hidden)
                 }
                 if let message {
                     Section {
@@ -2114,15 +2442,20 @@ struct ChangeNameSheet: View {
     }
 }
 
-/// 改密码：必须先绑手机号，短信验证码验证身份；不限次数，随时能改
+/// 改密码（1.3.3.004，老爷 2026-11-29 01:41 亲口令，按 115 干净白卡重写）：
+/// 必须先绑手机号，短信验证码验证身份；不限次数，随时能改
 ///（老爷 2026-11-24 04:54 改口：之前「一个月只能改一次」作废，改绑手机号才一月一次）。
-/// 验证码发到已绑的手机号。
+/// 验证码发到已绑的手机号。白卡 + 输入框 + 底部大按钮，不用 Form
+///（双杠问题没了）；第一张卡下面那行提示不要了；两个密码框的小眼睛保留。
+/// 密码规则提醒「密码为 8-16 位，须同时包含字母和数字」是规则说明，留着。
 struct ChangePasswordSheet: View {
     @Environment(AppStore.self) private var store: AppStore
     @Environment(\.dismiss) private var dismiss
     @State private var code = ""
     @State private var newPassword = ""
     @State private var confirmPassword = ""
+    @State private var showNewPassword = false
+    @State private var showConfirmPassword = false
     @State private var countdown = 0
     @State private var sending = false
     @State private var saving = false
@@ -2131,65 +2464,90 @@ struct ChangePasswordSheet: View {
 
     private var boundPhone: String? { store.user?.phone }
 
+    private var canSave: Bool {
+        boundPhone != nil && code.count == 6
+            && PasswordUtil.isValid(newPassword) && newPassword == confirmPassword
+    }
+
     var body: some View {
         NavigationStack {
-            Form {
-                if let phone = boundPhone {
-                    Section {
-                        HStack {
-                            Text("验证手机号")
-                            Spacer()
-                            Text(PhoneUtil.masked(phone) ?? phone)
-                                .foregroundColor(.secondary)
-                        }
-                        HStack {
-                            TextField("6 位验证码", text: $code)
-                                .keyboardType(.numberPad)
-                                .fieldBackground()
-                            Button {
-                                Task { await sendCode() }
-                            } label: {
-                                Text(countdown > 0 ? "\(countdown) 秒后重发" : "获取验证码")
+            ScrollView {
+                VStack(spacing: 16) {
+                    if let phone = boundPhone {
+                        WhiteCard {
+                            HStack {
+                                Text("验证手机号")
+                                Spacer()
+                                Text(PhoneUtil.masked(phone) ?? phone)
+                                    .foregroundColor(.secondary)
                             }
-                            .disabled(sending || countdown > 0)
-                            // 1.3.2.005（方案 §3.3）：验证码按钮只有一行字高，透明留白扩到 48pt。
-                            .touchTarget(vertical: 14)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 13)
+                            WhiteCardDivider()
+                            HStack(spacing: 12) {
+                                TextField("6 位验证码", text: $code)
+                                    .keyboardType(.numberPad)
+                                    .textInputAutocapitalization(.never)
+                                    .autocorrectionDisabled()
+                                OutlinedCodeButton(title: countdown > 0 ? "\(countdown) 秒后重发" : "获取验证码",
+                                                   disabled: sending || countdown > 0) {
+                                    Task { await sendCode() }
+                                }
+                            }
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
                         }
-                    } footer: {
-                        Text("验证码发到已绑的手机号；不限次数，随时能改。")
-                    }
-                    Section("新密码") {
-                        SecureField(PasswordUtil.placeholder, text: $newPassword)
-                        .fieldBackground()
-                        SecureField("再输一次新密码", text: $confirmPassword)
-                        .fieldBackground()
+                        WhiteCard {
+                            PasswordFieldRow(placeholder: PasswordUtil.placeholder, text: $newPassword, show: $showNewPassword)
+                            WhiteCardDivider()
+                            PasswordFieldRow(placeholder: "再输一次新密码", text: $confirmPassword, show: $showConfirmPassword)
+                        }
                         // 1.3.2.017：密码规则提醒（小字、次要色）；冒号限制已去掉，不再提冒号。
                         Text(PasswordUtil.ruleHint)
                             .font(.caption)
                             .foregroundColor(.secondary)
-                    }
-                } else {
-                    Section {
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 4)
+                    } else {
                         Text("还没绑定手机号。改密码要先绑手机号（短信验证码验证身份）。")
                             .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
-                }
-                if let message {
-                    Section {
-                        Text(message).foregroundColor(isError ? .red : .green)
+                    if let message {
+                        Text(message)
+                            .font(.subheadline)
+                            .foregroundColor(isError ? .red : .green)
+                            .multilineTextAlignment(.center)
                     }
+                    Button {
+                        Task { await save() }
+                    } label: {
+                        Group {
+                            if saving {
+                                ProgressView().tint(.white)
+                            } else {
+                                Text("保存").font(.headline)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: AppStyle.buttonHeight)
+                        .background((canSave || saving) ? AppStyle.navyAdaptive : Color(.systemGray3))
+                        .foregroundColor(.white)
+                        .cornerRadius(AppStyle.buttonHeight / 2)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(!canSave || saving)
                 }
+                .padding(.horizontal, 20)
+                .padding(.top, 20)
+                .padding(.bottom, 24)
             }
+            .background(Color(.systemGroupedBackground))
             .navigationTitle("修改密码")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
+                ToolbarItem(placement: .navigationBarLeading) {
                     Button("取消") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("保存") { Task { await save() } }
-                        .disabled(saving || boundPhone == nil || code.count != 6
-                                  || !PasswordUtil.isValid(newPassword) || newPassword != confirmPassword)
                 }
             }
         }

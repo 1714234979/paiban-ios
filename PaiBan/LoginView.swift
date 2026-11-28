@@ -295,10 +295,13 @@ struct LoginView: View {
     private func isValidPhone(_ s: String) -> Bool { PhoneUtil.isValid(s) }
 }
 
-/// 忘记密码（登录页「忘记密码？」入口）：没登录时用短信验证码重置密码。
+/// 忘记密码（登录页「忘记密码？」入口，1.3.3.004 按 115 干净白卡重写）：没登录时用短信验证码重置密码。
 /// 流程：输手机号 → 点获取验证码（走重置密码模板）→ 输 6 位码 → 设新密码 → 提交。
 /// 成功后只改密码，不自动登录；回登录页时账号框已填好这个手机号，用户只输新密码就行。
-/// 样式和登录页同一套：下划线输入框 + 藏青全圆角胶囊按钮。
+/// 第一张卡：手机号（+86 前缀）+ 新密码 + 再输一次；第二张卡：短信验证码 + 描边「获取验证码」；
+/// 下面大号「提交」按钮。不要多余提示，不抄参考图的文案（规则是 8-16 位不是 8-20；
+/// 咱们没有数字账号，「若你只知道数字账号，请点此找回」那句不要）。
+/// 只有手机找回，没有邮箱找回，点「忘记密码」直接进这个表单，不用选方式。
 struct ForgotPasswordView: View {
     @Environment(AppStore.self) private var store: AppStore
     @Environment(\.dismiss) private var dismiss
@@ -312,9 +315,6 @@ struct ForgotPasswordView: View {
     @State private var confirmPassword = ""
     @State private var showPassword = false
     @State private var showConfirmPassword = false
-    @FocusState private var focusedField: ForgotField?
-    /// 输入框聚焦态（统一规范 v2：聚焦变暗 + 阴影，不用亮色描边）。
-    private enum ForgotField { case phone, smsCode, newPassword, confirmPassword }
     @State private var smsCountdown = 0
     @State private var smsSending = false
     @State private var errorText: String?
@@ -331,7 +331,7 @@ struct ForgotPasswordView: View {
                         formBody
                     }
                 }
-                .padding(.horizontal, 32)
+                .padding(.horizontal, 20)
                 .padding(.top, 32)
                 .padding(.bottom, 24)
             }
@@ -347,77 +347,47 @@ struct ForgotPasswordView: View {
     }
 
     private var formBody: some View {
-        VStack(spacing: 24) {
-            VStack(spacing: 8) {
-                underlineField(focused: focusedField == .phone) {
+        VStack(spacing: 20) {
+            WhiteCard {
+                HStack(spacing: 10) {
+                    Text("+86")
+                        .font(.system(size: 16, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Rectangle()
+                        .fill(Color(.separator))
+                        .frame(width: 1, height: 20)
                     TextField("请输入手机号", text: $phone)
                         .keyboardType(.numberPad)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                        .focused($focusedField, equals: .phone)
                 }
-                underlineField(focused: focusedField == .smsCode) {
-                    HStack(spacing: 12) {
-                        TextField("请输入验证码", text: $smsCode)
-                            .keyboardType(.numberPad)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                            .focused($focusedField, equals: .smsCode)
-                        Button {
-                            Task { await sendSmsCode() }
-                        } label: {
-                            Text(smsCountdown > 0 ? "\(smsCountdown) 秒后重发" : "获取验证码")
-                                .appFont(size: AppFont.bodySmall)
-                                .monospacedDigit()
-                                .foregroundColor(.blue)
-                        }
-                        .disabled(smsSending || smsCountdown > 0 || !PhoneUtil.isValid(phone))
-                    }
-                }
-                underlineField(focused: focusedField == .newPassword) {
-                    HStack(spacing: 8) {
-                        Group {
-                            if showPassword {
-                                TextField(PasswordUtil.placeholder, text: $newPassword)
-                                    .focused($focusedField, equals: .newPassword)
-                            } else {
-                                SecureField(PasswordUtil.placeholder, text: $newPassword)
-                                    .focused($focusedField, equals: .newPassword)
-                            }
-                        }
+                .padding(.horizontal, 16)
+                .padding(.vertical, 13)
+                WhiteCardDivider()
+                PasswordFieldRow(placeholder: PasswordUtil.placeholder, text: $newPassword, show: $showPassword)
+                WhiteCardDivider()
+                PasswordFieldRow(placeholder: "请再输一次新密码", text: $confirmPassword, show: $showConfirmPassword)
+            }
+            // 1.3.2.017：密码规则提醒（小字、次要色）；冒号限制已去掉，不再提冒号。
+            // 规则是 8-16 位（参考图里的 8-20 不对，不抄）。
+            Text(PasswordUtil.ruleHint)
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 4)
+            WhiteCard {
+                HStack(spacing: 12) {
+                    TextField("请输入验证码", text: $smsCode)
+                        .keyboardType(.numberPad)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
-                        Button { showPassword.toggle() } label: {
-                            Image(systemName: showPassword ? "eye" : "eye.slash")
-                                .foregroundColor(.secondary)
-                        }
+                    OutlinedCodeButton(title: smsCountdown > 0 ? "\(smsCountdown) 秒后重发" : "获取验证码",
+                                       disabled: smsSending || smsCountdown > 0 || !PhoneUtil.isValid(phone)) {
+                        Task { await sendSmsCode() }
                     }
                 }
-                underlineField(focused: focusedField == .confirmPassword) {
-                    HStack(spacing: 8) {
-                        Group {
-                            if showConfirmPassword {
-                                TextField("请再输一次新密码", text: $confirmPassword)
-                                    .focused($focusedField, equals: .confirmPassword)
-                            } else {
-                                SecureField("请再输一次新密码", text: $confirmPassword)
-                                    .focused($focusedField, equals: .confirmPassword)
-                            }
-                        }
-                        .textInputAutocapitalization(.never)
-                        .autocorrectionDisabled()
-                        Button { showConfirmPassword.toggle() } label: {
-                            Image(systemName: showConfirmPassword ? "eye" : "eye.slash")
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
-                // 1.3.2.017：密码规则提醒（小字、次要色）；冒号限制已去掉，不再提冒号。
-                Text(PasswordUtil.ruleHint)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 12)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
             }
             if let errorText {
                 Text(errorText)
@@ -432,12 +402,12 @@ struct ForgotPasswordView: View {
                     if isBusy {
                         ProgressView().tint(.white)
                     } else {
-                        Text("重置密码").font(.headline)
+                        Text("提交").font(.headline)
                     }
                 }
                 .frame(maxWidth: .infinity)
                 .frame(height: AppStyle.buttonHeight)
-                .background(AppStyle.navyAdaptive)
+                .background((canReset || isBusy) ? AppStyle.navyAdaptive : Color(.systemGray3))
                 .foregroundColor(.white)
                 .cornerRadius(AppStyle.buttonHeight / 2)
             }
@@ -470,21 +440,6 @@ struct ForgotPasswordView: View {
             .buttonStyle(.plain)
         }
         .padding(.top, 48)
-    }
-
-    /// 下划线输入框：和登录页同一套（只有底部一条细线）。
-    private func underlineField<Content: View>(focused: Bool = false, @ViewBuilder content: () -> Content) -> some View {
-        VStack(spacing: 0) {
-            content()
-                .padding(.vertical, 12)
-                .padding(.horizontal, 12)
-            Rectangle()
-                .fill(Color(.separator))
-                .frame(height: 1)
-        }
-        .background(focused ? AppStyle.surface2 : Color.clear)
-        .cornerRadius(10)
-        .shadow(color: focused ? Color.black.opacity(0.12) : .clear, radius: 4, y: 1)
     }
 
     private var canReset: Bool {

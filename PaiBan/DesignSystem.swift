@@ -323,7 +323,73 @@ extension View {
             .padding(.horizontal, horizontal)
             .contentShape(Rectangle())
     }
-    /// 输入框底线（1.3.2.018，老爷 2026-11-28 21:21 亲口令：灰底圆角框颜色加深太丑，
+    /// 白卡表单（1.3.3.004，115 式干净白卡）：纯白圆角卡，行间只一条分隔线，
+/// 行内输入框不再自己画下划线——找回密码、改密码、更换手机号三页共用。
+struct WhiteCard<Content: View>: View {
+    let content: Content
+    init(@ViewBuilder content: () -> Content) { self.content = content() }
+    var body: some View {
+        VStack(spacing: 0) { content }
+            .background(AppStyle.surface1, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+/// 白卡行分隔线：左右各留 16pt，与行内边距对齐。
+struct WhiteCardDivider: View {
+    var body: some View {
+        Divider().padding(.horizontal, 16)
+    }
+}
+
+/// 密码输入行（1.3.3.004）：小眼睛切换显示/隐藏，找回密码、改密码两页共用。
+struct PasswordFieldRow: View {
+    let placeholder: String
+    @Binding var text: String
+    @Binding var show: Bool
+    var body: some View {
+        HStack(spacing: 8) {
+            Group {
+                if show {
+                    TextField(placeholder, text: $text)
+                } else {
+                    SecureField(placeholder, text: $text)
+                }
+            }
+            .textInputAutocapitalization(.never)
+            .autocorrectionDisabled()
+            Button { show.toggle() } label: {
+                Image(systemName: show ? "eye" : "eye.slash")
+                    .font(.system(size: 15))
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 13)
+    }
+}
+
+/// 描边发码按钮（1.3.3.004，115 样式）：navy 描边 + navy 字胶囊，找回密码、改密码两页共用。
+struct OutlinedCodeButton: View {
+    let title: String
+    let disabled: Bool
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 14, weight: .medium))
+                .monospacedDigit()
+                .padding(.horizontal, 14)
+                .padding(.vertical, 7)
+                .foregroundStyle(disabled ? Color(.systemGray) : AppStyle.navyAdaptive)
+                .overlay(Capsule().stroke(disabled ? Color(.systemGray3) : AppStyle.navyAdaptive, lineWidth: 1))
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+    }
+}
+
+/// 输入框底线（1.3.2.018，老爷 2026-11-28 21:21 亲口令：灰底圆角框颜色加深太丑，
     /// 改成输入框下方只有一条横线——参考他发的微博改名字页样式：无填充、底下一条细线）。
     /// 给 Form/List 行里的裸 TextField / SecureField 用。全站 27 处共用这一个实现，
     /// 改这里就全改了（改密码、改昵称、公积金及所有 .fieldBackground() 输入框）。
