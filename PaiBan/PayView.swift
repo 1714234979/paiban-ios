@@ -33,6 +33,11 @@ struct PayView: View {
 
     /// 邻月工资预热的在途任务（1.3.2.004）：翻得快时旧任务直接取消，只留最新的。
     @State private var preloadPayTask: Task<Void, Never>?
+    /// 月明细骨架延迟 150ms 的在途任务（1.3.2.006）：加载开始后 150ms 再现骨架，
+    /// 数据快回来就不闪；加载结束或视图消失时取消。
+    @State private var paySkeletonTask: Task<Void, Never>?
+    /// 月明细的骨架是否显示（同上，150ms 延迟后才置 true）。
+    @State private var showPaySkeleton = false
 
     static func monthIndex(year: Int, month: Int) -> Int { year * 12 + (month - 1) }
     private func yearMonth(from index: Int) -> (year: Int, month: Int) { (index / 12, index % 12 + 1) }
@@ -52,6 +57,22 @@ struct PayView: View {
                 await Task.yield()
             }
         }
+    }
+
+    /// 骨架延迟 150ms（1.3.2.006）：加载开始后 150ms 再现骨架，数据快回来就不闪；
+    /// 加载结束立刻消失；视图消失时取消任务。Task 注明 @MainActor，置 @State 安全。
+    private func schedulePaySkeleton() {
+        paySkeletonTask?.cancel()
+        paySkeletonTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled else { return }
+            showPaySkeleton = true
+        }
+    }
+    private func hidePaySkeleton() {
+        paySkeletonTask?.cancel()
+        paySkeletonTask = nil
+        showPaySkeleton = false
     }
 
     var body: some View {
@@ -123,6 +144,9 @@ struct PayView: View {
                             noteCard
                             syncTimeFooter
                         }
+                        // 底部留白 88pt（1.3.2.006）：iOS 26/27 上原生底栏是悬浮胶囊样式（约 64pt），
+                        // ScrollView 底部不留够白，最底下的奖金卡片会被底栏压住一半。
+                        .padding(.bottom, 88)
                         // 点编辑框以外的地方就收起（丢弃未保存的改动）。Tap 手势只认轻点，
                         // 拖动（滚动/横滑）不会触发，不跟左右滑切月、上下滚动冲突。
                         .onTapGesture {
@@ -148,7 +172,14 @@ struct PayView: View {
             preloadPayAround(newIndex)
         }
         // 切到别的页面（排班/设置）时，敞着的编辑框自动收起，丢弃未保存的改动。
-        .onDisappear { dismissEdit() }
+        .onDisappear { dismissEdit(); hidePaySkeleton() }
+        // 骨架延迟 150ms（1.3.2.006）：加载开始计时、结束立刻消失。
+        .onChange(of: store.isLoadingPay) { loading in
+            if loading { schedulePaySkeleton() } else { hidePaySkeleton() }
+        }
+        .onAppear {
+            if store.isLoadingPay { schedulePaySkeleton() }
+        }
         .task {
             // 1.2.6 冷启动回当天：进页先对齐到今天所在的月（不再跟 Store 恢复的月份走），
             // 窗口以当月为中心重定。只在视图第一次创建时跑，从后台切回来不重跑、不强制回当月。
@@ -223,6 +254,8 @@ struct PayView: View {
                     // 1.3.2.005（方案 §3.3）：36pt 圆按钮，透明留白扩到 48pt，视觉不变。
                     .touchTarget(vertical: 6, horizontal: 6)
             }
+            // 1.3.2.006：按下缩放 0.96 + 微暗，100ms；热区不动（.005 已做 48pt）。
+            .buttonStyle(PressableButtonStyle())
             Spacer()
             Text(DateUtil.yearMonthTitle(year: yearMonth(from: pageIndex).year, month: yearMonth(from: pageIndex).month))
                 .appFont(size: 20, weight: 700).monospacedDigit()
@@ -239,6 +272,8 @@ struct PayView: View {
                     // 1.3.2.005（方案 §3.3）：36pt 圆按钮，透明留白扩到 48pt，视觉不变。
                     .touchTarget(vertical: 6, horizontal: 6)
             }
+            // 1.3.2.006：按下缩放 0.96 + 微暗，100ms；热区不动（.005 已做 48pt）。
+            .buttonStyle(PressableButtonStyle())
         }
         .padding(.horizontal, 16)
     }
@@ -319,13 +354,17 @@ struct PayView: View {
             // 骨架屏（1.3.2.005，方案 §4.4/§5.4）：四块灰卡，按真布局排
             //（工资 / 奖金 / 合计 / 出勤四张卡的个头），不转圈、不闪烁；
             // 输入到了直接换真内容。加载逻辑本身没动。
-            VStack(spacing: 16) {
-                SkeletonBar(height: 450)
-                SkeletonBar(height: 420)
-                SkeletonBar(height: 120)
-                SkeletonBar(height: 210)
+            // 1.3.2.006：加载开始 150ms 后才出现，数据快回来时不闪骨架；
+            // 150ms 内数据到了，这四块就不出现（也不显示“暂无工资数据”，那是加载结束才有的）。
+            if showPaySkeleton {
+                VStack(spacing: 16) {
+                    SkeletonBar(height: 450)
+                    SkeletonBar(height: 420)
+                    SkeletonBar(height: 120)
+                    SkeletonBar(height: 210)
+                }
+                .padding(.horizontal, 16)
             }
-            .padding(.horizontal, 16)
         } else {
             Text("暂无工资数据，稍后再试")
                 .foregroundColor(.secondary)

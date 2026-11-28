@@ -23,63 +23,79 @@ import SwiftUI
 struct MainTabView: View {
     @EnvironmentObject private var store: AppStore
 
-    var body: some View {
-        TabView(selection: $store.selectedTab) {
-            NavigationStack {
-                CalendarView()
-                    .navigationTitle("排班")
-                    .navigationBarTitleDisplayMode(.inline)
-            }
-            .tabItem {
-                Label("排班", systemImage: "calendar")
-            }
-            .tag(0)
+    /// Tab 切换交叉淡入（1.3.2.006，滑动与切换动效整改方案）：原生 TabView 自带的
+    /// 左右滑切换不掉，内容层自己淡——切 Tab 时先瞬时降到 0.3 / 下移 8pt，
+    /// 再 0.2s ease-out 淡回原位。底栏是 TabView 的一部分，切换时也会跟着轻微
+    /// 淡一下，可以接受。1.3.2.004 的 .animation(value:) 已删掉（它换不掉原生滑切）。
+    @State private var contentOpacity: Double = 1
+    @State private var contentOffsetY: CGFloat = 0
 
-            // 工资 Tab：只有有工资权限的人才显示（1.2.7.001，第 23 条）。
-            // 没权限的人只有排班 / 设置两个 Tab；年休假跟着工资走，也一并隐藏。
-            if store.payAccess {
+    var body: some View {
+        ZStack {
+            TabView(selection: $store.selectedTab) {
                 NavigationStack {
-                    PayView()
-                        .navigationTitle("预估工资")
+                    CalendarView()
+                        .navigationTitle("排班")
                         .navigationBarTitleDisplayMode(.inline)
                 }
                 .tabItem {
-                    Label("工资", systemImage: "yensign.circle")
+                    Label("排班", systemImage: "calendar")
                 }
-                .tag(1)
-            }
+                .tag(0)
 
-            NavigationStack {
-                SettingsView()
+                // 工资 Tab：只有有工资权限的人才显示（1.2.7.001，第 23 条）。
+                // 没权限的人只有排班 / 设置两个 Tab；年休假跟着工资走，也一并隐藏。
+                if store.payAccess {
+                    NavigationStack {
+                        PayView()
+                            .navigationTitle("预估工资")
+                            .navigationBarTitleDisplayMode(.inline)
+                    }
+                    .tabItem {
+                        Label("工资", systemImage: "yensign.circle")
+                    }
+                    .tag(1)
+                }
+
+                NavigationStack {
+                    SettingsView()
+                }
+                .tabItem {
+                    Label("设置", systemImage: "gearshape")
+                }
+                .tag(2)
             }
-            .tabItem {
-                Label("设置", systemImage: "gearshape")
+            .tint(Color.accentColor)
+            // 1.2.8.002：Tab 选中态走自适应强调色（浅色深 navy、深色亮蓝），
+            // 别让系统默认去猜；未选中态在 PaiBanApp.init 里用 UITabBar 外观定。
+            // 没登录时点小组件进来的深链：登录后进主界面再跳（store.handleDeepLink 先记下来）。
+            .task {
+                if let tab = store.pendingDeepLinkTab {
+                    store.pendingDeepLinkTab = nil
+                    store.selectedTab = tab
+                }
+                // 1.3.2.004：启动时就把工资算好——不然第一次点工资 Tab 才现算现取，
+                // 切换过去要等一下，快不起来。没权限 / 设定没填完时 refreshPay 自己会停。
+                if store.payAccess && store.pay == nil {
+                    await store.refreshPay()
+                }
             }
-            .tag(2)
+            // 工资权限没了（管理员关了）而当前正停在工资 Tab：切回排班。
+            .onChange(of: store.payAccess) { newValue in
+                if !newValue && store.selectedTab == 1 {
+                    store.selectedTab = 0
+                }
+            }
         }
-        .tint(Color.accentColor)
-        // 1.3.2.004（老爷 2026-11-28 11:43 亲口定，看苹果商店的底栏切换）：
-        // 底栏切页要迅速又平滑——0.25s 平滑淡入淡出，胶囊指示条跟着系统一起滑过去。
-        // 之前是系统默认的直接切换，没有过渡，看着生硬。
-        .animation(AppMotion.smooth(0.25), value: store.selectedTab)
-        // 1.2.8.002：Tab 选中态走自适应强调色（浅色深 navy、深色亮蓝），
-        // 别让系统默认去猜；未选中态在 PaiBanApp.init 里用 UITabBar 外观定。
-        // 没登录时点小组件进来的深链：登录后进主界面再跳（store.handleDeepLink 先记下来）。
-        .task {
-            if let tab = store.pendingDeepLinkTab {
-                store.pendingDeepLinkTab = nil
-                store.selectedTab = tab
-            }
-            // 1.3.2.004：启动时就把工资算好——不然第一次点工资 Tab 才现算现取，
-            // 切换过去要等一下，快不起来。没权限 / 设定没填完时 refreshPay 自己会停。
-            if store.payAccess && store.pay == nil {
-                await store.refreshPay()
-            }
-        }
-        // 工资权限没了（管理员关了）而当前正停在工资 Tab：切回排班。
-        .onChange(of: store.payAccess) { newValue in
-            if !newValue && store.selectedTab == 1 {
-                store.selectedTab = 0
+        .opacity(contentOpacity)
+        .offset(y: contentOffsetY)
+        .onChange(of: store.selectedTab) { _ in
+            // 先瞬时设（不要包在 withAnimation 里），再淡入。
+            contentOpacity = 0.3
+            contentOffsetY = 8
+            withAnimation(.easeOut(duration: 0.2)) {
+                contentOpacity = 1
+                contentOffsetY = 0
             }
         }
     }

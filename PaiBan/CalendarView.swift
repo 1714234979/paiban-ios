@@ -1,14 +1,16 @@
 import SwiftUI
 import UIKit
 
-/// 日历格固定高 64pt；网格外框总高固定 414pt（按 6 行 × 64 + 5 × 6 算），
-/// 行距按行数自适应：6 行紧（6pt）、5 行松（23.5pt）、4 行更松。
-/// 只调行内间距，外框总高度不变，左右滑动时页面尺寸不伸缩。
+/// 日历格固定高 64pt；网格外框总高固定 414pt（6 行 × 64 + 5 × 6），行距恒定 6pt。
+/// 固定 6 行（1.3.2.006，老爷 2026-11-28 12:53 亲口令「行距不一样，你改改我看看吧」）：
+/// 所有月都补满 42 格，5 行的月多一行下月开头的暗色日期，行距、行位置全月一致，
+/// 慢拖时两页的行严丝合缝，不再错位。
 private let calendarCellHeight: CGFloat = 64
 private let calendarGridHeight: CGFloat = 6 * 64 + 5 * 6
 private func calendarRowSpacing(weeks: Int) -> CGFloat {
-    guard weeks > 1 else { return 6 }
-    return (calendarGridHeight - CGFloat(weeks) * calendarCellHeight) / CGFloat(weeks - 1)
+    // 固定 6 行：行距恒定 6pt（1.3.2.006）。以前按行数自适应（5 行 23.5pt、6 行 6pt），
+    // 慢拖时两页行错位；现在 weeks 恒为 6，行距、行位置全月一致。总高 414pt、格高 64pt 不变。
+    6
 }
 
 /// 排班页：原生月历。每个日期格里的班次 pill 都是同一固定高度（28pt、通栏圆角），
@@ -20,6 +22,11 @@ struct CalendarView: View {
     @State private var showDayDetail = false
     /// 1.1.4：滑页刷新防抖任务（见 .onChange(of: pageIndex)）。
     @State private var refreshTask: Task<Void, Never>?
+    /// 调班/请假卡骨架延迟 150ms 的在途任务（1.3.2.006）：加载开始后 150ms 再现骨架，
+    /// 数据快回来就不闪；加载结束或视图消失时取消。
+    @State private var recordsSkeletonTask: Task<Void, Never>?
+    /// 调班/请假卡的骨架是否显示（同上，150ms 延迟后才置 true）。
+    @State private var showRecordsSkeleton = false
     // 滑页的页码 = 月份绝对序号（年*12 + 月-1），2026年11月 = 24322。
     // 用原生 TabView 分页滑，切月跟着手指走、左右月预渲染，不再整格闪白重画。
     @State private var pageIndex: Int = CalendarView.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
@@ -80,6 +87,9 @@ struct CalendarView: View {
                 syncTimeFooter
             }
             .padding(.horizontal, 16)
+            // 底部留白 88pt（1.3.2.006）：iOS 26/27 上原生底栏是悬浮胶囊样式（约 64pt），
+            // ScrollView 底部不留够白，最底下一行（“当月应出勤”）会被底栏压住一半。
+            .padding(.bottom, 88)
         }
         // 1.3.0.013：滚动指示条常显（老爷 19:24 说「没有滑动框」）——.visible 没用，
         // 画廊实拍证明它根本不画出来，改走自绘滑块 AlwaysVisibleScrollIndicator。
@@ -246,6 +256,8 @@ struct CalendarView: View {
                         // 只加竖向留白，不动四个 pill 之间的横向间距。
                         .touchTarget(vertical: 6)
                 }
+                // 1.3.2.006：按下缩放 0.96 + 微暗，100ms；热区不动（.005 已做 48pt）。
+                .buttonStyle(PressableButtonStyle())
             }
         }
     }
@@ -264,6 +276,8 @@ struct CalendarView: View {
                     // 1.3.2.005（方案 §3.3）：36pt 圆按钮，透明留白扩到 48pt，视觉不变。
                     .touchTarget(vertical: 6, horizontal: 6)
             }
+            // 1.3.2.006：按下缩放 0.96 + 微暗，100ms；热区不动（.005 已做 48pt）。
+            .buttonStyle(PressableButtonStyle())
             Spacer()
             Text(pagerTitle)
                 .appFont(size: 20, weight: 700).monospacedDigit()
@@ -281,6 +295,8 @@ struct CalendarView: View {
                     // 1.3.2.005（方案 §3.3）：小 pill 只有约 31pt 高，透明留白扩到 48pt。
                     .touchTarget(vertical: 9)
             }
+            // 1.3.2.006：按下缩放 0.96 + 微暗，100ms；热区不动（.005 已做 48pt）。
+            .buttonStyle(PressableButtonStyle())
             Spacer()
             Button {
                 withAnimation(AppMotion.standard()) {
@@ -294,6 +310,8 @@ struct CalendarView: View {
                     // 1.3.2.005（方案 §3.3）：36pt 圆按钮，透明留白扩到 48pt，视觉不变。
                     .touchTarget(vertical: 6, horizontal: 6)
             }
+            // 1.3.2.006：按下缩放 0.96 + 微暗，100ms；热区不动（.005 已做 48pt）。
+            .buttonStyle(PressableButtonStyle())
         }
     }
 
@@ -450,6 +468,25 @@ struct CalendarView: View {
     /// 只改数据源：原来读 store.swaps（落定刷新才换月），现在读当前页的月缓存）。
     private var displayedSwapRows: [SwapRow] { mergedRows(for: displayedSwaps ?? []) }
 
+    /// 调班/请假数据是否还在等（月缓存没到）：骨架延迟 150ms 的触发条件。
+    private var isRecordsLoading: Bool { displayedSwaps == nil || displayedLeaves == nil }
+
+    /// 骨架延迟 150ms（1.3.2.006）：加载开始后 150ms 再现骨架，数据快回来就不闪；
+    /// 加载结束立刻消失；视图消失时取消任务。Task 注明 @MainActor，置 @State 安全。
+    private func scheduleRecordsSkeleton() {
+        recordsSkeletonTask?.cancel()
+        recordsSkeletonTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 150_000_000)
+            guard !Task.isCancelled else { return }
+            showRecordsSkeleton = true
+        }
+    }
+    private func hideRecordsSkeleton() {
+        recordsSkeletonTask?.cancel()
+        recordsSkeletonTask = nil
+        showRecordsSkeleton = false
+    }
+
     private var recordsSection: some View {
         // 1.3.2.004（老爷 2026-11-28 11:33 亲口定）：这张卡一直存在，不再没记录就藏掉——
         // 本月没有调班请假就显示“本月没有调班请假”，数据没到先显示“正在加载…”。
@@ -457,20 +494,24 @@ struct CalendarView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("本月调班 / 请假")
                 .appFont(size: AppFont.headline, weight: 600)
-            if displayedSwaps == nil || displayedLeaves == nil {
+            if isRecordsLoading {
                 // 骨架屏（1.3.2.005，方案 §4.4/§5.4）：两行灰条，按记录行的样子排
                 //（日期 + 内容），不转圈、不闪烁；数据到了直接换真内容。
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        SkeletonBar(width: 86, height: 14)
-                        SkeletonBar(width: 150, height: 14)
+                // 1.3.2.006：加载开始 150ms 后才出现，数据快回来时不闪骨架；
+                // 150ms 内数据到了，这两行就不出现，卡里只剩标题。
+                if showRecordsSkeleton {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(spacing: 8) {
+                            SkeletonBar(width: 86, height: 14)
+                            SkeletonBar(width: 150, height: 14)
+                        }
+                        HStack(spacing: 8) {
+                            SkeletonBar(width: 86, height: 14)
+                            SkeletonBar(width: 110, height: 14)
+                        }
                     }
-                    HStack(spacing: 8) {
-                        SkeletonBar(width: 86, height: 14)
-                        SkeletonBar(width: 110, height: 14)
-                    }
+                    .padding(.vertical, 4)
                 }
-                .padding(.vertical, 4)
             } else if displayedSwapRows.isEmpty && (displayedLeaves ?? []).isEmpty {
                 Text("本月没有调班请假")
                     .appFont(size: AppFont.bodySmall)
@@ -503,6 +544,16 @@ struct CalendarView: View {
         .padding(AppStyle.cardPadding)
         .background(AppStyle.surface1)
         .cornerRadius(AppStyle.cardRadius)
+        // 骨架延迟 150ms（1.3.2.006）：加载开始计时、结束立刻消失、消失时取消任务。
+        .onChange(of: isRecordsLoading) { loading in
+            if loading { scheduleRecordsSkeleton() } else { hideRecordsSkeleton() }
+        }
+        .onAppear {
+            if isRecordsLoading { scheduleRecordsSkeleton() }
+        }
+        .onDisappear {
+            hideRecordsSkeleton()
+        }
     }
 
     /// 数据更新时间（1.3.2.005，方案 §9 第四条）：本地缓存最后一次成功取数的时间；
@@ -630,13 +681,17 @@ struct MonthPageView: View {
         snapLoaded = true
     }
 
-    /// 整页的格子（上月补 + 本月 + 下月补，拼满整周）：数据走 store.monthFor（缓存，
-    /// 只算一次）。格子总数恒等于 行数×7（上月补 + 本月 + 下月补正好拼满整周）。
+    /// 整页的格子（上月补 + 本月 + 下月补，拼满整周再补满 42 格）：数据走 store.monthFor
+    ///（缓存，只算一次）。格子总数恒为 42（6 周 × 7），行数恒为 6。
     /// 1.1.4：原来是 LazyVGrid，滑页中预取回来写 @Published、视图重算，
     /// LazyVGrid 懒加载重排、格子错位。改成固定 VStack + HStack：
     /// 每格固定 64pt、7 列写死，格子永远在固定位置。
     /// 1.3.2.004：格子算法抽成静态纯函数——父视图预加载 21 页时调这一份，
     /// 本页兜底也调这一份，不另写一份算法（两份算法迟早对不上）。
+    /// 1.3.2.006（老爷 2026-11-28 12:53 亲口令「行距不一样，你改改我看看吧」）：
+    /// 固定 6 行——补满整周后不到 42 格，再从下月开头多补整周，kind 仍是 .trailing
+    ///（暗色、点按跳到下月，跟现有尾随格一致）。5 行的月多出一行下月开头的暗色日期，
+    /// 这是固定 6 行的正常样子，先让老爷看效果，不要藏起来。
     static func buildGridDays(year: Int, month: Int, store: AppStore) -> [(day: DaySchedule, kind: GridDayKind)] {
         let prev = month == 1 ? (year - 1, 12) : (year, month - 1)
         let next = month == 12 ? (year + 1, 1) : (year, month + 1)
@@ -655,9 +710,20 @@ struct MonthPageView: View {
         let days = DateUtil.daysInMonth(year: year, month: month)
         let remainder = (leading + days) % 7
         let trailing = remainder == 0 ? 0 : 7 - remainder
+        let nextMonth = store.monthFor(year: next.0, month: next.1)
+        var usedTrailing = 0
         if trailing > 0 {
-            let nextMonth = store.monthFor(year: next.0, month: next.1)
             result += (nextMonth.days ?? []).prefix(trailing).map { ($0, GridDayKind.trailing) }
+            usedTrailing = trailing
+        }
+        // 补满 42 格（6 周）：每次多补一周，跳过已用掉的尾随天数。
+        // 常见是 35 格补一周；28 格的月（周一为首日的平年 2 月，如 2027-02）补两周。
+        // 下月至少 28 天，已用最多 6 + 7，取 7 格一定够；guard 是防万一的兜底。
+        while result.count < 42 {
+            let extra = (nextMonth.days ?? []).dropFirst(usedTrailing).prefix(7)
+            guard extra.count == 7 else { break }
+            result += extra.map { ($0, GridDayKind.trailing) }
+            usedTrailing += 7
         }
         return result
     }
@@ -667,10 +733,11 @@ struct MonthPageView: View {
     }
 
     var body: some View {
-        // 1.2.1（老爷 06:57 纠正「固定 6 行」的做法）：总高固定 414pt 不变，
-        // 行距按本月行数自适应——5 行的月松一些（23.5pt）、6 行的月紧凑一些（6pt），
-        // 行数不同但总高一样，整体对齐，5 行的月不再底部空一行。
-        // 关键：行数从快照 snapDays 里算（days.count / 7），快照在滑动中一动不动，
+        // 1.3.2.006（老爷 2026-11-28 12:53 亲口令「行距不一样，你改改我看看吧」）：
+        // 固定 6 行、行距恒定 6pt——以前 5 行月行距 23.5pt、6 行月 6pt，慢拖时两页
+        // 行错位；现在所有月都是 42 格、同一行距，行位置严丝合缝。5 行的月底部多一
+        // 行下月开头的暗色日期（.trailing，跟现有尾随格一样），先让老爷看效果。
+        // 关键：行数从快照 snapDays 里算（days.count / 7，恒为 6），快照在滑动中一动不动，
         // 所以行距在动画中途绝不变；快照 + 防抖换月 + 裁剪三件不变。
         // 周几行已抽到 TabView 外面固定不动，这里只画日期网格。
         // 订阅 payInputsVersion：工资输入到齐时底部统计（三薪 X 天 / 加班 X 天）要重算，
@@ -679,7 +746,7 @@ struct MonthPageView: View {
         let _ = store.payInputsVersion
         // 1.3.2.004：父视图预加载好的格子直接用（21 页窗口内）；窗口外才走快照兜底。
         let days = preloadedDays ?? (snapLoaded ? snapDays : gridDays)
-        // 格子总数恒等于 行数×7（上月补 + 本月 + 下月补正好拼满整周），行数从快照算。
+        // 格子恒为 42 格，行数恒为 6（days.count / 7）；行数从快照算，滑动中不动。
         let weeks = max(1, days.count / 7)
         VStack(spacing: calendarRowSpacing(weeks: weeks)) {
             ForEach(0..<weeks, id: \.self) { w in

@@ -342,6 +342,18 @@ extension View {
     }
 }
 
+/// 按压反馈（1.3.2.006，滑动与切换动效整改方案）：按下时缩放 0.96 + 底色微暗，
+/// 100ms ease-out，松开恢复。只用在月份箭头、今天 pill、班组 pill 这类小按钮上；
+/// 日历格点按不动，热区大小也不动（.005 已做 48pt）。
+struct PressableButtonStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
+            .brightness(configuration.isPressed ? -0.06 : 0)
+            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+    }
+}
+
 /// 骨架占位块（1.3.2.005，方案 §4.4 列表加载、§5.4 弱网与离线）：
 /// 加载时按真实布局排的灰色块，不转圈、不闪烁；数据到了直接换真内容。
 /// 灰用 surface2（浅 #E9E9EE / 深 #1A1A1B），两端都看得见、不刺眼。
