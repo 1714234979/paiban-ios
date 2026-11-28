@@ -75,28 +75,9 @@ struct PayView: View {
         }
     }
 
-    /// 点“今天”：切回当月（工资页没有日期格要闪，只跳页）。
-    private func goToToday() {
+    /// 点“本月”：切回当月（工资页没有日期格要闪，只跳页）。
+    private func goToCurrentMonth() {
         goToMonth(currentMonthIndex)
-    }
-
-    /// 右下角悬浮「今天」按钮（2026-11-28 老爷亲口令）：点按回到当月（走原来的 goToToday）。
-    /// 样式和排班页的悬浮按钮、左下角收起的底栏小圆球对称：同尺寸（48pt 圆）、
-    /// 同风格（毛玻璃圆 + 阴影），放在底栏上方、安全区之上，右边留 16pt。
-    /// 当月不显示（已经在当月就不用回，免得成个死按钮）。
-    private var todayFloatingButton: some View {
-        Button(action: goToToday) {
-            Text("今天")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(.primary)
-                .frame(width: 48, height: 48)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().stroke(Color.primary.opacity(0.08), lineWidth: 0.5))
-                .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel("回到今天")
-        .transition(.scale(scale: 0.85).combined(with: .opacity))
     }
 
     /// 减弱动态效果（重做，1.3.2.008）：月份切换只做 0.15s 淡入，不做位移、不做数字滚动。
@@ -162,10 +143,9 @@ struct PayView: View {
                     monthBreakdown(year: ym.year, month: ym.month)
                     syncTimeFooter
                 }
-                // 给右下角悬浮「今天」按钮留出滚动余量（Gemini 1.3.2.011）：
-                // 按钮改成 .overlay 浮在上面，不再用 safeAreaInset 挤压分页器高度，
-                // 底部垫 76pt，工资卡的关键内容不会被它盖住。
-                .padding(.bottom, 76)
+                // 底部留白（1.3.2.012）：右下角悬浮「今天」按钮已挪到导航栏，
+                // 这里不用再给它留 76pt；留 24pt 让明细底部在底栏上方有呼吸余量。
+                .padding(.bottom, 24)
                 // 底部留白（重做，老爷 2026-11-28 14:36 亲口令）：1.3.2.006 加的 88pt
                 // 删掉——那是给自定义底栏留的，底栏已改回原生 TabView（iOS 26+ 液态玻璃 +
                 // 往下滚自动收起），安全区由原生底栏自动处理，不再手动垫大额留白。
@@ -257,8 +237,8 @@ struct PayView: View {
         } else {
         VStack(spacing: 16) {
             // 月份标题栏（重做）：共用的 MonthHeaderView，跟排班页同一套。
-            // 标题走 titleState（过半就换），“今天”按钮不在标题栏里（2026-11-28 老爷亲口令：
-            // 改成右下角悬浮按钮，见下面 todayFloatingButton；标题行只剩 < 标题 >）。
+            // 标题走 titleState（过半就换），“本月”按钮不在标题栏里（1.3.2.012：
+            // 挪到导航栏右上角做胶囊；标题行只剩 < 标题 >）。
             ObservedMonthHeaderView(
                 state: titleState,
                 onPrevious: { goToMonth(pageIndex - 1) },
@@ -290,25 +270,34 @@ struct PayView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(AppStyle.pageBackground)
-        // 右下角悬浮「今天」按钮（2026-11-28 老爷亲口令）：放在底栏上方、安全区之上，
-        // 右边留 16pt；当月不显示。1.3.2.011（Gemini）：改用 overlay 浮在底栏安全区上方，
-        // 显隐「今天」按钮不再改变 ScrollView 视口高度，杜绝位置漂移；
-        // 每页 ScrollView 底部留了 76pt 内边距，内容不会被它盖住。
-        .overlay(alignment: .bottomTrailing) {
-            Group {
-                if pageIndex != currentMonthIndex {
-                    todayFloatingButton
-                        .padding(.trailing, 16)
-                        .padding(.bottom, 12)
-                }
-            }
-            .animation(reduceMotion ? .easeInOut(duration: 0.15) : .snappy(duration: 0.25), value: pageIndex == currentMonthIndex)
-        }
         // 导航栏毛玻璃隔离：和排班页同一毛病（黑卡文字透过导航栏、被栏底边切一半），
         // 改回系统原生 .automatic（排班页见 CalendarView；设置页见 SettingsView）。
         // 工资页之前没写 toolbarBackground，走的是系统默认（就是 .automatic），
         // 这里显式写出来，和两边保持一致、以后改一处就能对上。
         .toolbarBackground(.automatic, for: .navigationBar)
+        // 1.3.2.012（Gemini 2026-11-28 逐帧复核、老爷转来）：右下角悬浮「今天」按钮
+        // 挪到导航栏右上角，做成轻量「本月」胶囊——悬浮圆钮正好压住「科室绩效」的
+        // 「可改」，导航栏右上角现在是空的，放这里既不挡列表、底部 TabBar 附近也清爽。
+        // 工资页按月统计，叫「本月」比「今天」准；当月不显示（已经在本月就不用回）。
+        // 另注：Gemini 说它“半秒就自己消失、是真 Bug”——婉儿逐帧核过，f_21/22/23/28/29
+        // 里它一直都在，所谓两次“消失”都是老爷切回排班 Tab，不是按钮自己没了；
+        // 挪位置只为不挡「可改」，不是修消失，别再当 Bug 追。
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                if pageIndex != currentMonthIndex {
+                    Button(action: goToCurrentMonth) {
+                        Text("本月")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                            .background(AppStyle.navyAdaptive, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("回到本月")
+                }
+            }
+        }
         // 滑到哪页，Store 就跟到哪月（setPayMonth 只改月份、只读缓存，
         // 1.3.2.011：落定那帧不同步算，未命中 pay 置空、后台 prewarm 算好再换）；
         // 切月时把敞着的编辑框收起（那是上个月的数，别留在新月上误触）。
@@ -623,14 +612,15 @@ struct PayView: View {
     /// 想改就点「可改」徽标（小目标，横滑起止很难同时落在它上面），误触基本杜绝。
     /// 1.1.4：TabView 滑页时手指从行上划过也不会再打开编辑框（行本身不是按钮，
     /// TabView 的横滑手势优先），这条保留、继续有效。
+    /// 1.3.2.012（Gemini 2026-11-28 逐帧复核）：「可改」徽标放金额左边——
+    /// 原来放金额右边，徽标把金额往左顶了一截，金额和上下没徽标的行对不齐；
+    /// 放左边后金额全部贴右沿对齐，徽标仍是同一按钮、点法不变。
     private func editableRow(title: String, valueText: String, field: PayRecordField, currentValue: String, placeholder: String) -> some View {
         VStack(spacing: 0) {
-            HStack {
+            HStack(spacing: 8) {
                 Text(title)
                     .foregroundColor(.secondary)
                 Spacer()
-                Text(valueText)
-                    .monospacedDigit()
                 Button {
                     openEdit(field, currentValue: currentValue)
                 } label: {
@@ -646,6 +636,8 @@ struct PayView: View {
                         .touchTarget(vertical: 14, horizontal: 4)
                 }
                 .buttonStyle(.plain)
+                Text(valueText)
+                    .monospacedDigit()
             }
             .appFont(size: AppFont.bodySmall)
             .padding(.vertical, 5)

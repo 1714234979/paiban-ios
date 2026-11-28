@@ -16,6 +16,12 @@ struct SettingsView: View {
     @State private var pendingChannelVersion: String?
     @State private var showChannelSwitchConfirm = false
     @State private var isFetchingChannelVersion = false
+    /// 渠道胶囊滑动（1.3.2.012）：和班组胶囊一样，选中底色用 matchedGeometryEffect 在两个选项间滑动。
+    @Namespace private var channelCapsuleNamespace
+    /// 两渠道最新版号（1.3.2.012）：进设置页时后台各拉一次，挂在选项下面；拉不到就不显示，不报错。
+    @State private var channelVersions: [String: String] = [:]
+    /// 减弱动态效果（1.3.2.012）：胶囊不滑动，直接跳。
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     // 图一新增行（1.2.7.001）：班次推送提醒 / 去除广告。
     // 1.2.7.002：日历只留月视图，「日历默认展开整月」开关已删。
@@ -257,8 +263,10 @@ struct SettingsView: View {
                         channelButton(title: "正式版", channel: "stable")
                         channelButton(title: "内测版", channel: "beta")
                     }
-                    .background(Color(.systemGray5))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .background(AppStyle.surface1)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    // 1.3.2.012：胶囊滑动只绑在装的渠道这个状态上；减弱动态效果时不滑动。
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: UpdateChecker.installedChannel)
                     Text("内测版只推给内测人员；切到内测后，下次打开 App 也按内测查。")
                         .font(.caption)
                         .foregroundColor(.secondary)
@@ -357,6 +365,13 @@ struct SettingsView: View {
                 let status = await ShiftReminder.authorizationStatus()
                 if status == .denied { showReminderDeniedAlert = true }
             }
+            // 1.3.2.012：两渠道最新版号各拉一次，挂在切换选项下面；拉不到就不显示。
+            async let stableInfo = store.fetchVersionForChannel("stable")
+            async let betaInfo = store.fetchVersionForChannel("beta")
+            var versions: [String: String] = [:]
+            if let info = await stableInfo { versions["stable"] = info.latestVersion }
+            if let info = await betaInfo { versions["beta"] = info.latestVersion }
+            channelVersions = versions
         }
     }
 
@@ -478,31 +493,53 @@ struct SettingsView: View {
     /// 会被误标成已选中，点它 guard 直接 return，看着就是点不动——003/007
     /// 修的点按 mechanics 本来就没坏，真正拦住点击的是这个 guard。
     /// 装着内测版（四段号）时内测版是已选中、正式版一定点得动；装着正式版时反过来。
+    /// 1.3.2.012（老爷 2026-11-28 亲口令：切换 UI 再优化 + 加切换动画）：
+    /// 选中态改成和班组胶囊一样的深色滑动胶囊（matchedGeometryEffect，装的渠道
+    /// 变了就滑过去）；每个选项下面挂该渠道最新版号（进设置页时后台拉一次），
+    /// 点下去先给轻冲击触感，再弹确认框。选中态仍按装的版本定（009 的规矩不动，
+    /// 胶囊不会指到没装的渠道上）；.borderless 也不能动（007 的教训，List 行里
+    /// 别的 ButtonStyle 接不到点击）。
     private func channelButton(title: String, channel: String) -> some View {
         let installedChannel = UpdateChecker.installedChannel
         let selected = installedChannel == channel
         let fetching = isFetchingChannelVersion && !selected
         return Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
             guard channel != installedChannel, !isFetchingChannelVersion else { return }
             Task { await askChannelSwitch(to: channel) }
         } label: {
-            HStack(spacing: 6) {
-                if fetching {
-                    ProgressView()
-                        .controlSize(.small)
+            VStack(spacing: 2) {
+                HStack(spacing: 6) {
+                    if fetching {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                    Text(title)
+                        .font(.subheadline)
+                        .bold(selected)
                 }
-                Text(title)
-                    .font(.subheadline)
-                    .bold(selected)
-                    .foregroundColor(selected ? .primary : .secondary)
+                if let version = channelVersions[channel] {
+                    Text(version)
+                        .font(.caption2)
+                        .foregroundColor(selected ? .white.opacity(0.75) : .secondary)
+                }
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
-            .background(selected ? AppStyle.surface1 : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            // 1.3.2.005（方案 §3.3）：渠道按钮只有约 35pt 高，透明留白扩到 48pt；
-            // 只加竖向留白，不动两个按钮之间的横向间距。
-            .touchTarget(vertical: 7)
+            .background(
+                Group {
+                    if selected {
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(AppStyle.navyAdaptive)
+                            .matchedGeometryEffect(id: "channelCapsule", in: channelCapsuleNamespace)
+                    } else {
+                        Color.clear
+                    }
+                }
+            )
+            .foregroundColor(selected ? .white : .primary)
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            // 两行按钮本身已有约 50pt 高，1.3.2.005 的 touchTarget 透明留白不用再加。
         }
         .buttonStyle(.borderless)
         .disabled(isFetchingChannelVersion)
@@ -1442,6 +1479,13 @@ struct ChangelogView: View {
     var body: some View {
         Form {
             Section {
+                changelog(version: "1.3.2.012（内测）", items: [
+                    "排班页黑卡改成左右分栏：左边日期班次倒计时，右边今日已挣放大当主角；休息天高度也不变了",
+                    "排班页顺序改成标题→黑卡→日历→班组选择，和工资页同款顺序，切 Tab 标题和黑卡不再跳；班组切换加了淡出淡入，胶囊滑过去不再变形",
+                    "龙抬头在日期格里改成「龙头」，不再竖排三行顶到班次；排班页底部留了白，统计行不再贴着底栏",
+                    "工资页返回按钮挪到导航栏右上角，叫「本月」，不再挡「科室绩效」的「可改」；「可改」挪到金额左边，金额全部贴右沿对齐",
+                    "设置页内测/正式版切换改成深色滑动胶囊，两个选项下面挂着各自最新版号，点下去有轻震动",
+                ])
                 changelog(version: "1.3.2.011（内测）", items: [
                     "黑卡被切的根因修了：分页器改按实际高度排版，「今天」按钮改成悬浮、不再挤压页面；黑卡标签和数字完整显示",
                     "工资页切月不卡了：只读本地缓存，算数和写盘都挪到后台；进 App 就把前后 10 个月工资先预热好",

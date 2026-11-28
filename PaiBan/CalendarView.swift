@@ -30,6 +30,10 @@ struct CalendarView: View {
     /// 今天格轻高亮（1.3.2.007，iOS.docx §3.2）：点“今天”后目标格一次微闪（边框/底色，不放大）。
     @State private var todayFlashDate: String? = nil
     @State private var todayFlashTask: Task<Void, Never>? = nil
+    /// 班组切换淡出淡入（1.3.2.012，老爷 2026-11-28 亲口令：只有进入动画、没有出去的动画）：
+    /// 换班组时日历内容先淡出、数据换好再淡入，和胶囊滑入对称；减弱动态效果时不淡，直接换。
+    @State private var teamFade = false
+    @State private var teamFadeTask: Task<Void, Never>? = nil
     /// 班组胶囊滑动（1.3.2.007，iOS.docx §3.2）：选中底色用 matchedGeometryEffect 在四个 pill 间滑动。
     @Namespace private var teamCapsuleNamespace
     /// 减弱动态效果（重做，1.3.2.008）：月份切换只做 0.15s 淡入，不做位移、不做数字滚动。
@@ -201,16 +205,27 @@ struct CalendarView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                headerCard
-                teamSwitcher
+                // 1.3.2.012（老爷 2026-11-28 亲口令）：标题放最上、黑卡放标题下、
+                // 班组选择放日历下面——和工资页同款顺序（标题→黑卡→内容），
+                // 两页标题与黑卡同高，切 Tab 不再有割裂感。
                 monthNavigator
+                    .padding(.top, 8)
+                headerCard
+                    .opacity(teamFade ? 0 : 1)
                 // 1.2.7.002：日历只留月视图（周视图已删）。
                 monthPager
+                    .opacity(teamFade ? 0 : 1)
+                teamSwitcher
                 summaryLine
+                    .opacity(teamFade ? 0 : 1)
                 recordsSection
+                    .opacity(teamFade ? 0 : 1)
                 syncTimeFooter
             }
             .padding(.horizontal, 16)
+            // 底部留白（1.3.2.012，Gemini 2026-11-28 逐帧复核）：滑到底时统计卡和同步时间
+            // 在底栏上方留 24pt 呼吸余量，不贴着底栏；统计行本身滑一下就能完整露出。
+            .padding(.bottom, 24)
             // 底部留白（重做，老爷 2026-11-28 14:36 亲口令）：1.3.2.006 加的 88pt 删掉——
             // 那是给自定义底栏留的，底栏已改回原生 TabView（iOS 26+ 液态玻璃），
             // 安全区由原生底栏自动处理，不再手动垫大额留白。
@@ -335,6 +350,17 @@ struct CalendarView: View {
             }
         }
         .onChange(of: store.viewTeam) { _ in
+            // 1.3.2.012：先淡出（0.15s）再换数据、150ms 后淡入——出去的动画和胶囊滑入对称。
+            // 减弱动态效果时不淡，直接换；连点换班组时取消上一次淡入，只淡最后一次。
+            if !reduceMotion {
+                withAnimation(.easeInOut(duration: 0.15)) { teamFade = true }
+                teamFadeTask?.cancel()
+                teamFadeTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 150_000_000)
+                    guard !Task.isCancelled else { return }
+                    withAnimation(.easeInOut(duration: 0.2)) { teamFade = false }
+                }
+            }
             // 1.3.2.004：换班组立刻按新班组重算 21 页（monthFor 按新班组算），再后台刷新。
             preloadAround(pageIndex, forceRebuild: true)
             Task { await store.refreshMonth() }
@@ -354,29 +380,36 @@ struct CalendarView: View {
     // MARK: 头部
 
     /// 顶栏黑框：今天的年月日、周几、什么班（切到别的月份也照样显示今天）。
-    /// 1.2.7：下面再加两行实时行——倒计时 + 已挣/预估（只那一小块每秒刷新，不带动整页）。
+    /// 1.3.2.012（老爷 2026-11-28 亲口令：黑框右半边空着）：左右分栏——
+    /// 左边日期 + 班次 + 倒计时，右边今日已挣当主角（小字标签 + 大号金额 + 预估）。
+    /// 休息/请假没钱可挣、没工资权限也不显示，右列直接不占位；左列恒三行，
+    /// 上班/休息黑卡高度基本不变。倒计时和金额各走自己的 TimelineView 每秒刷新，
+    /// 不带动整页（1.2.7 的隔离还在）。
     private var headerCard: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(todayDateLine)
-                .appFont(size: AppFont.titleLarge, weight: 700)
-                .fadeIn()
-                .foregroundColor(.white)
-            Text(todayShiftLine)
-                .appFont(size: AppFont.bodySmall)
-                .fadeIn()
-                .foregroundColor(AppStyle.whiteText(opacity: 0.75))
-            if let day = store.todaySchedule {
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(todayDateLine)
+                    .appFont(size: AppFont.titleLarge, weight: 700)
+                    .fadeIn()
+                    .foregroundColor(.white)
+                Text(todayShiftLine)
+                    .appFont(size: AppFont.bodySmall)
+                    .fadeIn()
+                    .foregroundColor(AppStyle.whiteText(opacity: 0.75))
+                if let day = store.todaySchedule {
+                    let inputs = store.todayEstimateInputs
+                    TodayStatusLine(day: day, earlyRate: inputs.earlyRate, midRate: inputs.midRate, inputs: inputs.inputs)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            if let day = store.todaySchedule, store.payAccess {
                 let inputs = store.todayEstimateInputs
-                TodayLiveRow(day: day, earlyRate: inputs.earlyRate, midRate: inputs.midRate, inputs: inputs.inputs, showMoney: store.payAccess)
-                    .transition(.opacity)
+                TodayMoneyHero(day: day, earlyRate: inputs.earlyRate, midRate: inputs.midRate, inputs: inputs.inputs)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .background(AppStyle.navyAdaptive)
         .cornerRadius(16)
-        // 1.3.2.004（老爷 2026-11-28 11:39 亲口定）：休息的班没有预计工资，黑卡只有两行、
-        // 上班的班有四行——切班时黑卡高度是慢慢变的，不再一下子跳（下面的日历跟着顺滑地挪）。
         // 1.3.2.007：曲线改成 0.25s ease-in-out（iOS.docx §3.2/§4.1），行为不变。
         .animation(.easeInOut(duration: 0.25), value: store.viewTeam)
     }
@@ -436,9 +469,12 @@ struct CalendarView: View {
                         // 只加竖向留白，不动四个 pill 之间的横向间距。
                         .touchTarget(vertical: 6)
                 }
-                // 1.3.2.007：按压反馈是新版 PressableButtonStyle（0.97 + opacity 0.85）；
+                // 1.3.2.012（Gemini 2026-11-28 逐帧复核）：按压反馈改成只压暗不缩放
+                //（DayCellPressStyle，opacity 0.75）——原来 PressableButtonStyle 的 0.97
+                // 缩放和 matchedGeometryEffect 的胶囊滑动同一帧走，胶囊在滑过去的同时
+                // 被压扁、抬手又弹回来，看着就是切换变形；只压暗，胶囊滑得干净。
                 // 热区不动（.005 已做 48pt）。
-                .buttonStyle(PressableButtonStyle())
+                .buttonStyle(DayCellPressStyle())
             }
         }
         // 胶囊滑动只绑在 viewTeam 这个状态上（iOS.docx §4.1：动画绑具体状态，不绑父容器）；
@@ -899,7 +935,8 @@ struct MonthPageView: View {
     private static func makeGridDay(_ day: DaySchedule, kind: GridDayKind, statutory: [String: String], store: AppStore) -> GridDay {
         let extra = ChineseCalendar.info(for: day.date)
         let lunarRaw = extra.lunarText
-        let lunarText = (lunarRaw.count == 3 && lunarRaw.hasSuffix("节")) ? String(lunarRaw.dropLast()) : lunarRaw
+        // 1.3.2.012：龙抬头→龙头（见 displayLunarText 的注释），两处同步改。
+        let lunarText = lunarRaw == "龙抬头" ? "龙头" : ((lunarRaw.count == 3 && lunarRaw.hasSuffix("节")) ? String(lunarRaw.dropLast()) : lunarRaw)
         let holidayMark: String?
         if let h = store.holiday(for: day.date) {
             switch h.kind {
@@ -1183,11 +1220,15 @@ struct DayCell: View {
     ///（劳动节→劳动、儿童节→儿童、妇女节→妇女、教师节→教师、国庆节→国庆、
     /// 圣诞节→圣诞、情人节→情人、愚人节→愚人、万圣节→万圣、元宵节→元宵、
     /// 中元节→中元）。本来就两个字的（元旦、清明、端午、中秋、春节、除夕）不动；
-    /// 节气名（冬至、小寒等）没有「节」字，也不动。只改这里的显示，
+    /// 节气名（冬至、小寒等）没有「节」字，也不动。
+    /// 1.3.2.012：龙抬头是唯一不带「节」的三字节日，竖排三行会顶到下面的班次 pill，
+    /// 显示成「龙头」（龙头节的别名），和其余两字节日齐平。只改这里的显示，
     /// 不动 ChineseCalendar 的原始数据（当天详情等别处不受影响）。
+    /// 预计算在 makeGridDay 里也有一份同样的映射，两处同步改。
     private var displayLunarText: String {
         if let pre = precomputedLunarText { return pre }
         let t = extra.lunarText
+        if t == "龙抬头" { return "龙头" }
         if t.count == 3 && t.hasSuffix("节") { return String(t.dropLast()) }
         return t
     }
@@ -1353,16 +1394,14 @@ struct DayCell: View {
     /// 三薪角标已改成日期数字右侧的小橙点（见 dateRow），这里不再留 capsule 版。
 }
 
-/// 今日倒计时 + 实时工资（1.2.7）：只这个小视图每秒刷新（TimelineView 1 秒一格），不带动整页。
-/// 上班前：距上班 + 已挣 ¥0.00 · 预估 ¥XXX；上班中：距下班 + 已挣实时涨 · 预估 ¥XXX；
-/// 下班后：今日已下班 + 今日已挣 ¥XXX；休息/请假：今日休息/今日请假（钱那行不显示）。
-private struct TodayLiveRow: View {
+/// 今日倒计时（1.2.7）：只这一行每秒刷新（TimelineView 1 秒一格），不带动整页。
+/// 上班前：距上班 HH:MM:SS；上班中：距下班；双班间隔：距下一班；下班后：今日已下班；
+/// 休息/请假：今日休息/今日请假。
+private struct TodayStatusLine: View {
     let day: DaySchedule
     let earlyRate: Double
     let midRate: Double
     let inputs: PayCalc.DayEstimateInputs
-    /// 钱显隐（第 29 条补充规矩）：只有开了工资权限才显示「已挣 · 预估」那行；倒计时不是钱，一直显示。
-    let showMoney: Bool
 
     var body: some View {
         TimelineView(.periodic(from: Date(), by: 1)) { context in
@@ -1372,19 +1411,12 @@ private struct TodayLiveRow: View {
                 shift: day.shift, onLeave: day.onLeave == true, day: today, now: now,
                 earlyRate: earlyRate, midRate: midRate, inputs: inputs
             )
-            VStack(alignment: .leading, spacing: 2) {
-                // 2026-11-28 慢滑卡顿修：倒计时每秒重画一次，上面挂 .fadeIn 等于每秒
-                // 多走一次离屏模糊；字本来就是等宽、宽度不动，模糊入场效果在每秒刷新的
-                // 文字上根本看不出来，直接去掉，只留等宽数字。
-                Text(countdownText(state: state, now: now))
-                    .appFont(size: AppFont.bodySmall).monospacedDigit()
-                    .foregroundColor(.white)
-                if let money = moneyText(state: state) {
-                    Text(money)
-                        .appFont(size: AppFont.bodySmall).monospacedDigit()
-                        .foregroundColor(AppStyle.whiteText(opacity: 0.75))
-                }
-            }
+            // 2026-11-28 慢滑卡顿修：倒计时每秒重画一次，上面挂 .fadeIn 等于每秒
+            // 多走一次离屏模糊；字本来就是等宽、宽度不动，模糊入场效果在每秒刷新的
+            // 文字上根本看不出来，直接去掉，只留等宽数字。
+            Text(countdownText(state: state, now: now))
+                .appFont(size: AppFont.bodySmall).monospacedDigit()
+                .foregroundColor(.white)
         }
     }
 
@@ -1412,25 +1444,60 @@ private struct TodayLiveRow: View {
         let s = total % 60
         return String(format: "%02d:%02d:%02d", h, m, s)
     }
+}
 
-    /// 钱那行：上班中/上班前显示已挣 + 预估；下班后显示今日已挣；休息/请假不显示。
-    /// 三薪那天末尾带「（三薪）」，加班那天带「（加班）」。
-    /// 没工资权限不显示这行（第 29 条补充规矩）。
-    private func moneyText(state: PayCalc.TodayLiveState) -> String? {
-        guard showMoney else { return nil }
-        // 第 40 条：三薪/加班以后缀看当日种类（不是法定日就一定是三薪——超额的法定日转加班）。
+/// 今日已挣大号金额（1.3.2.012）：黑卡右列当主角——上面小字标签、中间大号金额、
+/// 下面预估一行；每秒刷新，只这一小块，不带动整页。
+/// 上班中/上班前显示已挣 + 预估；下班后显示今日已挣；休息/请假没钱可挣，
+/// 这一列直接不渲染（headerCard 里不放它）。
+/// 三薪那天标签/预估行带「（三薪）」，加班那天带「（加班）」。
+private struct TodayMoneyHero: View {
+    let day: DaySchedule
+    let earlyRate: Double
+    let midRate: Double
+    let inputs: PayCalc.DayEstimateInputs
+
+    var body: some View {
+        TimelineView(.periodic(from: Date(), by: 1)) { context in
+            let now = context.date
+            let today = DateUtil.calendar.startOfDay(for: now)
+            let state = PayCalc.todayLiveState(
+                shift: day.shift, onLeave: day.onLeave == true, day: today, now: now,
+                earlyRate: earlyRate, midRate: midRate, inputs: inputs
+            )
+            if let money = moneyParts(state: state) {
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(money.label)
+                        .appFont(size: AppFont.caption)
+                        .foregroundColor(AppStyle.whiteText(opacity: 0.75))
+                    Text(money.amount)
+                        .appFont(size: 24, weight: 700).monospacedDigit()
+                        .foregroundColor(.white)
+                    if let sub = money.sub {
+                        Text(sub)
+                            .appFont(size: AppFont.caption)
+                            .foregroundColor(AppStyle.whiteText(opacity: 0.75))
+                    }
+                }
+            }
+        }
+    }
+
+    /// 金额三件套：标签 / 大号金额 / 预估小字（下班后没预估、休息没钱，返回 nil）。
+    /// 第 40 条：三薪/加班以后缀看当日种类（不是法定日就一定是三薪——超额的法定日转加班）。
+    private func moneyParts(state: PayCalc.TodayLiveState) -> (label: String, amount: String, sub: String?)? {
         let suffix = inputs.isTriple ? "（三薪）" : (inputs.isOvertime ? "（加班）" : "")
         switch state {
         case .rest:
             return nil
         case .before(_, let total):
-            return "已挣 ¥0.00 · 预估 \(MoneyUtil.money(total))\(suffix)"
+            return ("已挣", MoneyUtil.money(0), "预估 \(MoneyUtil.money(total))\(suffix)")
         case .working(_, let earned, let total):
-            return "已挣 \(MoneyUtil.money(earned)) · 预估 \(MoneyUtil.money(total))\(suffix)"
+            return ("已挣", MoneyUtil.money(earned), "预估 \(MoneyUtil.money(total))\(suffix)")
         case .between(_, let earned, let total):
-            return "已挣 \(MoneyUtil.money(earned)) · 预估 \(MoneyUtil.money(total))\(suffix)"
+            return ("已挣", MoneyUtil.money(earned), "预估 \(MoneyUtil.money(total))\(suffix)")
         case .done(let total):
-            return "今日已挣 \(MoneyUtil.money(total))\(suffix)"
+            return ("今日已挣\(suffix)", MoneyUtil.money(total), nil)
         }
     }
 }
