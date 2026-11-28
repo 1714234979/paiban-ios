@@ -60,7 +60,9 @@ struct PayView: View {
     /// 横滑一来回再多约 30pt），黑卡在它里面就被顶出可视区、顶部横切。
     /// 每页记一个偏移，落定时按阈值纠回顶部（见 onChange）；用户自己滚下去
     /// 超过 120pt 的不纠（那是他在看下面，不是漂移）。
-    @State private var payPageScrollPoints: [Int: CGPoint] = [:]
+    /// 注意：.scrollPosition(point:) 是 iOS 18 才有的 API，部署目标 17.0 编不过；
+    /// 这里用 iOS 17 的 .scrollPosition(id:) + ScrollPosition（里面有 .point）。
+    @State private var payPageScrollPositions: [Int: ScrollPosition] = [:]
     /// 月明细骨架延迟 150ms 的在途任务（1.3.2.006）：加载开始后 150ms 再现骨架，
     /// 数据快回来就不闪；加载结束或视图消失时取消。
     @State private var paySkeletonTask: Task<Void, Never>?
@@ -145,13 +147,13 @@ struct PayView: View {
     private func yearMonth(from index: Int) -> (year: Int, month: Int) { (index / 12, index % 12 + 1) }
 
     /// 某页竖滚 ScrollView 的 scrollPosition 绑定（1.3.2.010）：
-    /// 没记过就是 nil（不控，默认 0）；滚过就记下来，落定时按阈值纠。
-    /// 绑定的值是 ScrollView 真实的 contentOffset（双向回流），漂移改了偏移，
-    /// 这里也跟着变，落定时写回 .zero 才能真把偏移纠回去。
-    private func scrollPointBinding(for offset: Int) -> Binding<CGPoint?> {
+    /// 没记过就是空位置（不控，默认 0）；滚过就记下来，落定时按阈值纠。
+    /// 绑定的值是 ScrollView 真实的滚动位置（双向回流），漂移改了偏移，
+    /// 这里也跟着变，落定时写回顶部才能真把偏移纠回去。
+    private func scrollPointBinding(for offset: Int) -> Binding<ScrollPosition> {
         Binding(
-            get: { payPageScrollPoints[offset] },
-            set: { payPageScrollPoints[offset] = $0 ?? .zero }
+            get: { payPageScrollPositions[offset] ?? ScrollPosition() },
+            set: { payPageScrollPositions[offset] = $0 }
         )
     }
 
@@ -185,7 +187,7 @@ struct PayView: View {
             .contentMargins(.top, 0)
             // 每页竖滚位置记下来（1.3.2.010）：落定时按阈值纠回顶部（见 onChange），
             // 漂移再也留不到静止帧上。
-            .scrollPosition(point: scrollPointBinding(for: offset))
+            .scrollPosition(id: scrollPointBinding(for: offset))
             // 1.3.0.013：滚动指示条常显（老爷 19:24 说「没有滑动框」）——.visible 没用，
             // 画廊实拍证明它根本不画出来，改走自绘滑块 AlwaysVisibleScrollIndicator。
             .modifier(AlwaysVisibleScrollIndicator())
@@ -355,11 +357,11 @@ struct PayView: View {
             // 会漂移（实测静止约 42pt、横滑一来回再多约 30pt），不纠就留在静止帧上。
             // 只纠小偏移（< 120pt，漂移的量级）：用户自己滚下去在看下面的不碰，
             // 他的位置留着。纠正不做动画，瞬间回顶（不然落定后内容还往下出溜一下）。
-            if (payPageScrollPoints[newIndex]?.y ?? 0) < 120 {
+            if (payPageScrollPositions[newIndex]?.point?.y ?? 0) < 120 {
                 var transaction = Transaction()
                 transaction.disablesAnimations = true
                 withTransaction(transaction) {
-                    payPageScrollPoints[newIndex] = .zero
+                    payPageScrollPositions[newIndex] = ScrollPosition(point: .zero)
                 }
             }
             // 1.3.2.004：落到哪月就把前后 10 个月的工资提前算好，滑过去直接显示。
