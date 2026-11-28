@@ -66,11 +66,15 @@ struct BetaChannelVersions: Codable, Equatable {
 
 /// App 内更新检查器（可复用、无界面依赖）。
 /// 流程：启动后（服务器连通时）调一次版本清单 → 语义化版本比较 →
-/// 有新版且今天没点过「稍后」就返回记录，由调用方弹原生提示。
+/// 有新版且不是点过「稍后」的那个版本就返回记录，由调用方弹原生提示。
 /// 检查失败（没网、服务器不通）一律静默，返回 nil，不弹错。
 enum UpdateChecker {
 
-    private static let dismissedDateKey = "paiban.updateDismissedDate"
+    /// 点过「稍后」的那个版本号（1.3.2.015 起按版本记，不按日期记）。
+    /// 旧版按日期记（paiban.updateDismissedDate）：点一次「稍后」，当天再有新版
+    /// 也不弹——老爷一天更新好几次，新版当天就收不到提示（2026-11-28 他报的）。
+    /// 改成按版本记：只对点过「稍后」的那个版本不再弹，出了更新的版本照样弹。
+    private static let dismissedVersionKey = "paiban.updateDismissedVersion"
 
     /// 当前版本：Bundle 的 CFBundleShortVersionString（Info.plist 里 1.1.1）。
     static var currentVersion: String {
@@ -141,15 +145,16 @@ enum UpdateChecker {
         return (parts, comps.count > 1 ? String(comps[1]) : nil)
     }
 
-    /// 今天是不是已经点过「稍后」。
-    static var dismissedToday: Bool {
-        let today = DateUtil.string(from: Date())
-        return UserDefaults.standard.string(forKey: dismissedDateKey) == today
+    /// 这个版本是不是已经点过「稍后」。
+    static func isDismissed(version: String) -> Bool {
+        UserDefaults.standard.string(forKey: dismissedVersionKey) == version
     }
 
-    /// 点「稍后」：记下当天日期，当天不再弹。
-    static func markDismissedToday() {
-        UserDefaults.standard.set(DateUtil.string(from: Date()), forKey: dismissedDateKey)
+    /// 点「稍后」：记下这个版本号，只对它不再弹；出了更新的版本照样弹。
+    /// 旧的日期记录（paiban.updateDismissedDate）顺手清掉，不再用。
+    static func markDismissed(version: String) {
+        UserDefaults.standard.set(version, forKey: dismissedVersionKey)
+        UserDefaults.standard.removeObject(forKey: "paiban.updateDismissedDate")
     }
 
     /// 查更新的结果（1.3.0.012）：必须区分「确实没新版」和「查失败了」——
@@ -206,11 +211,17 @@ enum UpdateChecker {
     /// 1.3.0.012：光问对线还不够——内测线还要服务端按认证换 latestVersion 才回内测版号，
     /// 请求没带有效 session 时服务端照旧回正式版 1.3.0，弹窗还是不弹。这次内测线直接读
     /// 回包里公开的 beta.ios（见 offeredVersion），不再依赖认证。
+    /// 1.3.2.015：先查再比——「稍后」按版本记：只对点过「稍后」的那个版本不再弹，
+    /// 出了更新的版本照样弹。旧版是先看日期、当天点过就直接不查，新版当天收不到。
     static func checkAfterLaunch(api: APIClient) async -> CheckResult {
-        guard !dismissedToday else { return .upToDate }
         do {
             let info = try await api.fetchVersion(channel: installedChannel)
-            return evaluate(info: info)
+            let result = evaluate(info: info)
+            if case .updateAvailable(let offered) = result,
+               isDismissed(version: offered.latestVersion) {
+                return .upToDate
+            }
+            return result
         } catch {
             AppLogger.shared.log("查更新失败：\(error.localizedDescription)", tag: "Update")
             return .failed

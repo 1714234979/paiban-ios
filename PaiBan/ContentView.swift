@@ -186,11 +186,11 @@ struct ContentView: View {
                         openDownloadURL(info)
                     }
                     Button("稍后", role: .cancel) {
-                        store.dismissUpdateForToday()
+                        store.dismissUpdate()
                     }
                 } else {
                     Button("知道了", role: .cancel) {
-                        store.dismissUpdateForToday()
+                        store.dismissUpdate()
                     }
                 }
             } message: {

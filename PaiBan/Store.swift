@@ -1989,9 +1989,12 @@ final class AppStore {
         }
     }
 
-    /// 点「稍后」：当天不再弹。
-    func dismissUpdateForToday() {
-        UpdateChecker.markDismissedToday()
+    /// 点「稍后」/「知道了」：只对当前弹的这个版本不再弹；出了更新的版本照样弹
+    ///（1.3.2.015：按版本记，不按日期记——旧版点一次「稍后」当天再有新版也不弹）。
+    func dismissUpdate() {
+        if let version = pendingUpdate?.latestVersion, !version.isEmpty {
+            UpdateChecker.markDismissed(version: version)
+        }
         pendingUpdate = nil
     }
 }

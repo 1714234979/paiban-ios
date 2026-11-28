@@ -1298,6 +1298,9 @@ struct ChangelogView: View {
     var body: some View {
         Form {
             Section {
+                changelog(version: "1.3.2.015（内测）", items: [
+                    "更新弹窗改成按版本记：点「稍后」只对这个版本不再弹，出了新版本照样弹，一天更新好几次也能收到",
+                ])
                 changelog(version: "1.3.2.014（内测）", items: [
                     "排班页和工资页的顶卡改成白框，跟着浅色深色走；排班页日期放顶行，今日已挣挪到底下",
                     "工资页顶卡多了三段进度条和三列小字，实发工资、实发奖金、餐贴一眼看清",
