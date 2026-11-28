@@ -3,7 +3,7 @@ import SwiftUI
 /// 手动排班页（1.2.7.002）：月历 + 底部班次按钮，点某天再点班次就是给那天排班。
 /// 样式：精美、简约。周日开头（日一二三四五六）；每天一格：阳历大数字、右上角农历小字、
 /// 下面一个班次色块（休息=青色、白班=绿、夜班=紫、早班=橙、中班=粉）；
-/// 选中的那天描绿边；今天那格底色淡黄；底部「点击下方班次排班」+ 右边橙色「完成」。
+/// 选中的那天描绿边；今天那格底色淡黄；底部是班次按钮 + 右边橙色「完成」。
 struct ManualScheduleView: View {
     @EnvironmentObject private var store: AppStore
     @Environment(\.dismiss) private var dismiss
@@ -151,11 +151,9 @@ struct ManualScheduleView: View {
                     .padding(.horizontal, 16)
             }
 
-            // 底部一行字 + 完成按钮。
+            // 底部完成按钮（1.3.2.007，老爷 13:45 亲口令：砍掉提示文字——
+            // 下面的班次按钮本身就是排班的入口，不用一行字再教一遍）。
             HStack {
-                Text("点击下方班次排班")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
                 Spacer()
                 Button("完成") { dismiss() }
                     .font(.headline)

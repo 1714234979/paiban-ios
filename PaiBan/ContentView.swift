@@ -210,7 +210,8 @@ struct ContentView: View {
     /// 登录/引导/主界面/离线页哪一个）。两个都满足才淡出，缺一个就继续盖着。
     private func maybeDismissSplash() {
         guard showSplash, splashMinTimePassed, !store.isStarting else { return }
-        withAnimation(AppMotion.standard(0.35)) {
+        // 1.3.2.007：开屏淡出 0.25s ease-in-out（iOS.docx §4.1）；旧的 AppMotion.standard 已删掉。
+        withAnimation(.easeInOut(duration: 0.25)) {
             showSplash = false
         }
     }

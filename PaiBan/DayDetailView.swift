@@ -179,7 +179,7 @@ struct DayDetailView: View {
                                 .appFont(size: AppFont.bodySmall)
                                 .foregroundColor(.green)
                         }
-                        .blurIn()
+                        .fadeIn()
                         .task(id: doneMessage) {
                             try? await Task.sleep(nanoseconds: 2_500_000_000)
                             if self.doneMessage == doneMessage { self.doneMessage = nil }

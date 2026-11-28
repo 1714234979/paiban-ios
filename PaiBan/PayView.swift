@@ -38,6 +38,14 @@ struct PayView: View {
     @State private var paySkeletonTask: Task<Void, Never>?
     /// 月明细的骨架是否显示（同上，150ms 延迟后才置 true）。
     @State private var showPaySkeleton = false
+    /// 箭头点按切月过渡（1.3.2.007，iOS.docx §3.1）：TabView 瞬间跳页，明细本身只做
+    /// 20pt 轻微位移 + 短促交叉淡入，0.25s easeInOut；拖拽滑月走原生 TabView 分页，不动。
+    @State private var monthShift: CGFloat = 0
+    @State private var monthOpacity: Double = 1
+    /// 标题箭头淡入（跳页时标题 0.5→1 淡入恢复）。
+    @State private var titleDim: Double = 1
+    /// 减弱动态效果（1.3.2.007，iOS.docx §3.4）：取消横向位移，改 0.15s 交叉淡入。
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static func monthIndex(year: Int, month: Int) -> Int { year * 12 + (month - 1) }
     private func yearMonth(from index: Int) -> (year: Int, month: Int) { (index / 12, index % 12 + 1) }
@@ -73,6 +81,22 @@ struct PayView: View {
         paySkeletonTask?.cancel()
         paySkeletonTask = nil
         showPaySkeleton = false
+    }
+
+    /// 箭头点按切月（1.3.2.007，iOS.docx §3.1）：不用大跨度横甩——TabView 瞬间跳到
+    /// 新月，明细本身只做 20pt 轻微位移 + 短促交叉淡入，0.25s easeInOut；标题同时
+    /// 0.5→1 淡入恢复。减弱动态效果时不位移，只做 0.15s 淡入。direction：+1 下月，-1 上月。
+    private func jumpToMonth(_ index: Int, direction: Int) {
+        let target = min(max(index, pageRange.lowerBound), pageRange.upperBound - 1)
+        monthShift = reduceMotion ? 0 : CGFloat(direction) * 20
+        monthOpacity = 0.6
+        titleDim = 0.5
+        pageIndex = target
+        withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : .easeInOut(duration: 0.25)) {
+            monthShift = 0
+            monthOpacity = 1
+            titleDim = 1
+        }
     }
 
     var body: some View {
@@ -141,7 +165,6 @@ struct PayView: View {
                     ScrollView {
                         VStack(spacing: 16) {
                             monthBreakdown(year: ym.year, month: ym.month)
-                            noteCard
                             syncTimeFooter
                         }
                         // 底部留白 88pt（1.3.2.006）：iOS 26/27 上原生底栏是悬浮胶囊样式（约 64pt），
@@ -160,6 +183,10 @@ struct PayView: View {
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
+            // 箭头点按切月过渡（1.3.2.007，iOS.docx §3.1）：跳页 + 20pt 轻移 + 交叉淡入；
+            // 拖拽滑月时这里是 0/1，不动，原生 TabView 自己跟手。
+            .offset(x: monthShift)
+            .opacity(monthOpacity)
         }
         .background(AppStyle.pageBackground)
         // 滑到哪页，Store 就跟到哪月（setPayMonth 同步算好当月工资、写进缓存）；
@@ -224,11 +251,8 @@ struct PayView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text("预估工资")
                 .appFont(size: AppFont.titleLarge, weight: 700)
-                .blurIn(delay: 0)
+                .fadeIn()
                 .foregroundColor(.white)
-            Text("本地计算，仅供参考")
-                .appFont(size: AppFont.bodySmall)
-                .foregroundColor(AppStyle.whiteText(opacity: 0.75))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
@@ -243,9 +267,8 @@ struct PayView: View {
     private var monthStepper: some View {
         HStack {
             Button {
-                withAnimation(AppMotion.smooth()) {
-                    pageIndex = max(pageRange.lowerBound, pageIndex - 1)
-                }
+                // 1.3.2.007：箭头点按不用大跨度横甩，跳页 + 20pt 轻移 + 交叉淡入（见 jumpToMonth）。
+                jumpToMonth(max(pageRange.lowerBound, pageIndex - 1), direction: -1)
             } label: {
                 Image(systemName: "chevron.left")
                     .frame(width: 36, height: 36)
@@ -254,16 +277,18 @@ struct PayView: View {
                     // 1.3.2.005（方案 §3.3）：36pt 圆按钮，透明留白扩到 48pt，视觉不变。
                     .touchTarget(vertical: 6, horizontal: 6)
             }
-            // 1.3.2.006：按下缩放 0.96 + 微暗，100ms；热区不动（.005 已做 48pt）。
+            // 1.3.2.007：按压反馈是新版 PressableButtonStyle（0.97 + opacity 0.85）；
+            // 热区不动（.005 已做 48pt）。
             .buttonStyle(PressableButtonStyle())
             Spacer()
             Text(DateUtil.yearMonthTitle(year: yearMonth(from: pageIndex).year, month: yearMonth(from: pageIndex).month))
                 .appFont(size: 20, weight: 700).monospacedDigit()
+                // 跳页时标题 0.5→1 淡入恢复（1.3.2.007）。
+                .opacity(titleDim)
             Spacer()
             Button {
-                withAnimation(AppMotion.smooth()) {
-                    pageIndex = min(pageRange.upperBound - 1, pageIndex + 1)
-                }
+                // 1.3.2.007：箭头点按不用大跨度横甩，跳页 + 20pt 轻移 + 交叉淡入（见 jumpToMonth）。
+                jumpToMonth(min(pageRange.upperBound - 1, pageIndex + 1), direction: 1)
             } label: {
                 Image(systemName: "chevron.right")
                     .frame(width: 36, height: 36)
@@ -272,7 +297,8 @@ struct PayView: View {
                     // 1.3.2.005（方案 §3.3）：36pt 圆按钮，透明留白扩到 48pt，视觉不变。
                     .touchTarget(vertical: 6, horizontal: 6)
             }
-            // 1.3.2.006：按下缩放 0.96 + 微暗，100ms；热区不动（.005 已做 48pt）。
+            // 1.3.2.007：按压反馈是新版 PressableButtonStyle（0.97 + opacity 0.85）；
+            // 热区不动（.005 已做 48pt）。
             .buttonStyle(PressableButtonStyle())
         }
         .padding(.horizontal, 16)
@@ -634,15 +660,6 @@ struct PayView: View {
         guard let value else { return "—" }
         if value == value.rounded() { return "\(Int(value)) 天" }
         return String(format: "%.1f 天", value)
-    }
-
-    private var noteCard: some View {
-        Text("计算工资仅供参考，请按照自己车间的平均绩效奖金填写，工资奖金会根据排班变化。")
-            .appFont(size: AppFont.caption)
-            .foregroundColor(.secondary)
-            .multilineTextAlignment(.center)
-            .padding(.horizontal, 24)
-            .padding(.top, 4)
     }
 
     /// 数据更新时间（1.3.2.005，方案 §9 第四条）：本地缓存最后一次成功取数的时间；

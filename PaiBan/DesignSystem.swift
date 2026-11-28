@@ -278,41 +278,23 @@ struct AppFontModifier: ViewModifier {
     }
 }
 
-/// 双端统一动效（视频细节 5）：时长快 150 / 中 250 / 慢 350；
-/// 标准缓动 FastOutSlowIn，强调 CubicBezier(0.2, 0, 0, 1)。
-enum AppMotion {
-    static let fast: Double = 0.15
-    static let medium: Double = 0.25
-    static let slow: Double = 0.35
-    /// 拖拽类（月份滑动、sheet、分段滑块）：过阻尼，雷厉风行，过程尾 0% 回弹。
-    static let drag = Animation.spring(response: 0.3, dampingFraction: 1.0)
-    /// 反馈类（成功对勾、Toast）：欠阻尼，Q 弹感，2.5s 自动消失。
-    static let feedback = Animation.spring(response: 0.4, dampingFraction: 0.65)
-    /// 反馈类自动消失时间。
-    static let feedbackDismissDelay: Double = 2.5
-    /// 标准缓动 FastOutSlowIn；强调 CubicBezier(0.2, 0, 0, 1)。
-    static func standard(_ duration: Double = 0.25) -> Animation {
-        .timingCurve(0.2, 0, 0, 1, duration: duration)
-    }
-    /// 平滑缓动（1.3.2.004：工资页切月、顶栏黑卡高度变化用）：慢进慢出，不抢不顿。
-    /// 老爷 2026-11-28 11:34 亲口定工资页动画“改成平滑的”（不是再加一个）。
-    /// 默认 0.35s；底栏切页要更快（0.25s，苹果商店那种“迅速又平滑”）。
-    static func smooth(_ duration: Double = 0.35) -> Animation {
-        .timingCurve(0.4, 0, 0.2, 1, duration: duration)
-    }
-}
+/// 动效（1.3.2.007，iOS.docx + 分平台动画规范）：iOS 只用 easeInOut 与
+/// spring(response/dampingFraction)，禁止自造 cubic-bezier。
+/// 旧的 AppMotion 已整段删掉（standard/smooth 是自造 timingCurve；
+/// drag/feedback 两个弹簧全 App 无调用、只有定义；fast/medium/slow 三个
+/// 时长常量也无调用）——各处动画直接写 .easeInOut(duration:) 或
+/// .spring(response:dampingFraction:)，不经过中间层。
 
-/// 水墨晕染式出现（视频细节 3）：blur 6→0、120ms、cubic-bezier(.16,1,.3,1)，
-/// 逐行错开 delay，前一个没晕完下一个就开始（连成波浪）。
-struct BlurInModifier: ViewModifier {
-    let delay: Double
+/// 出现淡入（1.3.2.007，iOS.docx + 规范 §4.1）：纯 opacity 淡入，0.25s ease-in-out；
+/// 不 blur、不错开 delay。旧的 BlurInModifier（blur 6→0、120ms、自造 cubic-bezier、
+/// 逐行 delay 30ms）已删掉，4 处调用改成这个。
+struct FadeInModifier: ViewModifier {
     @State private var appeared = false
     func body(content: Content) -> some View {
         content
-            .blur(radius: appeared ? 0 : 6)
             .opacity(appeared ? 1 : 0)
             .onAppear {
-                withAnimation(.timingCurve(0.16, 1, 0.3, 1, duration: 0.12).delay(delay)) {
+                withAnimation(.easeInOut(duration: 0.25)) {
                     appeared = true
                 }
             }
@@ -324,9 +306,9 @@ extension View {
     func appFont(size: CGFloat, weight cssWeight: CGFloat = 400) -> some View {
         modifier(AppFontModifier(size: size, cssWeight: cssWeight))
     }
-    /// 水墨晕染式出现：blur 6→0、120ms；delay 逐行错开 30ms。
-    func blurIn(delay: Double = 0) -> some View {
-        modifier(BlurInModifier(delay: delay))
+    /// 出现淡入：0.25s ease-in-out 纯 opacity，不 blur、不 delay。
+    func fadeIn() -> some View {
+        modifier(FadeInModifier())
     }
     /// 行内图标下移 1/8 em（视频细节 3）：图标中心对齐文字中心，不再飘在基线上。
     func iconAligned() -> some View {
@@ -342,15 +324,27 @@ extension View {
     }
 }
 
-/// 按压反馈（1.3.2.006，滑动与切换动效整改方案）：按下时缩放 0.96 + 底色微暗，
-/// 100ms ease-out，松开恢复。只用在月份箭头、今天 pill、班组 pill 这类小按钮上；
-/// 日历格点按不动，热区大小也不动（.005 已做 48pt）。
+/// 实心小按钮按压反馈（1.3.2.007，iOS.docx §3.3 + 规范 §4.2）：
+/// 按下 scale 0.97 + opacity 0.85，0.1s；抬起 0.3s spring(dampingFraction 0.7) 回弹。
+/// 只用在月份箭头、今天 pill、班组 pill 这类实心小按钮上。
+/// 旧的 0.96 缩放 + brightness -0.06 已删掉（规范：iOS 按压是压暗/微缩，不是 brightness）。
 struct PressableButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .scaleEffect(configuration.isPressed ? 0.96 : 1.0)
-            .brightness(configuration.isPressed ? -0.06 : 0)
-            .animation(.easeOut(duration: 0.1), value: configuration.isPressed)
+            .scaleEffect(configuration.isPressed ? 0.97 : 1.0)
+            .opacity(configuration.isPressed ? 0.85 : 1.0)
+            .animation(configuration.isPressed ? .easeOut(duration: 0.1) : .spring(response: 0.3, dampingFraction: 0.7), value: configuration.isPressed)
+    }
+}
+
+/// 日期格按压反馈（1.3.2.007，iOS.docx §3.3）：按下整体压暗至 opacity 0.75，0.08s；
+/// 抬起 0.18s 顺滑恢复。不做缩放、不做涟漪。日期格以前没有任何按压反馈（只有 onTapGesture），
+/// 这次按 §3.3 给格子加上压暗。
+struct DayCellPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.75 : 1.0)
+            .animation(configuration.isPressed ? .easeOut(duration: 0.08) : .easeInOut(duration: 0.18), value: configuration.isPressed)
     }
 }
 

@@ -226,7 +226,8 @@ struct FeedbackView: View {
     private func feedbackRow(_ item: FeedbackItem) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             Button {
-                withAnimation {
+                // 1.3.2.007：默认 withAnimation 改成显式 0.25s ease-in-out（规范 §4.1）。
+                withAnimation(.easeInOut(duration: 0.25)) {
                     if expandedFile == item.file {
                         expandedFile = nil
                     } else {

@@ -13,6 +13,21 @@ private func calendarRowSpacing(weeks: Int) -> CGFloat {
     6
 }
 
+/// 标题视差的页位置上报（1.3.2.007，整改提示词 §3.3）：每页用 GeometryReader 把
+/// 自己在 monthPager 坐标系里的 minX + 页宽报上来，父视图按当前页的位移算标题的
+/// 0.5 倍视差。原生 TabView 不直接暴露拖拽进度，这是取进度的办法。
+private struct PageGeom {
+    var minX: CGFloat
+    var width: CGFloat
+}
+
+private struct PageOffsetKey: PreferenceKey {
+    static var defaultValue: [Int: PageGeom] = [:]
+    static func reduce(value: inout [Int: PageGeom], nextValue: () -> [Int: PageGeom]) {
+        value.merge(nextValue(), uniquingKeysWith: { _, new in new })
+    }
+}
+
 /// 排班页：原生月历。每个日期格里的班次 pill 都是同一固定高度（28pt、通栏圆角），
 /// 修掉网页版“日班绿块占满整格、别的班只是短 pill”的 bug。
 struct CalendarView: View {
@@ -27,6 +42,26 @@ struct CalendarView: View {
     @State private var recordsSkeletonTask: Task<Void, Never>?
     /// 调班/请假卡的骨架是否显示（同上，150ms 延迟后才置 true）。
     @State private var showRecordsSkeleton = false
+    /// 箭头点按切月过渡（1.3.2.007，iOS.docx §3.1）：TabView 瞬间跳页，网格本身只做
+    /// 20pt 轻微位移 + 短促交叉淡入，0.25s easeInOut；拖拽滑月走原生 TabView 分页（1:1 linear），不动。
+    @State private var monthShift: CGFloat = 0
+    @State private var monthOpacity: Double = 1
+    /// 标题视差（1.3.2.007，整改提示词 §3.3）：拖拽时年月标题以当前页位移的 0.5 倍
+    /// 同向移动，opacity 随进度 1→0.5；落定后 0.25s easeInOut 回位、新标题淡入恢复。
+    @State private var titleParallaxOffset: CGFloat = 0
+    @State private var titleParallaxOpacity: Double = 1
+    /// 标题箭头淡入（跳页时标题 0.5→1 淡入恢复）。
+    @State private var titleDim: Double = 1
+    /// 标题落定回位动画进行中：期间不接新的拖拽进度，免得打断回位。
+    @State private var titleReturning = false
+    @State private var titleReturnTask: Task<Void, Never>? = nil
+    /// 今天格轻高亮（1.3.2.007，iOS.docx §3.2）：点“今天”后目标格一次微闪（边框/底色，不放大）。
+    @State private var todayFlashDate: String? = nil
+    @State private var todayFlashTask: Task<Void, Never>? = nil
+    /// 班组胶囊滑动（1.3.2.007，iOS.docx §3.2）：选中底色用 matchedGeometryEffect 在四个 pill 间滑动。
+    @Namespace private var teamCapsuleNamespace
+    /// 减弱动态效果（1.3.2.007，iOS.docx §3.4）：取消横向位移与弹簧过冲，改 0.15s 交叉淡入；跟手位移保留。
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     // 滑页的页码 = 月份绝对序号（年*12 + 月-1），2026年11月 = 24322。
     // 用原生 TabView 分页滑，切月跟着手指走、左右月预渲染，不再整格闪白重画。
     @State private var pageIndex: Int = CalendarView.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
@@ -72,6 +107,54 @@ struct CalendarView: View {
             }
         }
         preloadedGrids = next
+    }
+
+    /// 箭头/今天/邻月点按切月（1.3.2.007，iOS.docx §3.1）：不用大跨度横甩——
+    /// TabView 瞬间跳到新月（pageIndex 不包动画），网格本身只做 20pt 轻微位移 +
+    /// 短促交叉淡入，0.25s easeInOut；标题同时 0.5→1 淡入恢复。
+    /// 减弱动态效果时不位移，只做 0.15s 淡入。direction：+1 下月（内容从右进），-1 上月。
+    private func jumpToMonth(_ index: Int, direction: Int) {
+        let target = min(max(index, pageRange.lowerBound), pageRange.upperBound - 1)
+        monthShift = reduceMotion ? 0 : CGFloat(direction) * 20
+        monthOpacity = 0.6
+        titleDim = 0.5
+        pageIndex = target
+        withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : .easeInOut(duration: 0.25)) {
+            monthShift = 0
+            monthOpacity = 1
+            titleDim = 1
+        }
+    }
+
+    /// 点“今天”（1.3.2.007，iOS.docx §3.2）：不在当月时平滑切回当月；目标日期格一次
+    /// 极克制的轻高亮（微闪，不放大）；轻冲击触感与动画起点同一帧触发。
+    /// 已在当月时只闪格子，不跳页。减弱动态效果时不闪（当天已有绿边框标识）。
+    private func goToToday() {
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        let target = Self.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
+        if target == pageIndex {
+            flashTodayCell()
+        } else {
+            jumpToMonth(target, direction: target > pageIndex ? 1 : -1)
+            if !reduceMotion {
+                // 页落定（0.25s）后再闪格子，免得格子还没滑到位就闪完了。
+                flashTodayCell(after: 300_000_000)
+            }
+        }
+    }
+
+    /// 今天格轻高亮：把 todayFlashDate 置上今天的日期，650ms 后清掉；
+    /// 格子收到后做一次 0.55s 的底色微闪。delay 用在跳页后，等页落定再闪。
+    private func flashTodayCell(after delayNanoseconds: UInt64 = 0) {
+        todayFlashTask?.cancel()
+        todayFlashTask = Task { @MainActor in
+            if delayNanoseconds > 0 { try? await Task.sleep(nanoseconds: delayNanoseconds) }
+            guard !Task.isCancelled else { return }
+            todayFlashDate = DateUtil.string(from: Date())
+            try? await Task.sleep(nanoseconds: 650_000_000)
+            guard !Task.isCancelled else { return }
+            todayFlashDate = nil
+        }
     }
 
     var body: some View {
@@ -170,6 +253,22 @@ struct CalendarView: View {
                 store.prefetchMonth(year: prev.year, month: prev.month)
                 await store.refreshMonth()
             }
+            // 标题视差落定回位（1.3.2.007）：拖拽松手、页落定后，标题从 0.5× 偏移 /
+            // 0.5 透明度 0.25s easeInOut 回到原位，新月份标题淡入恢复；回位期间
+            // 不接新的拖拽进度（titleReturning），免得打断回位。
+            // 没拖拽（箭头点按）时视差本来就是 0/1，这里什么都不做。
+            if titleParallaxOffset != 0 || titleParallaxOpacity != 1 {
+                titleReturning = true
+                withAnimation(.easeInOut(duration: 0.25)) {
+                    titleParallaxOffset = 0
+                    titleParallaxOpacity = 1
+                }
+                titleReturnTask?.cancel()
+                titleReturnTask = Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 260_000_000)
+                    titleReturning = false
+                }
+            }
         }
         .onChange(of: store.viewTeam) { _ in
             // 1.3.2.004：换班组立刻按新班组重算 21 页（monthFor 按新班组算），再后台刷新。
@@ -195,11 +294,11 @@ struct CalendarView: View {
         VStack(alignment: .leading, spacing: 4) {
             Text(todayDateLine)
                 .appFont(size: AppFont.titleLarge, weight: 700)
-                .blurIn(delay: 0)
+                .fadeIn()
                 .foregroundColor(.white)
             Text(todayShiftLine)
                 .appFont(size: AppFont.bodySmall)
-                .blurIn(delay: 0.03)
+                .fadeIn()
                 .foregroundColor(AppStyle.whiteText(opacity: 0.75))
             if let day = store.todaySchedule {
                 let inputs = store.todayEstimateInputs
@@ -213,7 +312,8 @@ struct CalendarView: View {
         .cornerRadius(16)
         // 1.3.2.004（老爷 2026-11-28 11:39 亲口定）：休息的班没有预计工资，黑卡只有两行、
         // 上班的班有四行——切班时黑卡高度是慢慢变的，不再一下子跳（下面的日历跟着顺滑地挪）。
-        .animation(AppMotion.smooth(), value: store.viewTeam)
+        // 1.3.2.007：曲线改成 0.25s ease-in-out（iOS.docx §3.2/§4.1），行为不变。
+        .animation(.easeInOut(duration: 0.25), value: store.viewTeam)
     }
 
     /// 今天的年月日 + 周几，如“2026年11月24日 星期二”。
@@ -243,31 +343,49 @@ struct CalendarView: View {
         HStack(spacing: 8) {
             ForEach(TeamInfo.allTeams, id: \.self) { team in
                 Button {
+                    // 1.3.2.007（iOS.docx §3.2/P7）：轻冲击触感与动画起点同一帧触发。
+                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
                     store.viewTeam = team
                 } label: {
                     Text("\(team)班")
                         .appFont(size: AppFont.headline, weight: store.viewTeam == team ? 700 : 400)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
-                        .background(store.viewTeam == team ? AppStyle.navyAdaptive : AppStyle.surface1)
+                        .background(
+                            Group {
+                                if store.viewTeam == team {
+                                    // 选中胶囊底色平滑滑动（1.3.2.007，iOS.docx §3.2）：
+                                    // matchedGeometryEffect 让底色在四个 pill 间滑过去，
+                                    // 不是整块日历横移；减弱动态效果时不滑动。
+                                    RoundedRectangle(cornerRadius: 20)
+                                        .fill(AppStyle.navyAdaptive)
+                                        .matchedGeometryEffect(id: "teamCapsule", in: teamCapsuleNamespace)
+                                } else {
+                                    AppStyle.surface1
+                                }
+                            }
+                        )
                         .foregroundColor(store.viewTeam == team ? .white : .primary)
                         .cornerRadius(20)
                         // 1.3.2.005（方案 §3.3）：班组 pill 只有约 37pt 高，透明留白扩到 48pt；
                         // 只加竖向留白，不动四个 pill 之间的横向间距。
                         .touchTarget(vertical: 6)
                 }
-                // 1.3.2.006：按下缩放 0.96 + 微暗，100ms；热区不动（.005 已做 48pt）。
+                // 1.3.2.007：按压反馈是新版 PressableButtonStyle（0.97 + opacity 0.85）；
+                // 热区不动（.005 已做 48pt）。
                 .buttonStyle(PressableButtonStyle())
             }
         }
+        // 胶囊滑动只绑在 viewTeam 这个状态上（iOS.docx §4.1：动画绑具体状态，不绑父容器）；
+        // 减弱动态效果时 animation 传 nil，胶囊直接跳过去、不滑动。
+        .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: store.viewTeam)
     }
 
     private var monthNavigator: some View {
         HStack {
             Button {
-                withAnimation(AppMotion.standard()) {
-                    pageIndex = max(pageRange.lowerBound, pageIndex - 1)
-                }
+                // 1.3.2.007：箭头点按不用大跨度横甩，跳页 + 20pt 轻移 + 交叉淡入（见 jumpToMonth）。
+                jumpToMonth(max(pageRange.lowerBound, pageIndex - 1), direction: -1)
             } label: {
                 Image(systemName: "chevron.left")
                     .frame(width: 36, height: 36)
@@ -276,15 +394,18 @@ struct CalendarView: View {
                     // 1.3.2.005（方案 §3.3）：36pt 圆按钮，透明留白扩到 48pt，视觉不变。
                     .touchTarget(vertical: 6, horizontal: 6)
             }
-            // 1.3.2.006：按下缩放 0.96 + 微暗，100ms；热区不动（.005 已做 48pt）。
+            // 1.3.2.007：按压反馈是新版 PressableButtonStyle（0.97 + opacity 0.85）；
+            // 热区不动（.005 已做 48pt）。
             .buttonStyle(PressableButtonStyle())
             Spacer()
             Text(pagerTitle)
                 .appFont(size: 20, weight: 700).monospacedDigit()
+                // 标题视差（1.3.2.007，整改提示词 §3.3）：拖拽时以网格位移 0.5 倍同向移动、
+                // opacity 随进度 1→0.5；跳页时 titleDim 让它 0.5→1 淡入恢复。
+                .offset(x: titleParallaxOffset)
+                .opacity(titleParallaxOpacity * titleDim)
             Button {
-                withAnimation(AppMotion.standard()) {
-                    pageIndex = Self.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
-                }
+                goToToday()
             } label: {
                 Text("今天")
                     .appFont(size: AppFont.bodySmall)
@@ -295,13 +416,13 @@ struct CalendarView: View {
                     // 1.3.2.005（方案 §3.3）：小 pill 只有约 31pt 高，透明留白扩到 48pt。
                     .touchTarget(vertical: 9)
             }
-            // 1.3.2.006：按下缩放 0.96 + 微暗，100ms；热区不动（.005 已做 48pt）。
+            // 1.3.2.007：按压反馈是新版 PressableButtonStyle（0.97 + opacity 0.85）；
+            // 热区不动（.005 已做 48pt）。
             .buttonStyle(PressableButtonStyle())
             Spacer()
             Button {
-                withAnimation(AppMotion.standard()) {
-                    pageIndex = min(pageRange.upperBound - 1, pageIndex + 1)
-                }
+                // 1.3.2.007：箭头点按不用大跨度横甩，跳页 + 20pt 轻移 + 交叉淡入（见 jumpToMonth）。
+                jumpToMonth(min(pageRange.upperBound - 1, pageIndex + 1), direction: 1)
             } label: {
                 Image(systemName: "chevron.right")
                     .frame(width: 36, height: 36)
@@ -310,7 +431,8 @@ struct CalendarView: View {
                     // 1.3.2.005（方案 §3.3）：36pt 圆按钮，透明留白扩到 48pt，视觉不变。
                     .touchTarget(vertical: 6, horizontal: 6)
             }
-            // 1.3.2.006：按下缩放 0.96 + 微暗，100ms；热区不动（.005 已做 48pt）。
+            // 1.3.2.007：按压反馈是新版 PressableButtonStyle（0.97 + opacity 0.85）；
+            // 热区不动（.005 已做 48pt）。
             .buttonStyle(PressableButtonStyle())
         }
     }
@@ -362,18 +484,49 @@ struct CalendarView: View {
                             showDayDetail = true
                         },
                         onSelectAdjacentMonth: { y, m in
-                            withAnimation(AppMotion.standard()) {
-                                pageIndex = Self.monthIndex(year: y, month: m)
-                            }
-                        }
+                            // 1.3.2.007：邻月格点按也是跳页，走同一个轻移 + 淡入（见 jumpToMonth）。
+                            let target = Self.monthIndex(year: y, month: m)
+                            jumpToMonth(target, direction: target > pageIndex ? 1 : -1)
+                        },
+                        flashDate: todayFlashDate
                     )
                     .tag(idx)
+                    // 标题视差取进度（1.3.2.007）：每页把自己在 monthPager 坐标系里的
+                    // minX + 页宽报上来，父视图按当前页位移算标题的 0.5 倍视差。
+                    .background(
+                        GeometryReader { geo in
+                            Color.clear.preference(
+                                key: PageOffsetKey.self,
+                                value: [idx: PageGeom(minX: geo.frame(in: .named("monthPager")).minX, width: geo.size.width)]
+                            )
+                        }
+                    )
                 }
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
             .frame(height: calendarGridHeight)
             // 1.1.5：裁剪——每页内容绝不漏到邻页上（重叠的最后一道保险）。
             .clipped()
+            // 标题视差的坐标系：页的 minX 在这个坐标系里静止时是 0，拖拽时就是位移。
+            .coordinateSpace(name: "monthPager")
+            // 箭头点按切月过渡（1.3.2.007，iOS.docx §3.1）：跳页 + 20pt 轻移 + 交叉淡入；
+            // 拖拽滑月时这里是 0/1，不动，原生 TabView 自己跟手。
+            .offset(x: monthShift)
+            .opacity(monthOpacity)
+            // 标题视差（1.3.2.007，整改提示词 §3.3）：拖拽时标题以当前页位移的 0.5 倍
+            // 同向移动，opacity 随进度 1→0.5；直接写状态、不包动画，1:1 linear 跟手。
+            // 减弱动态效果时不做视差；落定回位动画期间（titleReturning）不接新进度。
+            .onPreferenceChange(PageOffsetKey.self) { offsets in
+                guard !reduceMotion, !titleReturning else { return }
+                guard let geom = offsets[pageIndex], geom.width > 0 else {
+                    titleParallaxOffset = 0
+                    titleParallaxOpacity = 1
+                    return
+                }
+                let progress = min(abs(geom.minX) / geom.width, 1)
+                titleParallaxOffset = geom.minX * 0.5
+                titleParallaxOpacity = 1 - 0.5 * progress
+            }
             if store.isLoadingMonth {
                 ProgressView("正在加载…")
                     .padding(.top, 8)
@@ -664,6 +817,9 @@ struct MonthPageView: View {
     let onSelectDay: (DaySchedule) -> Void
     /// 点到上月/下月补的日期时跳到对应月。
     let onSelectAdjacentMonth: (Int, Int) -> Void
+    /// 点“今天”后要微闪的日期（1.3.2.007，iOS.docx §3.2）：等于今天的格子闪一次，平时是 nil。
+    /// 有默认值，旧的调用处不用改。
+    let flashDate: String? = nil
 
     /// 一格的身份：上月补的 / 本月 / 下月补的（点上月/下月补的跳到对应月）。
     enum GridDayKind { case leading, current, trailing }
@@ -780,6 +936,9 @@ struct MonthPageView: View {
     /// 一格：按身份给不同的点按行为（本月点开详情，上月/下月补的跳到对应月）。
     /// 「当月显示上下月」关了：上月/下月补的格子留空（占位不变，布局不抖），点不了。
     /// maxWidth 让格子在 HStack 里均分 7 列（原来 LazyVGrid 的 .flexible() 就是这个作用）。
+    /// 1.3.2.007：格子用 Button + DayCellPressStyle（按下压暗至 0.75，0.08s；抬起 0.18s 恢复）——
+    /// 以前只有 onTapGesture、没有任何按压反馈。Button 的按压态与 TabView 滑页共存（系统在
+    /// 拖动开始时取消按压），不会抢滑页手势。
     @ViewBuilder
     private func gridCell(day: DaySchedule, kind: GridDayKind) -> some View {
         if (kind == .leading || kind == .trailing) && !store.calendarDisplay.showAdjacentMonths {
@@ -788,17 +947,23 @@ struct MonthPageView: View {
         } else {
             switch kind {
             case .leading:
-                DayCell(day: day, isToday: false, isSelected: false, isAdjacent: true)
-                    .frame(maxWidth: .infinity)
-                    .onTapGesture { onSelectAdjacentMonth(prevYearMonth.year, prevYearMonth.month) }
+                Button { onSelectAdjacentMonth(prevYearMonth.year, prevYearMonth.month) } label: {
+                    DayCell(day: day, isToday: false, isSelected: false, isAdjacent: true)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(DayCellPressStyle())
             case .current:
-                DayCell(day: day, isToday: day.date == DateUtil.string(from: Date()), isSelected: isSelected(day.date), isTriplePay: tripleDates.contains(day.date))
-                    .frame(maxWidth: .infinity)
-                    .onTapGesture { onSelectDay(day) }
+                Button { onSelectDay(day) } label: {
+                    DayCell(day: day, isToday: day.date == DateUtil.string(from: Date()), isSelected: isSelected(day.date), isTriplePay: tripleDates.contains(day.date), isFlashing: flashDate == day.date)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(DayCellPressStyle())
             case .trailing:
-                DayCell(day: day, isToday: false, isSelected: false, isAdjacent: true)
-                    .frame(maxWidth: .infinity)
-                    .onTapGesture { onSelectAdjacentMonth(nextYearMonth.year, nextYearMonth.month) }
+                Button { onSelectAdjacentMonth(nextYearMonth.year, nextYearMonth.month) } label: {
+                    DayCell(day: day, isToday: false, isSelected: false, isAdjacent: true)
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(DayCellPressStyle())
             }
         }
     }
@@ -849,8 +1014,26 @@ struct DayCell: View {
     var isAdjacent: Bool = false
     /// 三薪日（工资算法里 tripleDays 的那几天）：色块里加一行半透明「三薪」。
     var isTriplePay: Bool = false
+    /// 点“今天”后的微闪（1.3.2.007，iOS.docx §3.2）：目标格一次底色微闪，不放大。
+    var isFlashing: Bool = false
+    /// 微闪的不透明度（1 → 0，0.55s easeOut）。
+    @State private var flashOpacity: Double = 0
+    /// 减弱动态效果：班次标签变化只做 0.15s 淡入、不缩放；微闪也取消。
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private let pillHeight: CGFloat = 28
+
+    /// 班次标签的身份（1.3.2.007）：换班组时 pill 内容变了就换身份，触发 0.2s 缩放 + 交叉淡入。
+    private var pillKey: String { "\(day.shift)|\(day.isRest)|\(isTriplePay)" }
+
+    /// 微闪：不透明度从 1 起、0.55s easeOut 淡到 0；减弱动态效果时不闪。
+    private func startFlash() {
+        guard !reduceMotion else { return }
+        flashOpacity = 1
+        withAnimation(.easeOut(duration: 0.55)) {
+            flashOpacity = 0
+        }
+    }
 
     /// 日历显示设置（1.2.7.001）：法定节假日/农历显隐走这里。
     private var display: CalendarDisplaySettings { store.calendarDisplay }
@@ -1028,16 +1211,36 @@ struct DayCell: View {
                         .cornerRadius(7)
                 }
             }
+            // 班次标签变化（1.3.2.007，iOS.docx §3.2）：换班组时标签快速轻微缩放加交叉淡入，
+            // 0.2s easeInOut，不整块日历横移；减弱动态效果时只做 0.15s 淡入、不缩放。
+            .id(pillKey)
+            .transition(reduceMotion ? .opacity : .scale(scale: 0.92).combined(with: .opacity))
+            .animation(reduceMotion ? .easeInOut(duration: 0.15) : .easeInOut(duration: 0.2), value: pillKey)
             .opacity(isAdjacent ? (colorScheme == .dark ? 0.65 : 0.5) : 1.0)
         }
         .padding(2)
         .frame(height: calendarCellHeight)
         .background(isSelected ? Color.blue.opacity(0.12) : Color.clear)
         .cornerRadius(8)
+        // 今天格微闪（1.3.2.007，iOS.docx §3.2）：底色微闪一次，0.55s 淡出，不放大；
+        // 描边那层在上面，不会被闪盖住。
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.green.opacity(0.22))
+                .opacity(flashOpacity)
+        )
         .overlay(
             RoundedRectangle(cornerRadius: 8)
                 .stroke(isToday ? Color.green : (isSelected ? Color.blue : Color.clear), lineWidth: isToday ? 2 : 1.5)
         )
+        // 选中框切换（1.3.2.007，iOS.docx §3.3）：克制的高阻尼弹簧，禁止过冲。
+        .animation(.spring(response: 0.28, dampingFraction: 0.86), value: isSelected)
+        .onChange(of: isFlashing) { flashing in
+            if flashing { startFlash() }
+        }
+        .onAppear {
+            if isFlashing { startFlash() }
+        }
     }
 }
 
@@ -1061,7 +1264,7 @@ private struct TodayLiveRow: View {
                 earlyRate: earlyRate, midRate: midRate, inputs: inputs
             )
             VStack(alignment: .leading, spacing: 2) {
-                // 2026-11-28 慢滑卡顿修：倒计时每秒重画一次，上面挂 .blurIn 等于每秒
+                // 2026-11-28 慢滑卡顿修：倒计时每秒重画一次，上面挂 .fadeIn 等于每秒
                 // 多走一次离屏模糊；字本来就是等宽、宽度不动，模糊入场效果在每秒刷新的
                 // 文字上根本看不出来，直接去掉，只留等宽数字。
                 Text(countdownText(state: state, now: now))

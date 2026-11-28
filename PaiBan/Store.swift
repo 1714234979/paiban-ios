@@ -907,8 +907,9 @@ final class AppStore: ObservableObject {
     }
 
     /// 切月（工资页）：同步改月份并立刻用本地算好的工资顶上（有输入时秒出），
-    /// 让调用方的 withAnimation 能把「月份 + 内容」包在同一个动画事务里，
     /// 工资页切月才有真正的左右滑动动画；本地算不出时照旧走异步 refreshPay（onChange 兜底）。
+    /// 1.3.2.007：切月过渡现在走 jumpToMonth 的 monthOpacity/monthShift 交叉淡入，
+    /// 不再包在调用方的 withAnimation 事务里——数据照旧同步换，动画只淡入淡出。
     func setPayMonth(year: Int, month: Int) {
         payYearMonth = (year, month)
         if let local = computeLocalPay(year: year, month: month) {
