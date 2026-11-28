@@ -55,14 +55,6 @@ struct PayView: View {
 
     /// 邻月工资预热的在途任务（1.3.2.004）：翻得快时旧任务直接取消，只留最新的。
     @State private var preloadPayTask: Task<Void, Never>?
-    /// 每页竖滚 ScrollView 的滚动位置（1.3.2.010）：竖滚偏移不归任何 SwiftUI 状态管，
-    /// 嵌套在横向分页器里的 ScrollView 会把竖向偏移漂移（实测静止就偏约 42pt，
-    /// 横滑一来回再多约 30pt），黑卡在它里面就被顶出可视区、顶部横切。
-    /// 每页记一个偏移，落定时按阈值纠回顶部（见 onChange）；用户自己滚下去
-    /// 超过 120pt 的不纠（那是他在看下面，不是漂移）。
-    /// 注意：.scrollPosition(point:) 是 iOS 18 才有的 API，部署目标 17.0 编不过；
-    /// 这里用 iOS 17 的 .scrollPosition(id:) + ScrollPosition（里面有 .point）。
-    @State private var payPageScrollPositions: [Int: ScrollPosition] = [:]
     /// 月明细骨架延迟 150ms 的在途任务（1.3.2.006）：加载开始后 150ms 再现骨架，
     /// 数据快回来就不闪；加载结束或视图消失时取消。
     @State private var paySkeletonTask: Task<Void, Never>?
@@ -146,23 +138,17 @@ struct PayView: View {
     static func monthIndex(year: Int, month: Int) -> Int { year * 12 + (month - 1) }
     private func yearMonth(from index: Int) -> (year: Int, month: Int) { (index / 12, index % 12 + 1) }
 
-    /// 某页竖滚 ScrollView 的 scrollPosition 绑定（1.3.2.010）：
-    /// 没记过就是空位置（不控，默认 0）；滚过就记下来，落定时按阈值纠。
-    /// 绑定的值是 ScrollView 真实的滚动位置（双向回流），漂移改了偏移，
-    /// 这里也跟着变，落定时写回顶部才能真把偏移纠回去。
-    private func scrollPointBinding(for offset: Int) -> Binding<ScrollPosition> {
-        Binding(
-            get: { payPageScrollPositions[offset] ?? ScrollPosition() },
-            set: { payPageScrollPositions[offset] = $0 }
-        )
-    }
-
     /// 某个月的整页内容（1.3.2.010）：黑卡固定页眉 + 明细竖滚。
     /// 单独抽成函数——整页塞在分页器闭包里会让 body 的类型检查超时（编包报错），
     /// 拆出来才能编过（.008 日期格拆 6 块是同一个毛病）。
     /// 黑卡放在页内、ScrollView 外：跟着月份翻页（在页里），但不跟竖滚走
     ///（不在 ScrollView 里），嵌套 ScrollView 的竖向偏移漂移再也切不到它。
     /// 明细（monthBreakdown + syncTimeFooter）仍在 ScrollView 里竖滚。
+    /// 落定纠偏那层不要了（编包三连挂的教训）：竖滚位置纠偏要用 ScrollPosition /
+    /// .scrollPosition(point:)，全是 iOS 18 才有的 API，部署目标 17.0 编不过；
+    /// iOS 17 的 .scrollPosition(id:) 只认视图 id、读不到偏移量，纠不了。
+    /// 黑卡已在 ScrollView 外、切不到它；明细若真机上还漂，再用
+    /// GeometryReader + ScrollViewReader 那套老办法修。
     private func payMonthPage(offset: Int) -> some View {
         let ym = yearMonth(from: baseIndex + offset)
         return VStack(spacing: 16) {
@@ -185,9 +171,6 @@ struct PayView: View {
             // 纵向 ScrollView 嵌在横向分页器里时，系统会按 safe-area 给内容加顶边距，
             // 是竖向偏移漂移的头号嫌疑；显式写 0，不让它自己加。
             .contentMargins(.top, 0)
-            // 每页竖滚位置记下来（1.3.2.010）：落定时按阈值纠回顶部（见 onChange），
-            // 漂移再也留不到静止帧上。
-            .scrollPosition(id: scrollPointBinding(for: offset))
             // 1.3.0.013：滚动指示条常显（老爷 19:24 说「没有滑动框」）——.visible 没用，
             // 画廊实拍证明它根本不画出来，改走自绘滑块 AlwaysVisibleScrollIndicator。
             .modifier(AlwaysVisibleScrollIndicator())
@@ -353,17 +336,6 @@ struct PayView: View {
             let ym = yearMonth(from: newIndex)
             dismissEdit()
             store.setPayMonth(year: ym.year, month: ym.month)
-            // 1.3.2.010：落定时把这页的竖滚位置纠回顶部——嵌套 ScrollView 的竖向偏移
-            // 会漂移（实测静止约 42pt、横滑一来回再多约 30pt），不纠就留在静止帧上。
-            // 只纠小偏移（< 120pt，漂移的量级）：用户自己滚下去在看下面的不碰，
-            // 他的位置留着。纠正不做动画，瞬间回顶（不然落定后内容还往下出溜一下）。
-            if (payPageScrollPositions[newIndex]?.point?.y ?? 0) < 120 {
-                var transaction = Transaction()
-                transaction.disablesAnimations = true
-                withTransaction(transaction) {
-                    payPageScrollPositions[newIndex] = ScrollPosition(point: .zero)
-                }
-            }
             // 1.3.2.004：落到哪月就把前后 10 个月的工资提前算好，滑过去直接显示。
             preloadPayAround(newIndex)
         }
