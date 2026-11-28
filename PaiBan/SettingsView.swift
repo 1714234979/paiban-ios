@@ -1565,6 +1565,9 @@ struct ChangelogView: View {
             }
             if UpdateChecker.installedChannel == "beta" {
                 Section("内测版") {
+                    changelog(version: "1.3.3.001", items: [
+                        "账号与安全页头像改成居中布局，头像居中放顶部，下面带打码手机号，头像旁的名字删掉",
+                    ])
                     changelog(version: "1.3.2.022", items: [
                         "当天详情页里，已经调班了再点「调班」的那行提示，挪到 sheet 最下面了（「已调班」那张卡下面）",
                         "账号与安全页顶部的姓氏头像再大了一点",
