@@ -336,7 +336,7 @@ struct PayView: View {
                 store.needsSpecialDeductionAsk = true
             }
         }
-        .alert("有没有专项附加扣除？", isPresented: $store.needsSpecialDeductionAsk) {
+        .alert("有没有专项附加扣除？", isPresented: Bindable(store).needsSpecialDeductionAsk) {
             Button("有，去填写") {
                 store.markSpecialDeductionAsked()
                 showSpecialDeductions = true

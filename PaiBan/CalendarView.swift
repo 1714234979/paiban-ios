@@ -982,7 +982,7 @@ struct MonthPageView: View {
 /// 1.2.2：窄屏（<400pt，如 iPhone 15 的 393pt）阳历数字 16→15pt + 缩放兜底，
 /// 左右两列 12/9→11/8——之前两位数的号在窄屏上被截成「…」。
 /// 请假「假」标从号数旁边移到左列、和法定「假/班」上下叠放（之前号数+红标太宽、压着右边阴历字）；
-/// 三薪日：色块右上角 "三薪" 橙色小角标，不塞进色块里；法定「假/班」保持原样，两套标法不混。
+/// 三薪日：日期数字右侧小橙点；法定「假/班」保持原样，两套标法不混。
 struct DayCell: View {
     @Environment(AppStore.self) private var store: AppStore
     /// 1.2.8.001：上下月补的日期在深色下 0.5 透明太暗、看着发虚，深色放宽到 0.65。
@@ -1070,8 +1070,7 @@ struct DayCell: View {
         }
         .padding(2)
         .frame(height: calendarCellHeight)
-        // 选中底色用圆角矩形画，不用 .cornerRadius() 裁剪——三薪角标 "三薪" 要伸出 pill
-        // 右边 2pt，裁剪会把它切掉；圆角背景只画底色，不裁内容。
+        // 选中底色用圆角矩形画，不用 .cornerRadius() 裁剪——圆角背景只画底色，不裁内容。
         .background(RoundedRectangle(cornerRadius: 8).fill(isSelected ? Color.blue.opacity(0.12) : Color.clear))
         // 今天格微闪（1.3.2.007，iOS.docx §3.2）：底色微闪一次，0.55s 淡出，不放大；
         // 描边那层在上面，不会被闪盖住。
@@ -1101,12 +1100,21 @@ struct DayCell: View {
     private var dateRow: some View {
         HStack(alignment: .top, spacing: 1) {
             leftMarkColumn
-            Text("\(day.dayNumber)")
-                .appFont(size: dayNumberFontSize, weight: isToday ? 700 : 600).monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-                .foregroundColor(isAdjacent ? .secondary : .primary)
-                .frame(maxWidth: .infinity, alignment: .center)
+            // 号数 + 三薪小橙点（2026-11-28 老爷亲口令：角标缩小成一个小橙点，放日期数字右侧）。
+            // 点 6pt，号数两位数时靠 minimumScaleFactor 稍缩一点让位，不挤农历列。
+            HStack(spacing: 2) {
+                Text("\(day.dayNumber)")
+                    .appFont(size: dayNumberFontSize, weight: isToday ? 700 : 600).monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                    .foregroundColor(isAdjacent ? .secondary : .primary)
+                if isTriplePay && !isAdjacent {
+                    Circle()
+                        .fill(Color.orange)
+                        .frame(width: 6, height: 6)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .center)
             // 阴历/节气/节日小字（1.2.7.001）：显示农历关了就留空（占位不变，布局不抖）。
             lunarColumn
         }
@@ -1165,28 +1173,13 @@ struct DayCell: View {
         .padding(.top, 1)
     }
 
-    /// 班次 pill + 三薪角标 + 换组动画（1.3.2.007，iOS.docx §3.2）：
-    /// pill 固定 24pt；三薪不塞进色块，改右上角 "三薪" 橙色小角标（重做，
-    /// 老爷 2026-11-28 14:30 亲口令：录屏里三薪和班次挤在同一个色块里又小又挤，
-    /// 格子高度还不一致）。所有格子的 pill 同高，视觉节奏一致。
+    /// 班次 pill + 换组动画（1.3.2.007，iOS.docx §3.2）：
+    /// pill 固定 24pt；三薪不在色块上，改成日期数字右侧的小橙点（见 dateRow，
+    /// 老爷 2026-11-28 亲口令）。所有格子的 pill 同高，视觉节奏一致。
     /// 双班：两个 11pt 小 pill 上下叠（11 + 2 + 11 = 24）；单班：一个 24pt pill。
-    /// 角标位置（2026-11-28 改）：原来 offset y:-5 往上凸 5pt，顶边正好顶到农历小字的
-    /// 底边（农历两字行高约 22pt，底边离 pill 顶只有 5pt），看着像压住了农历。
-    /// 改成 y:0——角标顶边和 pill 顶边齐平，离农历小字有 5pt 空隙，绝不压农历。
-    /// 注：没按指令挪到日期数字右侧——日期行中间栏只有约 20pt（号数约 16pt），
-    /// 角标 22pt 宽放进去会把号数挤到 0 或盖住农历列（见汇报里的尺寸账），只能留在
-    /// pill 右上角；y:0 是能同时做到「不压农历、不挤号数」的唯一位置。
     private var shiftPill: some View {
         shiftPillContent
-            // 三薪角标：右上角小橙 capsule "三薪"，不占 pill 内的地方、不撑高格子。
-            // offset 只向右伸 2pt（不用老爷示例里的 4pt）：页有 .clipped() 裁剪，
-            // 周六那列的角标伸 4pt 会被页边裁掉 2pt，伸 2pt 正好贴着格边、完整显示。
-            // y 改成 0（原来 -5）：顶边和 pill 顶边齐平，不再往上凸压农历小字。
-            .overlay(alignment: .topTrailing) {
-                if isTriplePay && !isAdjacent {
-                    triplePayBadge
-                }
-            }
+            // 三薪标记不在 pill 上（2026-11-28 老爷亲口令：改成日期数字右侧的小橙点，见 dateRow）。
             // 班次标签变化（1.3.2.007，iOS.docx §3.2）：换班组时标签快速轻微缩放加交叉淡入，
             // 0.2s easeInOut，不整块日历横移；减弱动态效果时只做 0.15s 淡入、不缩放。
             .id(pillKey)
@@ -1223,17 +1216,7 @@ struct DayCell: View {
         }
     }
 
-    /// 三薪角标：8pt 黑体白字 "三薪"，橙色 capsule，右上角 offset x:2、y:0。
-    /// y:0（原来 -5）：顶边和 pill 顶边齐平，不再往上凸压农历小字（见上面 shiftPill）。
-    private var triplePayBadge: some View {
-        Text("三薪")
-            .font(.system(size: 8, weight: .black))
-            .foregroundColor(.white)
-            .padding(.horizontal, 3)
-            .padding(.vertical, 1)
-            .background(Color.orange, in: Capsule())
-            .offset(x: 2, y: 0)
-    }
+    /// 三薪角标已改成日期数字右侧的小橙点（见 dateRow），这里不再留 capsule 版。
 }
 
 /// 今日倒计时 + 实时工资（1.2.7）：只这个小视图每秒刷新（TimelineView 1 秒一格），不带动整页。

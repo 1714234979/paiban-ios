@@ -33,7 +33,7 @@ struct MainTabView: View {
     @Environment(AppStore.self) private var store: AppStore
 
     var body: some View {
-        TabView(selection: $store.selectedTab) {
+        TabView(selection: Bindable(store).selectedTab) {
             NavigationStack {
                 CalendarView()
                     .navigationTitle("排班")

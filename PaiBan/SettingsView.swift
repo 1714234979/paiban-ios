@@ -1256,7 +1256,7 @@ struct SpecialDeductionsView: View {
                 DispatchQueue.main.async { store.needsSpecialDeductionAsk = true }
             }
         }
-        .alert("有没有专项附加扣除？", isPresented: $store.needsSpecialDeductionAsk) {
+        .alert("有没有专项附加扣除？", isPresented: Bindable(store).needsSpecialDeductionAsk) {
             Button("有，去填写") { store.markSpecialDeductionAsked() }
             Button("没有", role: .cancel) { store.markSpecialDeductionAsked() }
         } message: {
@@ -1448,7 +1448,7 @@ struct ChangelogView: View {
                     "日历白卡整张跟着月份滑，星期栏和日期永远对齐，不再错位、切边",
                     "工资黑卡跟着月份一起翻页、一起滚动，不再上面停在 11 月、下面已经滑到 12 月",
                     "「今天」按钮改成右下角悬浮按钮，标题行只剩箭头和月份；调班/请假那张卡改成通栏长条",
-                    "三薪角标不再往上凸压农历字；排班页、工资页、设置页向上滚时导航栏不再透字",
+                    "三薪改成日期数字旁边的小橙点，不再往上凸压农历字；排班页、工资页、设置页向上滚时导航栏不再透字",
                 ])
                 changelog(version: "1.3.2.008（内测）", items: [
                     "排班页重做了：月份滑动是系统原生的分页，标题只跟着落定的那一页走，不再错位、重叠、跳月；「今天」按钮只在非当月出现",

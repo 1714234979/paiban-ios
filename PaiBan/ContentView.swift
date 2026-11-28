@@ -143,7 +143,7 @@ struct ContentView: View {
                         MainTabView()
                             // 第 47 条：公积金没填时，弹一次窗让用户填（框里留空，照工资条填；
                             // 能关掉，没填的下次打开再弹，直到填了为止）。
-                            .sheet(isPresented: $store.needsHousingFundPrompt) {
+                            .sheet(isPresented: Bindable(store).needsHousingFundPrompt) {
                                 HousingFundPromptView()
                             }
                             // 1.3.0.014：主界面稳了 2 秒后再查一次更新——冷启动那次检查可能
