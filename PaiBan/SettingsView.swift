@@ -1553,6 +1553,9 @@ struct ChangelogView: View {
             }
             if UpdateChecker.installedChannel == "beta" {
                 Section("内测版") {
+                    changelog(version: "1.3.2.021", items: [
+                        "当天详情页里，这天已经调班了再点「调班」，会轻震一下并提示一行字：已经进行调班了，如果需要再次更改，请删除此次调班，或者直接更改排班",
+                    ])
                     changelog(version: "1.3.2.020", items: [
                         "工资页切月左右滑时，竖向拖动条不再跟着左右跑了",
                         "隐私政策和用户协议里，工资估算加上了「仅对获得工资权限的用户提供」的限定——工资估算只给有权限的人用",

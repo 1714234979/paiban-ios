@@ -623,7 +623,9 @@ struct DayDetailView: View {
                 actionButton("调班", prominent: activeAction == "调班") {
                     resetFlowStates()
                     if shownDay.overridden == true && shownDay.onLeave != true {
-                        // 已有调班：下面直接显示状态与删除/补填入口，不用再开表单。
+                        // 1.3.2.021：已有调班再点调班，不开表单，轻震一下 + 提示一行字。
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        errorText = "已经进行调班了，如果需要再次更改，请删除此次调班，或者直接更改排班"
                     } else {
                         showSwapFlow.toggle()
                     }
