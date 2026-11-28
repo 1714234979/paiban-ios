@@ -297,8 +297,9 @@ struct RotationSettingsView: View {
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .overlay(
                 RoundedRectangle(cornerRadius: 14)
-                    .stroke(selected ? Color.primary : Color.clear, lineWidth: 2)
+                    .fill(Color.white.opacity(selected ? 0.12 : 0))
             )
+            .shadow(color: selected ? Color.black.opacity(0.25) : .clear, radius: 6, y: 2)
         }
         .buttonStyle(.plain)
     }

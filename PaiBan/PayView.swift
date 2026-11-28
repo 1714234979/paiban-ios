@@ -24,12 +24,12 @@ struct PayView: View {
     /// 滑页的页码 = 月份绝对序号（年*12 + 月-1），与排班页同一套。
     /// 1.2.6 冷启动回当天：默认当月。
     @State private var pageIndex: Int = PayView.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
-    /// 滑页范围：一次生成 12 个月，当前月居中（前后各 5–6 个月），和排班页对齐。
+    /// 滑页范围：一次生成 10 年（120 个月），当前月居中（前后各 60 个月），和排班页对齐。
     @State private var windowStartIndex: Int = {
         let now = DateUtil.yearMonth(of: Date())
-        return PayView.monthIndex(year: now.year, month: now.month) - 5
+        return PayView.monthIndex(year: now.year, month: now.month) - 60
     }()
-    private var pageRange: Range<Int> { windowStartIndex..<(windowStartIndex + 12) }
+    private var pageRange: Range<Int> { windowStartIndex..<(windowStartIndex + 120) }
 
     static func monthIndex(year: Int, month: Int) -> Int { year * 12 + (month - 1) }
     private func yearMonth(from index: Int) -> (year: Int, month: Int) { (index / 12, index % 12 + 1) }
@@ -43,15 +43,15 @@ struct PayView: View {
                     .font(.largeTitle)
                     .foregroundColor(.secondary)
                 Text("没有工资权限")
-                    .font(.headline)
+                    .appFont(size: AppFont.headline, weight: 600)
                 Text("你的账号没有查看工资的权限。如需开通，请联系管理员。")
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
             }
             .padding()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(.systemGroupedBackground))
+            .background(AppStyle.pageBackground)
         } else if store.needsPaySetup {
             // 工资设定还没填完（2026-11-27 10:28，老爷亲口定，取代第 30 条自动弹窗）：
             // 干净的空页面，中间只有一个按钮，不显示任何空数字或零；点进去走一遍
@@ -62,9 +62,9 @@ struct PayView: View {
                     .font(.system(size: 44))
                     .foregroundColor(.secondary)
                 Text("还没填工资设置")
-                    .font(.headline)
+                    .appFont(size: AppFont.headline, weight: 600)
                 Text("基本工资、奖金系数、缴费基数、岗位、入职时间和剩余年休假填好后，工资页就按你的数算。")
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, 32)
@@ -72,7 +72,7 @@ struct PayView: View {
                     showPayGuide = true
                 } label: {
                     Text("填写工资设置")
-                        .font(.headline)
+                        .appFont(size: AppFont.headline, weight: 600)
                         .frame(maxWidth: 240)
                         .frame(height: AppStyle.buttonHeight)
                         .background(AppStyle.navyAdaptive)
@@ -83,7 +83,7 @@ struct PayView: View {
             }
             .padding()
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(.systemGroupedBackground))
+            .background(AppStyle.pageBackground)
             .sheet(isPresented: $showPayGuide) {
                 PayGuideView()
             }
@@ -116,7 +116,7 @@ struct PayView: View {
             }
             .tabViewStyle(.page(indexDisplayMode: .never))
         }
-        .background(Color(.systemGroupedBackground))
+        .background(AppStyle.pageBackground)
         // 滑到哪页，Store 就跟到哪月（setPayMonth 同步算好当月工资、写进缓存）；
         // 切月时把敞着的编辑框收起（那是上个月的数，别留在新月上误触）。
         .onChange(of: pageIndex) { newIndex in
@@ -130,7 +130,7 @@ struct PayView: View {
             // 1.2.6 冷启动回当天：进页先对齐到今天所在的月（不再跟 Store 恢复的月份走），
             // 窗口以当月为中心重定。只在视图第一次创建时跑，从后台切回来不重跑、不强制回当月。
             let now = DateUtil.yearMonth(of: Date())
-            windowStartIndex = Self.monthIndex(year: now.year, month: now.month) - 5
+            windowStartIndex = Self.monthIndex(year: now.year, month: now.month) - 60
             pageIndex = Self.monthIndex(year: now.year, month: now.month)
             store.setPayMonth(year: now.year, month: now.month)
             if store.pay == nil {
@@ -167,10 +167,11 @@ struct PayView: View {
     private var headerCard: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text("预估工资")
-                .font(.title2).bold()
+                .appFont(size: AppFont.titleLarge, weight: 700)
+                .blurIn(delay: 0)
                 .foregroundColor(.white)
             Text("本地计算，仅供参考")
-                .font(.subheadline)
+                .appFont(size: AppFont.bodySmall)
                 .foregroundColor(AppStyle.whiteText(opacity: 0.75))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -182,31 +183,31 @@ struct PayView: View {
     }
 
     /// 月份步进：标题直接取当前页（跟着滑页走，不用等网络）；左右箭头改页码，
-    /// onChange 里 setPayMonth，同样有滑动动画。滑页范围与排班页一致（12 页窗口，到边就停）。
+    /// onChange 里 setPayMonth，同样有滑动动画。滑页范围与排班页一致（120 页窗口，10 年，到边就停）。
     private var monthStepper: some View {
         HStack {
             Button {
-                withAnimation(.easeInOut(duration: 0.25)) {
+                withAnimation(AppMotion.standard()) {
                     pageIndex = max(pageRange.lowerBound, pageIndex - 1)
                 }
             } label: {
                 Image(systemName: "chevron.left")
                     .frame(width: 36, height: 36)
-                    .background(Color(.systemBackground))
+                    .background(AppStyle.surface1)
                     .clipShape(Circle())
             }
             Spacer()
             Text(DateUtil.yearMonthTitle(year: yearMonth(from: pageIndex).year, month: yearMonth(from: pageIndex).month))
-                .font(.title3).bold()
+                .font(.title3).appWeight(700).monospacedDigit()
             Spacer()
             Button {
-                withAnimation(.easeInOut(duration: 0.25)) {
+                withAnimation(AppMotion.standard()) {
                     pageIndex = min(pageRange.upperBound - 1, pageIndex + 1)
                 }
             } label: {
                 Image(systemName: "chevron.right")
                     .frame(width: 36, height: 36)
-                    .background(Color(.systemBackground))
+                    .background(AppStyle.surface1)
                     .clipShape(Circle())
             }
         }
@@ -267,7 +268,7 @@ struct PayView: View {
                 if let tripleDates = pay.tripleDates, !tripleDates.isEmpty {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("三薪明细")
-                            .font(.headline)
+                            .appFont(size: AppFont.headline, weight: 600)
                         ForEach(tripleDates, id: \.date) { item in
                             HStack {
                                 Text(item.date ?? "")
@@ -276,11 +277,11 @@ struct PayView: View {
                                 Text(item.shift ?? "")
                                     .foregroundColor(.secondary)
                             }
-                            .font(.subheadline)
+                            .appFont(size: AppFont.bodySmall)
                         }
                     }
                     .padding(AppStyle.cardPadding)
-                    .background(Color(.systemBackground))
+                    .background(AppStyle.surface1)
                     .cornerRadius(AppStyle.cardRadius)
                     .padding(.horizontal, 16)
                 }
@@ -304,16 +305,16 @@ struct PayView: View {
         let workShifts = counts.filter { $0.name != "休息" }.reduce(0) { $0 + $1.count }
         return VStack(alignment: .leading, spacing: 6) {
             Text("工资口径待定")
-                .font(.headline)
+                .appFont(size: AppFont.headline, weight: 600)
             Text("\(mode?.name ?? "")是 \(hours) 小时班，工资口径还没定（12 小时/6 小时班的加班与津贴规则与 8 小时班不一样），金额暂不算，只显示班次统计。")
-                .font(.subheadline)
+                .appFont(size: AppFont.bodySmall)
                 .foregroundColor(.secondary)
             Text("当月共上 \(workShifts) 个班 · \(workShifts * hours) 小时")
-                .font(.subheadline)
-                .bold()
+                .appFont(size: AppFont.bodySmall, weight: 700)
+                .monospacedDigit()
         }
         .padding(AppStyle.cardPadding)
-        .background(Color(.systemBackground))
+        .background(AppStyle.surface1)
         .cornerRadius(AppStyle.cardRadius)
         .padding(.horizontal, 16)
     }
@@ -321,7 +322,7 @@ struct PayView: View {
     private func paySection(title: String, rows: [(String, String)]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text(title)
-                .font(.headline)
+                .appFont(size: AppFont.headline, weight: 600)
                 .padding(.bottom, 8)
             ForEach(rows, id: \.0) { row in
                 HStack {
@@ -329,15 +330,16 @@ struct PayView: View {
                         .foregroundColor(.secondary)
                     Spacer()
                     Text(row.1)
-                        .bold(row.0.hasPrefix("实发") || row.0.hasPrefix("应发") || row.0.hasPrefix("税前") || row.0.contains("合计"))
+                        .appWeight(row.0.hasPrefix("实发") || row.0.hasPrefix("应发") || row.0.hasPrefix("税前") || row.0.contains("合计") ? 700 : 400)
+                        .monospacedDigit()
                 }
-                .font(.subheadline)
+                .appFont(size: AppFont.bodySmall)
                 .padding(.vertical, 5)
                 Divider()
             }
         }
         .padding(AppStyle.cardPadding)
-        .background(Color(.systemBackground))
+        .background(AppStyle.surface1)
         .cornerRadius(AppStyle.cardRadius)
         .padding(.horizontal, 16)
     }
@@ -347,7 +349,7 @@ struct PayView: View {
     private func bonusSection(pay: PayMonth) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("奖金")
-                .font(.headline)
+                .appFont(size: AppFont.headline, weight: 600)
                 .padding(.bottom, 8)
             editableRow(title: "科室绩效", valueText: MoneyUtil.money(pay.deptPerf), field: .deptPerf,
                         currentValue: pay.deptPerf.map { String(format: "%.2f", $0) } ?? "4000",
@@ -374,7 +376,7 @@ struct PayView: View {
             // 大病医疗（修订版）：只汇算时扣，不进月度预扣；填了年度自付总额就提示一句。
             if let selfPay = store.user?.paySettings?.specialDeductions?.medicalSelfPayAnnual, selfPay > 0 {
                 Text("大病医疗需在次年汇算时扣除，未计入本月预扣；年度自付 \(MoneyUtil.money(selfPay))，预计汇算可扣 \(MoneyUtil.money(PayCalc.medicalAnnualDeduction(store.user?.paySettings?.specialDeductions)))。")
-                    .font(.caption)
+                    .appFont(size: AppFont.caption)
                     .foregroundColor(.secondary)
                     .padding(.vertical, 4)
             }
@@ -382,7 +384,7 @@ struct PayView: View {
             staticRow(title: "实发奖金", valueText: MoneyUtil.money(pay.bonusAfterTax), bold: true)
         }
         .padding(AppStyle.cardPadding)
-        .background(Color(.systemBackground))
+        .background(AppStyle.surface1)
         .cornerRadius(AppStyle.cardRadius)
         .padding(.horizontal, 16)
     }
@@ -392,7 +394,7 @@ struct PayView: View {
     private func salarySection(pay: PayMonth) -> some View {
         VStack(alignment: .leading, spacing: 0) {
             Text("工资")
-                .font(.headline)
+                .appFont(size: AppFont.headline, weight: 600)
                 .padding(.bottom, 8)
             staticRow(title: "基本工资", valueText: MoneyUtil.money(pay.baseSalary), bold: false)
             staticRow(title: "岗位", valueText: pay.position ?? "—", bold: false)
@@ -412,7 +414,7 @@ struct PayView: View {
             staticRow(title: "实发工资", valueText: MoneyUtil.money(pay.salaryNet), bold: true)
         }
         .padding(AppStyle.cardPadding)
-        .background(Color(.systemBackground))
+        .background(AppStyle.surface1)
         .cornerRadius(AppStyle.cardRadius)
         .padding(.horizontal, 16)
     }
@@ -425,9 +427,10 @@ struct PayView: View {
                     .foregroundColor(.secondary)
                 Spacer()
                 Text(valueText)
-                    .bold(bold)
+                    .appWeight(bold ? 700 : 400)
+                    .monospacedDigit()
             }
-            .font(.subheadline)
+            .appFont(size: AppFont.bodySmall)
             .padding(.vertical, 5)
             Divider()
         }
@@ -448,11 +451,12 @@ struct PayView: View {
                     .foregroundColor(.secondary)
                 Spacer()
                 Text(valueText)
+                    .monospacedDigit()
                 Button {
                     openEdit(field, currentValue: currentValue)
                 } label: {
                     Text("可改")
-                        .font(.caption)
+                        .appFont(size: AppFont.caption)
                         .foregroundColor(.blue)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
@@ -461,14 +465,18 @@ struct PayView: View {
                 }
                 .buttonStyle(.plain)
             }
-            .font(.subheadline)
+            .appFont(size: AppFont.bodySmall)
             .padding(.vertical, 5)
             if editingField == field {
                 VStack(spacing: 8) {
                     HStack {
                         TextField(placeholder, text: $editText)
                             .keyboardType(.decimalPad)
-                            .textFieldStyle(.roundedBorder)
+                            .textFieldStyle(.plain)
+                            .padding(10)
+                            .background(editFieldFocused ? AppStyle.surface2 : AppStyle.surface1)
+                            .cornerRadius(8)
+                            .shadow(color: editFieldFocused ? Color.black.opacity(0.12) : .clear, radius: 4, y: 1)
                             .focused($editFieldFocused)
                         Button("保存") { Task { await saveEdit() } }
                             .buttonStyle(.borderedProminent)
@@ -478,7 +486,7 @@ struct PayView: View {
                     }
                     if let editError {
                         Text(editError)
-                            .font(.caption)
+                            .appFont(size: AppFont.caption)
                             .foregroundColor(.red)
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
@@ -547,7 +555,7 @@ struct PayView: View {
 
     private var noteCard: some View {
         Text("计算工资仅供参考，请按照自己车间的平均绩效奖金填写，工资奖金会根据排班变化。")
-            .font(.caption)
+            .appFont(size: AppFont.caption)
             .foregroundColor(.secondary)
             .multilineTextAlignment(.center)
             .padding(.horizontal, 24)

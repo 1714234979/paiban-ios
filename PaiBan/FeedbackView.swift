@@ -47,7 +47,7 @@ struct FeedbackView: View {
                 Text("遇到什么问题？")
                     .font(.title2).bold()
                 Text("选一下类型和出问题的页面，再写清楚是哪个月出了问题。发送时会附上最近 24 小时的运行日志（只含 App 自己的运行记录，不含密码）。")
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.secondary)
 
                 HStack {
@@ -90,7 +90,7 @@ struct FeedbackView: View {
                             } label: {
                                 Image(systemName: "xmark.circle.fill")
                                     .foregroundColor(.secondary)
-                                    .background(Circle().fill(Color(.systemBackground)))
+                                    .background(Circle().fill(AppStyle.surface1))
                             }
                             .offset(x: 6, y: -6)
                         }
@@ -101,24 +101,23 @@ struct FeedbackView: View {
                 }
 
                 Text("问题描述")
-                    .font(.subheadline).bold()
+                    .appFont(size: AppFont.bodySmall, weight: 700)
                 TextEditor(text: $message)
                     .frame(minHeight: 100, maxHeight: 180)
+                    .scrollContentBackground(.hidden)
                     .padding(8)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: AppStyle.buttonRadius)
-                            .stroke(Color(.separator), lineWidth: 1)
-                    )
+                    .background(AppStyle.surface2)
+                    .cornerRadius(AppStyle.buttonRadius)
                 if let resultText {
                     Text(resultText)
-                        .font(.subheadline)
+                        .appFont(size: AppFont.bodySmall)
                         .foregroundColor(resultText.hasPrefix("已发送") ? .green : .red)
                 }
                 Button {
                     Task { await send() }
                 } label: {
                     Text(isSending ? "发送中…" : "发送反馈")
-                        .font(.headline)
+                        .appFont(size: AppFont.headline, weight: 600)
                         .frame(maxWidth: .infinity)
                         .frame(height: AppStyle.buttonHeight)
                         .background(AppStyle.navyAdaptive)
@@ -204,17 +203,17 @@ struct FeedbackView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
                 Text("我的反馈")
-                    .font(.headline)
+                    .appFont(size: AppFont.headline, weight: 600)
                 Spacer()
                 if isLoadingMyFeedback { ProgressView() }
             }
             if let myFeedbackError {
                 Text(myFeedbackError)
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.red)
             } else if myFeedback.isEmpty && !isLoadingMyFeedback {
                 Text("还没有反馈记录，上面提交后会出现在这里。")
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.secondary)
             }
             ForEach(myFeedback) { item in
@@ -240,18 +239,18 @@ struct FeedbackView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(feedbackTitle(item))
-                            .font(.subheadline).bold()
+                            .appFont(size: AppFont.bodySmall, weight: 700)
                             .foregroundColor(.primary)
                         Text(Self.displayTime(item.at))
-                            .font(.caption)
+                            .appFont(size: AppFont.caption)
                             .foregroundColor(.secondary)
                     }
                     Spacer()
                     Text(replyCountText(item))
-                        .font(.caption)
+                        .appFont(size: AppFont.caption)
                         .foregroundColor(.secondary)
                     Image(systemName: expandedFile == item.file ? "chevron.up" : "chevron.down")
-                        .font(.caption)
+                        .appFont(size: AppFont.caption)
                         .foregroundColor(.secondary)
                 }
             }
@@ -293,25 +292,25 @@ struct FeedbackView: View {
         return VStack(alignment: .leading, spacing: 8) {
             if replies.isEmpty {
                 Text("还没有回复，管理员回复后会出现在这里。")
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.secondary)
             }
             ForEach(replies) { reply in
                 VStack(alignment: .leading, spacing: 2) {
                     HStack {
                         Text(replySpeaker(reply))
-                            .font(.caption).bold()
+                            .appFont(size: AppFont.caption, weight: 700)
                             .foregroundColor(reply.from == "admin" ? AppStyle.navyText : .primary)
                         Text(Self.displayTime(reply.at))
-                            .font(.caption)
+                            .appFont(size: AppFont.caption)
                             .foregroundColor(.secondary)
                     }
                     Text(reply.text)
-                        .font(.subheadline)
+                        .appFont(size: AppFont.bodySmall)
                 }
                 .padding(8)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(reply.from == "admin" ? AppStyle.navy.opacity(0.08) : Color(.systemBackground))
+                .background(reply.from == "admin" ? AppStyle.navy.opacity(0.08) : AppStyle.surface1)
                 .cornerRadius(8)
             }
         }
@@ -328,12 +327,15 @@ struct FeedbackView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 8) {
                 TextField("继续回复…", text: $replyText)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
+                    .padding(10)
+                    .background(AppStyle.surface1)
+                    .cornerRadius(8)
                 Button {
                     Task { await sendReply(to: item) }
                 } label: {
                     Text(isReplying ? "发送中…" : "发送")
-                        .font(.subheadline).bold()
+                        .appFont(size: AppFont.bodySmall, weight: 700)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 8)
                         .background(AppStyle.navyAdaptive)
@@ -345,7 +347,7 @@ struct FeedbackView: View {
             }
             if let replyError {
                 Text(replyError)
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.red)
             }
         }

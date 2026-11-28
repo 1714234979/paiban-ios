@@ -210,7 +210,7 @@ struct ContentView: View {
     /// 登录/引导/主界面/离线页哪一个）。两个都满足才淡出，缺一个就继续盖着。
     private func maybeDismissSplash() {
         guard showSplash, splashMinTimePassed, !store.isStarting else { return }
-        withAnimation(.easeOut(duration: 0.35)) {
+        withAnimation(AppMotion.standard(0.35)) {
             showSplash = false
         }
     }

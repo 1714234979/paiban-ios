@@ -166,13 +166,23 @@ struct DayDetailView: View {
                     }
                     if let errorText {
                         Text(errorText)
-                            .font(.subheadline)
+                            .appFont(size: AppFont.bodySmall)
                             .foregroundColor(.red)
                     }
                     if let doneMessage {
-                        Text(doneMessage)
-                            .font(.subheadline)
-                            .foregroundColor(.green)
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.green)
+                                .iconAligned()
+                            Text(doneMessage)
+                                .appFont(size: AppFont.bodySmall)
+                                .foregroundColor(.green)
+                        }
+                        .blurIn()
+                        .task(id: doneMessage) {
+                            try? await Task.sleep(nanoseconds: 2_500_000_000)
+                            if self.doneMessage == doneMessage { self.doneMessage = nil }
+                        }
                     }
                     if canEdit {
                         // 手动排班（1.2.7.001，第 24 条）：点一天直接设当天班次，不用走调班。
@@ -213,14 +223,14 @@ struct DayDetailView: View {
         HStack(spacing: 14) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(DateUtil.fullFormatter.string(from: DateUtil.date(from: shownDay.date) ?? Date()) + " " + shownDay.weekdayText)
-                    .font(.headline)
+                    .appFont(size: AppFont.headline, weight: 600)
                 Text("\(shownDay.team ?? store.myTeam)班 · 基础班次 \(shownDay.baseShift ?? "—")")
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.secondary)
             }
             Spacer()
             Text(shownDay.shift)
-                .font(.headline)
+                .appFont(size: AppFont.headline, weight: 600)
                 .foregroundColor(.white)
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
@@ -228,7 +238,7 @@ struct DayDetailView: View {
                 .cornerRadius(8)
         }
         .padding(AppStyle.cardPadding)
-        .background(Color(.secondarySystemBackground))
+        .background(AppStyle.surface2)
         .cornerRadius(AppStyle.cardRadius)
     }
 
@@ -272,7 +282,7 @@ struct DayDetailView: View {
             }
         }
         .padding(AppStyle.cardPadding)
-        .background(Color(.secondarySystemBackground))
+        .background(AppStyle.surface2)
         .cornerRadius(AppStyle.cardRadius)
     }
 
@@ -282,9 +292,10 @@ struct DayDetailView: View {
                 .foregroundColor(.secondary)
                 .frame(width: 76, alignment: .leading)
             Text(value)
+                .monospacedDigit()
             Spacer()
         }
-        .font(.subheadline)
+        .appFont(size: AppFont.bodySmall)
     }
 
     /// 1.2.9.003：当天预估工资（与 PayCalc.todayEstimate 同口径，第 40 条）：
@@ -312,7 +323,7 @@ struct DayDetailView: View {
     private var otherTeamsCard: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("其他班次")
-                .font(.subheadline)
+                .appFont(size: AppFont.bodySmall)
                 .foregroundColor(.secondary)
             HStack(spacing: 8) {
                 ForEach(otherTeams, id: \.team) { item in
@@ -321,7 +332,7 @@ struct DayDetailView: View {
             }
         }
         .padding(AppStyle.cardPadding)
-        .background(Color(.secondarySystemBackground))
+        .background(AppStyle.surface2)
         .cornerRadius(AppStyle.cardRadius)
     }
 
@@ -347,7 +358,7 @@ struct DayDetailView: View {
                 .bold()
             Text(shift == "休息" ? "休" : shift)
         }
-        .font(.subheadline)
+        .appFont(size: AppFont.bodySmall)
         .lineLimit(1)
         .minimumScaleFactor(0.85)
         .foregroundColor(shift == "休息" ? ShiftStyle.color(for: "休息") : .white)
@@ -388,7 +399,7 @@ struct DayDetailView: View {
 
     private var banHint: some View {
         Text(banHintText)
-            .font(.subheadline)
+            .appFont(size: AppFont.bodySmall)
             .lineSpacing(4)
             .foregroundColor(AppStyle.banHintText)
             .padding(AppStyle.cardPadding)
@@ -400,11 +411,11 @@ struct DayDetailView: View {
     /// 只读提示：看别的班的日历时显示，改数据的入口全部不出现。
     private var readOnlyNote: some View {
         Text("正在看 \(shownDay.team ?? store.viewTeam) 班的日历，只能看，不能改。切回自己班（\(store.myTeam) 班）才能调班、请假、记加班。")
-            .font(.subheadline)
+            .appFont(size: AppFont.bodySmall)
             .foregroundColor(.secondary)
             .padding(AppStyle.cardPadding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(.secondarySystemBackground))
+            .background(AppStyle.surface2)
             .cornerRadius(AppStyle.cardRadius)
     }
 
@@ -414,9 +425,9 @@ struct DayDetailView: View {
     private var manualShiftPicker: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("设当天班次")
-                .font(.headline)
+                .appFont(size: AppFont.headline, weight: 600)
             Text("手动排班没有周期规律，点一天设当天班次；没设的当天算休息。")
-                .font(.subheadline)
+                .appFont(size: AppFont.bodySmall)
                 .foregroundColor(.secondary)
             Picker("当天班次", selection: Binding(
                 get: { shownDay.shift },
@@ -435,7 +446,7 @@ struct DayDetailView: View {
             }
         }
         .padding(AppStyle.cardPadding)
-        .background(Color(.secondarySystemBackground))
+        .background(AppStyle.surface2)
         .cornerRadius(AppStyle.cardRadius)
     }
 
@@ -488,15 +499,15 @@ struct DayDetailView: View {
     private var editShiftForm: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("改排班")
-                .font(.headline)
+                .appFont(size: AppFont.headline, weight: 600)
             Text("现在这天是 \(shownDay.shift)。改成：")
-                .font(.subheadline)
+                .appFont(size: AppFont.bodySmall)
                 .foregroundColor(.secondary)
             ForEach(editShiftOptions, id: \.self) { shift in
                 editShiftOptionRow(shift)
             }
             Text("没有「休息」：想恢复原来的班，用下面的「删除这次调班」。")
-                .font(.caption)
+                .appFont(size: AppFont.caption)
                 .foregroundColor(.secondary)
             Button {
                 Task { await submitEditShift() }
@@ -512,7 +523,7 @@ struct DayDetailView: View {
             .disabled(editShiftSaving)
         }
         .padding(AppStyle.cardPadding)
-        .background(Color(.secondarySystemBackground))
+        .background(AppStyle.surface2)
         .cornerRadius(AppStyle.cardRadius)
     }
 
@@ -523,10 +534,10 @@ struct DayDetailView: View {
         } label: {
             HStack {
                 Text(shift)
-                    .font(.subheadline).bold()
+                    .appFont(size: AppFont.bodySmall, weight: 700)
                     .foregroundColor(.primary)
                 Text(ShiftStyle.timeRange(for: shift))
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.secondary)
                 Spacer()
                 if editShiftSelection == shift {
@@ -536,9 +547,8 @@ struct DayDetailView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
-            .background(editShiftSelection == shift ? Color.accentColor.opacity(0.12) : Color(.systemBackground))
+            .background(editShiftSelection == shift ? Color.accentColor.opacity(0.12) : AppStyle.surface1)
             .cornerRadius(10)
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(editShiftSelection == shift ? Color.accentColor : Color.clear, lineWidth: 1.5))
         }
         .buttonStyle(.plain)
     }
@@ -630,7 +640,7 @@ struct DayDetailView: View {
                             .foregroundColor(.red)
                     }
                 }
-                .font(.subheadline)
+                .appFont(size: AppFont.bodySmall)
             }
             if showDeleteSwap {
                 deleteSwapConfirm
@@ -684,25 +694,25 @@ struct DayDetailView: View {
         VStack(alignment: .leading, spacing: 8) {
             if let cover = shownDay.coverDate {
                 Text("这是还班日，还的是 \(cover) 那次调班。")
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall)
                 Text("我这天上 \(shownDay.shift)\(shownDay.partner.map { "，\($0)班这天休息" } ?? "")。")
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.secondary)
             } else {
                 if let partner = shownDay.partner, let pShift = shownDay.partnerShift {
                     Text("已调班：我这天休息，\(partner)班替我上 \(pShift)\(shownDay.note.map { "（\($0)）" } ?? "")。")
-                        .font(.subheadline)
+                        .appFont(size: AppFont.bodySmall)
                 } else {
                     Text("已调班：我这天改成 \(shownDay.shift)\(shownDay.note.map { "（\($0)）" } ?? "")。")
-                        .font(.subheadline)
+                        .appFont(size: AppFont.bodySmall)
                 }
                 if let payback = shownDay.paybackDate {
                     Text("还班日：\(payback)\(paybackShiftText(payback))。")
-                        .font(.subheadline)
+                        .appFont(size: AppFont.bodySmall)
                         .foregroundColor(.secondary)
                 } else {
                     Text("还班日还没定（待还班）。过几天再补填还班日，一直不还就转为请假。")
-                        .font(.subheadline)
+                        .appFont(size: AppFont.bodySmall)
                         .foregroundColor(.secondary)
                     HStack(spacing: 12) {
                         Button("补填还班日") {
@@ -717,7 +727,7 @@ struct DayDetailView: View {
                     if showConvertLeave {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("转为请假后，这天按请假算。")
-                                .font(.caption)
+                                .appFont(size: AppFont.caption)
                                 .foregroundColor(.secondary)
                             HStack(spacing: 12) {
                                 Button("确认转请假") { Task { await convertToLeave() } }
@@ -727,21 +737,21 @@ struct DayDetailView: View {
                             }
                         }
                         .padding(10)
-                        .background(Color(.secondarySystemBackground))
+                        .background(AppStyle.surface2)
                         .cornerRadius(10)
                     }
                 }
             }
         }
         .padding(AppStyle.cardPadding)
-        .background(Color(.secondarySystemBackground))
+        .background(AppStyle.surface2)
         .cornerRadius(AppStyle.cardRadius)
     }
 
     private var deleteSwapConfirm: some View {
         HStack(spacing: 12) {
             Text("删除这次调班，两边一起恢复原排班（还班日也一起删）。")
-                .font(.caption)
+                .appFont(size: AppFont.caption)
                 .foregroundColor(.secondary)
             Spacer()
             Button("确认删除") { Task { await cancelSwap() } }
@@ -749,14 +759,14 @@ struct DayDetailView: View {
             Button("取消") { showDeleteSwap = false }
         }
         .padding(10)
-        .background(Color(.secondarySystemBackground))
+        .background(AppStyle.surface2)
         .cornerRadius(10)
     }
 
     private var deleteLeaveConfirm: some View {
         HStack(spacing: 12) {
             Text(shownDay.partner != nil ? "确认取消？请假和顶岗一起取消。" : "确认取消请假？")
-                .font(.caption)
+                .appFont(size: AppFont.caption)
                 .foregroundColor(.secondary)
             Spacer()
             Button("确认取消") { Task { await cancelLeave() } }
@@ -764,7 +774,7 @@ struct DayDetailView: View {
             Button("取消") { showDeleteLeave = false }
         }
         .padding(10)
-        .background(Color(.secondarySystemBackground))
+        .background(AppStyle.surface2)
         .cornerRadius(10)
     }
 
@@ -903,20 +913,20 @@ struct DayDetailView: View {
     private var swapFlow: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("调班（和别的班换）")
-                .font(.headline)
+                .appFont(size: AppFont.headline, weight: 600)
             if shownDay.onLeave == true {
                 Text("这天已请假，要调班先取消请假。")
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.secondary)
             } else if shownDay.shift == "休息" {
                 Text("这天我休息，没有班可调。")
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.secondary)
             } else {
                 Text("我这天上 \(shownDay.shift)（\(ShiftStyle.timeRange(for: shownDay.shift))），调班后我这天休息。选一个班替我上这天的班：")
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall)
                 Text("第 1 步 · 哪个班替我上这天")
-                    .font(.subheadline).bold()
+                    .appFont(size: AppFont.bodySmall, weight: 700)
                 if teamsRange == nil && teamsLoading {
                     ProgressView("正在读其他班组排班…")
                 } else {
@@ -930,9 +940,9 @@ struct DayDetailView: View {
                 }
                 if let partner = swapPartner, let pShift = swapPartnerShift {
                     Text("\(partner)班替我上这天：他那天上 \(pShift)（\(ShiftStyle.timeRange(for: pShift))）；我这天休息。")
-                        .font(.subheadline)
+                        .appFont(size: AppFont.bodySmall)
                     Text("第 2 步 · 还班日（本月任意一天，也可以以后再定）")
-                        .font(.subheadline).bold()
+                        .appFont(size: AppFont.bodySmall, weight: 700)
                     Button {
                         swapLater = true
                         swapPayback = nil
@@ -940,17 +950,16 @@ struct DayDetailView: View {
                     } label: {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("还班日先不填 · 以后再定")
-                                .font(.subheadline).bold()
+                                .appFont(size: AppFont.bodySmall, weight: 700)
                                 .foregroundColor(.primary)
                             Text("先把这天调了，这条记成「待还班」；过几天再到当天详情里补填还班日，一直不还就转为请假。")
-                                .font(.caption)
+                                .appFont(size: AppFont.caption)
                                 .foregroundColor(.secondary)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(12)
-                        .background(swapLater ? Color.accentColor.opacity(0.12) : Color(.secondarySystemBackground))
+                        .background(swapLater ? Color.accentColor.opacity(0.12) : AppStyle.surface2)
                         .cornerRadius(10)
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(swapLater ? Color.accentColor : Color.clear, lineWidth: 1.5))
                     }
                     .buttonStyle(.plain)
                     ScrollView {
@@ -968,7 +977,10 @@ struct DayDetailView: View {
                     // 预览两边：保存前先看清楚替班日与还班日各变成什么。
                     swapPreview(partner: partner, partnerShift: pShift)
                     TextField("备注（可选）", text: $swapNote)
-                        .textFieldStyle(.roundedBorder)
+                        .textFieldStyle(.plain)
+                        .padding(10)
+                        .background(AppStyle.surface1)
+                        .cornerRadius(8)
                     Button {
                         Task { await submitSwap() }
                     } label: {
@@ -985,7 +997,7 @@ struct DayDetailView: View {
             }
         }
         .padding(AppStyle.cardPadding)
-        .background(Color(.secondarySystemBackground))
+        .background(AppStyle.surface2)
         .cornerRadius(AppStyle.cardRadius)
         .task { await loadTeamsRange() }
     }
@@ -995,34 +1007,33 @@ struct DayDetailView: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack {
                     Text("\(team)班")
-                        .font(.headline)
+                        .appFont(size: AppFont.headline, weight: 600)
                     Spacer()
                     Text(ev.eligible ? "可以" : "不行")
-                        .font(.subheadline).bold()
+                        .appFont(size: AppFont.bodySmall, weight: 700)
                         .foregroundColor(ev.eligible ? .green : .secondary)
                 }
                 Text("这天本来：\(ev.ownShift.isEmpty ? "—" : ev.ownShift)\(ev.ownShift.isEmpty || ev.ownShift == "休息" ? "" : " \(ShiftStyle.timeRange(for: ev.ownShift))")")
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.secondary)
                 if ev.eligible, let result = ev.result {
                     if ev.ownShift == "休息" {
                         Text("\(resultLabel)：只上一个班 · \(result)\n这天本来休息，替班后就上这一个班（\(ShiftStyle.timeRange(for: result))），不算双班")
-                            .font(.subheadline)
+                            .appFont(size: AppFont.bodySmall)
                     } else {
                         Text("\(resultLabel)：\(result)\n\(ShiftStyle.timeRange(for: result))")
-                            .font(.subheadline)
+                            .appFont(size: AppFont.bodySmall)
                     }
                 } else {
                     Text(ev.reason ?? "不行")
-                        .font(.subheadline)
+                        .appFont(size: AppFont.bodySmall)
                         .foregroundColor(.secondary)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
-            .background(selected ? Color.accentColor.opacity(0.12) : Color(.systemBackground))
+            .background(selected ? Color.accentColor.opacity(0.12) : AppStyle.surface1)
             .cornerRadius(10)
-            .overlay(RoundedRectangle(cornerRadius: 10).stroke(selected ? Color.accentColor : Color.clear, lineWidth: 1.5))
             .opacity(ev.eligible ? 1 : 0.6)
         }
         .buttonStyle(.plain)
@@ -1035,23 +1046,23 @@ struct DayDetailView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("\(r.date) \(r.weekday)")
-                        .font(.subheadline)
+                        .appFont(size: AppFont.bodySmall)
                     Text("我本来 \(r.myShift)")
-                        .font(.caption)
+                        .appFont(size: AppFont.caption)
                         .foregroundColor(.secondary)
                     if let result = r.result {
                         Text("还班后我上 \(result)（\(ShiftStyle.timeRange(for: result))）")
-                            .font(.caption)
+                            .appFont(size: AppFont.caption)
                             .foregroundColor(.secondary)
                     } else {
                         Text(r.reason ?? "不行")
-                            .font(.caption)
+                            .appFont(size: AppFont.caption)
                             .foregroundColor(.secondary)
                     }
                 }
                 Spacer()
                 Text(r.result == nil ? "不行" : "可以")
-                    .font(.caption).bold()
+                    .appFont(size: AppFont.caption, weight: 700)
                     .foregroundColor(r.result == nil ? .secondary : .green)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -1068,18 +1079,18 @@ struct DayDetailView: View {
     private func swapPreview(partner: String, partnerShift: String) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("保存前预览")
-                .font(.subheadline).bold()
+                .appFont(size: AppFont.bodySmall, weight: 700)
             Text("替班日 \(shownDay.date)：我 \(shownDay.shift) → 休息；\(partner)班替我上 \(partnerShift)（\(ShiftStyle.timeRange(for: partnerShift))）。")
-                .font(.subheadline)
+                .appFont(size: AppFont.bodySmall)
             if swapLater {
                 Text("还班日：还没定。先这样保存，这条记成「待还班」；以后在当天详情里补填还班日，一直不还就转为请假（这天按请假算）。")
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall)
             } else if let payback = swapPayback, let pbShift = swapPaybackShift {
                 Text("还班日 \(payback)：我 \(myDayOn(payback)?.shift ?? "") → \(pbShift)（\(ShiftStyle.timeRange(for: pbShift))）；\(partner)班那天休息。")
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall)
             } else {
                 Text("还班日：还没选。选一天当还班日，或者点「还班日先不填」。")
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.secondary)
             }
         }
@@ -1104,14 +1115,14 @@ struct DayDetailView: View {
     private var fillPaybackFlow: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("补填还班日")
-                .font(.headline)
+                .appFont(size: AppFont.headline, weight: 600)
             if let partner = shownDay.partner, let covered = coveredShift {
                 Text("给 \(shownDay.date) 那次调班补一个还班日（本月任意一天）：那天我替 \(partner)班上他那天的班（那次调班里我被替掉的是 \(covered)）。")
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.secondary)
             } else {
                 Text("给 \(shownDay.date) 那次调班补一个还班日（本月任意一天）。")
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.secondary)
             }
             if let covered = coveredShift {
@@ -1128,11 +1139,11 @@ struct DayDetailView: View {
                 .frame(maxHeight: 320)
                 if let payback = fillPayback, let result = fillPaybackShift {
                     Text("还班日 \(payback)：我那天上 \(result)（\(ShiftStyle.timeRange(for: result))）。")
-                        .font(.subheadline)
+                        .appFont(size: AppFont.bodySmall)
                 }
             } else {
                 Text("这条调班记录不完整（没有对方班组），补不上还班日。")
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.secondary)
             }
             Button {
@@ -1145,7 +1156,7 @@ struct DayDetailView: View {
             .disabled(fillPayback == nil || fillPaybackShift == nil)
         }
         .padding(AppStyle.cardPadding)
-        .background(Color(.secondarySystemBackground))
+        .background(AppStyle.surface2)
         .cornerRadius(AppStyle.cardRadius)
         .task { await loadTeamsRange() }
     }
@@ -1155,17 +1166,17 @@ struct DayDetailView: View {
     private var leaveForm: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("请假")
-                .font(.headline)
+                .appFont(size: AppFont.headline, weight: 600)
             if shownDay.onLeave == true {
                 Text("已请假（\(shownDay.leaveType ?? "请假")）\(shownDay.leaveNote.map { " · \($0)" } ?? "")")
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall)
                 if let partner = shownDay.partner, !partner.isEmpty {
                     Text("顶岗：\(partner)班上 \(shownDay.partnerShift ?? "")。")
-                        .font(.subheadline)
+                        .appFont(size: AppFont.bodySmall)
                         .foregroundColor(.secondary)
                 } else if shownDay.shift != "休息" {
                     Text("还没安排顶岗。")
-                        .font(.subheadline)
+                        .appFont(size: AppFont.bodySmall)
                         .foregroundColor(.secondary)
                     Button("安排顶岗") {
                         leaveCoverPartner = nil
@@ -1180,7 +1191,7 @@ struct DayDetailView: View {
                         }
                         if let partner = leaveCoverPartner, let result = leaveCoverCandidates.first(where: { $0.team == partner })?.ev.result {
                             Text("\(partner)班顶岗：他这天上 \(result)（\(ShiftStyle.timeRange(for: result))）；我这天请假休息。")
-                                .font(.subheadline)
+                                .appFont(size: AppFont.bodySmall)
                             Button("确认安排顶岗") { Task { await submitLeaveCover() } }
                                 .buttonStyle(.borderedProminent)
                                 .frame(maxWidth: .infinity)
@@ -1196,7 +1207,10 @@ struct DayDetailView: View {
                 }
                 .pickerStyle(.segmented)
                 TextField("备注（可选）", text: $leaveNote)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
+                    .padding(10)
+                    .background(AppStyle.surface1)
+                    .cornerRadius(8)
                 Button("保存修改") { Task { await submitLeave() } }
                     .buttonStyle(.borderedProminent)
                     .frame(maxWidth: .infinity)
@@ -1208,10 +1222,13 @@ struct DayDetailView: View {
                 }
                 .pickerStyle(.segmented)
                 TextField("备注（可选）", text: $leaveNote)
-                    .textFieldStyle(.roundedBorder)
+                    .textFieldStyle(.plain)
+                    .padding(10)
+                    .background(AppStyle.surface1)
+                    .cornerRadius(8)
                 if shownDay.shift != "休息" {
                     Text("安排顶岗（可选）：选一个人替我上这天的班。")
-                        .font(.subheadline).bold()
+                        .appFont(size: AppFont.bodySmall, weight: 700)
                     Button("选顶岗的人") {
                         leaveCoverPartner = nil
                         Task { await loadTeamsRange() }
@@ -1233,7 +1250,7 @@ struct DayDetailView: View {
             }
         }
         .padding(AppStyle.cardPadding)
-        .background(Color(.secondarySystemBackground))
+        .background(AppStyle.surface2)
         .cornerRadius(AppStyle.cardRadius)
     }
 
@@ -1261,7 +1278,7 @@ struct DayDetailView: View {
     private var leaveRangeForm: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("请一段假（只算有班的日子，休班跳过，最多 62 天）")
-                .font(.headline)
+                .appFont(size: AppFont.headline, weight: 600)
             DatePicker("从", selection: $rangeStart, displayedComponents: .date)
             DatePicker("到", selection: $rangeEnd, displayedComponents: .date)
             Picker("类型", selection: $leaveType) {
@@ -1271,13 +1288,16 @@ struct DayDetailView: View {
             }
             .pickerStyle(.segmented)
             TextField("备注（可选）", text: $leaveNote)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
+                .padding(10)
+                .background(AppStyle.surface1)
+                .cornerRadius(8)
             Button("确认请假") { Task { await submitLeaveRange() } }
                 .buttonStyle(.borderedProminent)
                 .frame(maxWidth: .infinity)
         }
         .padding(AppStyle.cardPadding)
-        .background(Color(.secondarySystemBackground))
+        .background(AppStyle.surface2)
         .cornerRadius(AppStyle.cardRadius)
     }
 
@@ -1294,7 +1314,7 @@ struct DayDetailView: View {
     private var overtimeForm: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("记加班")
-                .font(.headline)
+                .appFont(size: AppFont.headline, weight: 600)
             DatePicker("开始", selection: $overtimeStart, displayedComponents: .hourAndMinute)
             DatePicker("结束", selection: $overtimeEnd, displayedComponents: .hourAndMinute)
             HStack {
@@ -1302,20 +1322,23 @@ struct DayDetailView: View {
                     .foregroundColor(.secondary)
                 Spacer()
                 Text(overtimeDurationText)
-                    .font(.headline)
+                    .appFont(size: AppFont.headline, weight: 600)
                     .foregroundColor(.blue)
             }
             Text("结束比开始早算跨夜（比如 22:00 到 02:00 是 4 小时）。")
-                .font(.caption)
+                .appFont(size: AppFont.caption)
                 .foregroundColor(.secondary)
             TextField("备注（可选）", text: $overtimeNote)
-                .textFieldStyle(.roundedBorder)
+                .textFieldStyle(.plain)
+                .padding(10)
+                .background(AppStyle.surface1)
+                .cornerRadius(8)
             Button("确认加班") { Task { await submitOvertime() } }
                 .buttonStyle(.borderedProminent)
                 .frame(maxWidth: .infinity)
         }
         .padding(AppStyle.cardPadding)
-        .background(Color(.secondarySystemBackground))
+        .background(AppStyle.surface2)
         .cornerRadius(AppStyle.cardRadius)
     }
 

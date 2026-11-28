@@ -34,12 +34,12 @@ struct OnboardingView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: AppStyle.sectionSpacing) {
                         Text("第 \(step + 1) 步 / 共 \(totalSteps) 步")
-                            .font(.caption)
+                            .appFont(size: AppFont.caption)
                             .foregroundColor(.secondary)
                         stepBody
                         if let errorText {
                             Text(errorText)
-                                .font(.subheadline)
+                                .appFont(size: AppFont.bodySmall)
                                 .foregroundColor(.red)
                         }
                     }
@@ -91,16 +91,16 @@ struct OnboardingView: View {
     private var stepMethod: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("你的班次怎么排？")
-                .font(.title2).bold()
+                .appFont(size: AppFont.titleLarge, weight: 700)
             Text("先选一种排班方式，之后在设置 → 倒班方式设置里随时能改。")
                 .foregroundColor(.secondary)
             Button {
                 method = "manual"
             } label: {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("手动排班").font(.headline).foregroundColor(.white)
+                    Text("手动排班").appFont(size: AppFont.headline, weight: 600).foregroundColor(.white)
                     Text("班次无周期规律\n灵活性强但需逐日点击")
-                        .font(.subheadline).foregroundColor(AppStyle.whiteText(opacity: 0.9))
+                        .appFont(size: AppFont.bodySmall).foregroundColor(AppStyle.whiteText(opacity: 0.9))
                 }
                 .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
                 .padding(16)
@@ -108,17 +108,18 @@ struct OnboardingView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .overlay(
                     RoundedRectangle(cornerRadius: 14)
-                        .stroke(method == "manual" ? Color.primary : Color.clear, lineWidth: 2)
+                        .fill(Color.white.opacity(method == "manual" ? 0.12 : 0))
                 )
+                .shadow(color: method == "manual" ? Color.black.opacity(0.25) : .clear, radius: 6, y: 2)
             }
             .buttonStyle(.plain)
             Button {
                 method = "periodic"
             } label: {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("周期排班").font(.headline).foregroundColor(.white)
+                    Text("周期排班").appFont(size: AppFont.headline, weight: 600).foregroundColor(.white)
                     Text("班次周期固定\n一次生成多月日历")
-                        .font(.subheadline).foregroundColor(AppStyle.whiteText(opacity: 0.9))
+                        .appFont(size: AppFont.bodySmall).foregroundColor(AppStyle.whiteText(opacity: 0.9))
                 }
                 .frame(maxWidth: .infinity, minHeight: 92, alignment: .leading)
                 .padding(16)
@@ -126,8 +127,9 @@ struct OnboardingView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 14))
                 .overlay(
                     RoundedRectangle(cornerRadius: 14)
-                        .stroke(method == "periodic" ? Color.primary : Color.clear, lineWidth: 2)
+                        .fill(Color.white.opacity(method == "periodic" ? 0.12 : 0))
                 )
+                .shadow(color: method == "periodic" ? Color.black.opacity(0.25) : .clear, radius: 6, y: 2)
             }
             .buttonStyle(.plain)
         }
@@ -138,12 +140,12 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 16) {
             if isManual {
                 Text("你在哪个班？")
-                    .font(.title2).bold()
+                    .appFont(size: AppFont.titleLarge, weight: 700)
                 Text("手动排班没有周期规律。选好班组后，去排班页点某一天设当天班次。")
                     .foregroundColor(.secondary)
             } else {
                 Text("选倒班方式和班组")
-                    .font(.title2).bold()
+                    .appFont(size: AppFont.titleLarge, weight: 700)
                 Text("方式 A 是最标准的 8 天循环。班组数跟着方式走（五班三倒 5 个班，三班二倒 3 个班）。")
                     .foregroundColor(.secondary)
                 // 1.2.7.002：全部方式按分类列出（四班三倒 5 种 + 新 15 种）；六班三倒序列未核实，继续留「即将推出」。
@@ -151,7 +153,7 @@ struct OnboardingView: View {
                 // 只看名字和循环天数不好分辨——引导里四班三倒 5 种本来就全列着，缺的是这些。
                 ForEach(RotationModes.categories, id: \.title) { cat in
                     Text(cat.title)
-                        .font(.subheadline).bold()
+                        .appFont(size: AppFont.bodySmall).bold()
                         .padding(.top, 4)
                     ForEach(cat.ids.compactMap { RotationModes.mode(id: $0) }) { mode in
                         Button {
@@ -166,16 +168,16 @@ struct OnboardingView: View {
                                     Text(mode.name)
                                         .foregroundColor(.primary)
                                     Text("\(mode.cycleDays) 天一循环 · \(mode.sequence) · \(mode.shiftHours) 小时/班 · 周均 \(mode.weeklyHours) 小时")
-                                        .font(.caption)
+                                        .appFont(size: AppFont.caption)
                                         .foregroundColor(.secondary)
                                     if let note = mode.note {
                                         Text(note)
-                                            .font(.caption)
+                                            .appFont(size: AppFont.caption)
                                             .foregroundColor(.secondary)
                                     }
                                     if mode.isPayTBD {
                                         Text("工资口径待定（金额暂不算）")
-                                            .font(.caption)
+                                            .appFont(size: AppFont.caption)
                                             .foregroundColor(.orange)
                                     }
                                 }
@@ -198,7 +200,7 @@ struct OnboardingView: View {
                             .foregroundColor(.secondary)
                         Spacer()
                         Text("即将推出")
-                            .font(.caption)
+                            .appFont(size: AppFont.caption)
                             .foregroundColor(.secondary)
                             .padding(.horizontal, 8)
                             .padding(.vertical, 4)
@@ -214,7 +216,7 @@ struct OnboardingView: View {
                 // 选完一眼就能看到这方式每天上什么班，不用凭名字猜。
                 if let mode = RotationModes.mode(id: modeId) {
                     Text("循环示意 · \(team)班 \(mode.name)")
-                        .font(.subheadline).bold()
+                        .appFont(size: AppFont.bodySmall).bold()
                         .padding(.top, 4)
                     CyclePreviewView(mode: mode, team: team, baseDate: baseDate)
                         .padding(10)
@@ -224,7 +226,7 @@ struct OnboardingView: View {
             }
 
             Text("你在哪个班？")
-                .font(.headline)
+                .appFont(size: AppFont.headline, weight: 600)
             Picker("班组", selection: $team) {
                 ForEach(RotationModes.mode(id: modeId)?.teamIds ?? TeamInfo.allTeams, id: \.self) { t in
                     Text("\(t)班").tag(t)
@@ -236,17 +238,17 @@ struct OnboardingView: View {
                 DatePicker("基准日", selection: $baseDate, displayedComponents: .date)
                 if let mode = RotationModes.mode(id: modeId) {
                     Text("\(team)班在基准日上 \(RotationModes.shiftName(for: mode.cycles[team]?.first ?? "D"))；基准日是循环第 1 天。")
-                        .font(.caption)
+                        .appFont(size: AppFont.caption)
                         .foregroundColor(.secondary)
                     if mode.id == "2-a" || mode.id == "3-3-a" || mode.id == "4-6-a" {
                         Text("基准日请选周一（按下周一起算，周六日休息）。")
-                            .font(.caption)
+                            .appFont(size: AppFont.caption)
                             .foregroundColor(.secondary)
                     }
                 }
             }
             Text("日=日班 08–16，中=中班 16–24，早=早班 00–08，休=休息")
-                .font(.caption)
+                .appFont(size: AppFont.caption)
                 .foregroundColor(.secondary)
         }
     }
@@ -337,12 +339,12 @@ struct PayGuideView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: AppStyle.sectionSpacing) {
                         Text("第 \(step + 1) 步 / 共 \(totalSteps) 步")
-                            .font(.caption)
+                            .appFont(size: AppFont.caption)
                             .foregroundColor(.secondary)
                         stepBody
                         if let errorText {
                             Text(errorText)
-                                .font(.subheadline)
+                                .appFont(size: AppFont.bodySmall)
                                 .foregroundColor(.red)
                         }
                     }
@@ -401,7 +403,7 @@ struct PayGuideView: View {
     private var stepSalary: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("先填工资底数")
-                .font(.title2).bold()
+                .appFont(size: AppFont.titleLarge, weight: 700)
             Text("基本工资和奖金系数决定了工资和奖金的底数，填好后工资页就能按你的数算。")
                 .foregroundColor(.secondary)
             HStack {
@@ -421,7 +423,7 @@ struct PayGuideView: View {
                     .frame(width: 120)
             }
             Text("不知道填多少就问管理员，或先按默认的 2420 / 1.0，之后在设置 → 工资设置里改。")
-                .font(.caption)
+                .appFont(size: AppFont.caption)
                 .foregroundColor(.secondary)
         }
     }
@@ -431,7 +433,7 @@ struct PayGuideView: View {
     private var stepContribution: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("社保缴费基数和岗位")
-                .font(.title2).bold()
+                .appFont(size: AppFont.titleLarge, weight: 700)
             Text("养老月扣填工资条上扣的养老保险那笔，基数会自动反推出来。")
                 .foregroundColor(.secondary)
             HStack {
@@ -450,10 +452,10 @@ struct PayGuideView: View {
                     Text("\(PayCalc.jsNum(base))（医疗 \(MoneyUtil.money(PayCalc.round2(base * 0.02))) · 失业 \(MoneyUtil.money(PayCalc.round2(base * 0.003)))）")
                         .foregroundColor(.secondary)
                 }
-                .font(.caption)
+                .appFont(size: AppFont.caption)
             } else {
                 Text("养老月扣空着也行，基数先按默认的 5938，之后在设置 → 工资设置里补。")
-                    .font(.caption)
+                    .appFont(size: AppFont.caption)
                     .foregroundColor(.secondary)
             }
             HStack {
@@ -473,7 +475,7 @@ struct PayGuideView: View {
     private var stepHire: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("入职时间和年休假")
-                .font(.title2).bold()
+                .appFont(size: AppFont.titleLarge, weight: 700)
             Text("入职时间只到月份，用来算工龄津贴；剩余年休假是今年还没休的年假天数。")
                 .foregroundColor(.secondary)
             HStack {
@@ -505,7 +507,7 @@ struct PayGuideView: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("剩余年休假天数")
                     Text("没休完的累计到明年，不清零；休了年假会自动扣")
-                        .font(.caption)
+                        .appFont(size: AppFont.caption)
                         .foregroundColor(.secondary)
                 }
                 Spacer()
@@ -515,7 +517,7 @@ struct PayGuideView: View {
                     .frame(width: 120)
             }
             Text("填完点「完成」，工资页就按这些数算。以后在设置 → 工资设置里随时能改。")
-                .font(.caption)
+                .appFont(size: AppFont.caption)
                 .foregroundColor(.secondary)
         }
     }
@@ -595,7 +597,7 @@ struct HousingFundPromptView: View {
         NavigationStack {
             VStack(alignment: .leading, spacing: AppStyle.sectionSpacing) {
                 Text("公积金按工资条上的实际月扣金额填。以前按缴费基数×6.8% 反推，算出来的和工资条对不上，所以现在直接填；不填按 0 算（不扣公积金）。")
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.secondary)
                 HStack {
                     Text("公积金")
@@ -608,7 +610,7 @@ struct HousingFundPromptView: View {
                 .font(.body)
                 if let errorText {
                     Text(errorText)
-                        .font(.subheadline)
+                        .appFont(size: AppFont.bodySmall)
                         .foregroundColor(.red)
                 }
                 Spacer()

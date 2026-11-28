@@ -226,12 +226,8 @@ struct ManualScheduleView: View {
             }
             .padding(.vertical, 6)
             .padding(.horizontal, 2)
-            .background(today ? Color.yellow.opacity(0.18) : Color.clear)
+            .background(selected ? Color.green.opacity(0.15) : (today ? Color.yellow.opacity(0.18) : Color.clear))
             .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(selected ? Color.green : Color.clear, lineWidth: 2)
-            )
         }
         .buttonStyle(.plain)
         .frame(height: 64)
@@ -318,7 +314,15 @@ struct ManualScheduleView: View {
                                     .fill(Color(hex: hex))
                                     .frame(width: 28, height: 28)
                                     .overlay(
-                                        Circle().stroke(customColorHex == hex ? Color.primary : Color.clear, lineWidth: 2)
+                                        Group {
+                                            if customColorHex == hex {
+                                                Image(systemName: "checkmark")
+                                                    .font(.caption)
+                                                    .bold()
+                                                    .foregroundColor(.white)
+                                                    .shadow(color: .black.opacity(0.4), radius: 1)
+                                            }
+                                        }
                                     )
                             }
                             .buttonStyle(.plain)

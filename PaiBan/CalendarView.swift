@@ -23,14 +23,14 @@ struct CalendarView: View {
     // 滑页的页码 = 月份绝对序号（年*12 + 月-1），2026年11月 = 24322。
     // 用原生 TabView 分页滑，切月跟着手指走、左右月预渲染，不再整格闪白重画。
     @State private var pageIndex: Int = CalendarView.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
-    // 滑页范围：一次生成 12 个月，当前月居中（前后各 5–6 个月）。
-    // 现在是 2026 年 11 月，窗口就是 2026-06 ~ 2027-05，滑到边就停。
-    // 12 页比原来 84 页轻得多，滑页不再为几十页做布局，卡顿的根也去了。
+    // 滑页范围：一次生成 10 年（120 个月），当前月居中（前后各 60 个月）。
+    // 现在是 2026 年 11 月，窗口就是 2021-11 ~ 2031-10，滑到边就停。
+    // 120 页只渲染附近页（TabView 懒加载），滑页不再为全量页做布局，卡顿的根也去了。
     @State private var windowStartIndex: Int = {
         let now = DateUtil.yearMonth(of: Date())
-        return CalendarView.monthIndex(year: now.year, month: now.month) - 5
+        return CalendarView.monthIndex(year: now.year, month: now.month) - 60
     }()
-    private var pageRange: Range<Int> { windowStartIndex..<(windowStartIndex + 12) }
+    private var pageRange: Range<Int> { windowStartIndex..<(windowStartIndex + 120) }
 
     /// 共享班表页（1.2.7.001，第 24 条）。
     @State private var showShareSchedule = false
@@ -56,7 +56,7 @@ struct CalendarView: View {
         // 1.3.0.013：滚动指示条常显（老爷 19:24 说「没有滑动框」）——.visible 没用，
         // 画廊实拍证明它根本不画出来，改走自绘滑块 AlwaysVisibleScrollIndicator。
         .modifier(AlwaysVisibleScrollIndicator())
-        .background(Color(.systemGroupedBackground))
+        .background(AppStyle.pageBackground)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button {
@@ -95,7 +95,7 @@ struct CalendarView: View {
             store.prefetchMonth(year: prev.year, month: prev.month)
             // 1.1.3：阴历缓存预热 + 工资输入补齐（日历的三薪标与底部统计要用）。
             // 阴历按月分批算（主线程，DateFormatter 不线程安全），每批之间让出主线程，
-            // 避免一次算 12 个月堵住界面；滑到新月时阴历已是缓存，不再现算。
+            // 避免一次算 120 个月堵住界面；滑到新月时阴历已是缓存，不再现算。
             // 工资输入（全年天数 + 配置）后台补，到了 payInputsVersion +1 触发重画。
             Task {
                 for idx in pageRange {
@@ -146,10 +146,12 @@ struct CalendarView: View {
     private var headerCard: some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(todayDateLine)
-                .font(.title2).bold()
+                .appFont(size: AppFont.titleLarge, weight: 700)
+                .blurIn(delay: 0)
                 .foregroundColor(.white)
             Text(todayShiftLine)
-                .font(.subheadline)
+                .appFont(size: AppFont.bodySmall)
+                .blurIn(delay: 0.03)
                 .foregroundColor(AppStyle.whiteText(opacity: 0.75))
             if let day = store.todaySchedule {
                 let inputs = store.todayEstimateInputs
@@ -192,10 +194,10 @@ struct CalendarView: View {
                     store.viewTeam = team
                 } label: {
                     Text("\(team)班")
-                        .bold(store.viewTeam == team)
+                        .appWeight(store.viewTeam == team ? 700 : 400)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 8)
-                        .background(store.viewTeam == team ? AppStyle.navyAdaptive : Color(.systemBackground))
+                        .background(store.viewTeam == team ? AppStyle.navyAdaptive : AppStyle.surface1)
                         .foregroundColor(store.viewTeam == team ? .white : .primary)
                         .cornerRadius(20)
                 }
@@ -206,39 +208,39 @@ struct CalendarView: View {
     private var monthNavigator: some View {
         HStack {
             Button {
-                withAnimation(.easeInOut(duration: 0.25)) {
+                withAnimation(AppMotion.standard()) {
                     pageIndex = max(pageRange.lowerBound, pageIndex - 1)
                 }
             } label: {
                 Image(systemName: "chevron.left")
                     .frame(width: 36, height: 36)
-                    .background(Color(.systemBackground))
+                    .background(AppStyle.surface1)
                     .clipShape(Circle())
             }
             Spacer()
             Text(pagerTitle)
-                .font(.title3).bold()
+                .font(.title3).appWeight(700).monospacedDigit()
             Button {
-                withAnimation(.easeInOut(duration: 0.25)) {
+                withAnimation(AppMotion.standard()) {
                     pageIndex = Self.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
                 }
             } label: {
                 Text("今天")
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
-                    .background(Color(.systemBackground))
+                    .background(AppStyle.surface1)
                     .cornerRadius(14)
             }
             Spacer()
             Button {
-                withAnimation(.easeInOut(duration: 0.25)) {
+                withAnimation(AppMotion.standard()) {
                     pageIndex = min(pageRange.upperBound - 1, pageIndex + 1)
                 }
             } label: {
                 Image(systemName: "chevron.right")
                     .frame(width: 36, height: 36)
-                    .background(Color(.systemBackground))
+                    .background(AppStyle.surface1)
                     .clipShape(Circle())
             }
         }
@@ -258,7 +260,7 @@ struct CalendarView: View {
         HStack(spacing: 4) {
             ForEach(Array(weekdayTitles.enumerated()), id: \.offset) { i, title in
                 Text(title)
-                    .font(.caption)
+                    .font(.caption).appWeight(400)
                     .foregroundColor(weekdayTitles[i] == "日" || weekdayTitles[i] == "六" ? .green : .primary)
                     .frame(maxWidth: .infinity)
             }
@@ -275,7 +277,7 @@ struct CalendarView: View {
         VStack(spacing: 4) {
             // 周几固定在最上面，不跟月份一起滑（原来在每页里，滑走就没了）。
             weekdayHeader
-            // 12 页 TabView：每页固定高（外框总高不变），行距按行数自适应。
+            // 120 页 TabView：每页固定高（外框总高不变），行距按行数自适应。
             // 滑页时不再重新布局、不再因周数不同伸缩，根治掉帧与页边忽大忽小。
             // 月份数据走 store.monthFor：有缓存直接取，没缓存本地 8 天一轮算好缓存起来，
             // 滑页时不再现算、不再发网络请求。
@@ -290,7 +292,7 @@ struct CalendarView: View {
                             showDayDetail = true
                         },
                         onSelectAdjacentMonth: { y, m in
-                            withAnimation(.easeInOut(duration: 0.25)) {
+                            withAnimation(AppMotion.standard()) {
                                 pageIndex = Self.monthIndex(year: y, month: m)
                             }
                         }
@@ -307,13 +309,13 @@ struct CalendarView: View {
                     .padding(.top, 8)
             } else if store.viewTeam != store.myTeam {
                 Text("看的是 \(store.viewTeam)班的排班（基础 8 天一轮；我和这个班调过、顶过岗的日子按调班后显示）。调班/请假只能改自己班的日历。")
-                    .font(.caption)
+                    .appFont(size: AppFont.caption)
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
             }
         }
         .padding(12)
-        .background(Color(.systemBackground))
+        .background(AppStyle.surface1)
         .cornerRadius(16)
     }
 
@@ -336,11 +338,11 @@ struct CalendarView: View {
         Group {
             if let stats = displayedMonth?.stats {
                 Text(summaryText(stats: stats))
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall).monospacedDigit()
                     .multilineTextAlignment(.center)
                     .padding(AppStyle.cardPadding)
                     .frame(maxWidth: .infinity)
-                    .background(Color(.systemBackground))
+                    .background(AppStyle.surface1)
                     .cornerRadius(AppStyle.cardRadius)
             }
         }
@@ -379,7 +381,7 @@ struct CalendarView: View {
             if !mergedSwapRows.isEmpty || !store.leaves.isEmpty {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("本月调班 / 请假")
-                        .font(.headline)
+                        .appFont(size: AppFont.headline, weight: 600)
                     ForEach(mergedSwapRows, id: \.key) { row in
                         swapRow(row)
                     }
@@ -389,14 +391,14 @@ struct CalendarView: View {
                                 .fill(Color.red)
                                 .frame(width: 8, height: 8)
                             Text(leave.date)
-                                .font(.subheadline)
+                                .appFont(size: AppFont.bodySmall)
                             Text(leave.type ?? "请假")
-                                .font(.subheadline)
+                                .appFont(size: AppFont.bodySmall)
                                 .foregroundColor(.red)
                             Spacer()
                             if let note = leave.note, !note.isEmpty {
                                 Text(note)
-                                    .font(.caption)
+                                    .appFont(size: AppFont.caption)
                                     .foregroundColor(.secondary)
                             }
                         }
@@ -404,7 +406,7 @@ struct CalendarView: View {
                     }
                 }
                 .padding(AppStyle.cardPadding)
-                .background(Color(.systemBackground))
+                .background(AppStyle.surface1)
                 .cornerRadius(AppStyle.cardRadius)
             }
         }
@@ -454,18 +456,18 @@ struct CalendarView: View {
                         .fill(Color.blue)
                         .frame(width: 8, height: 8)
                     Text(record.date)
-                        .font(.subheadline)
+                        .appFont(size: AppFont.bodySmall)
                     Text("调成 \(record.shift ?? "")")
-                        .font(.subheadline)
+                        .appFont(size: AppFont.bodySmall)
                     if let partner = record.partner, !partner.isEmpty {
                         Text("与 \(partner)班对调")
-                            .font(.caption)
+                            .appFont(size: AppFont.caption)
                             .foregroundColor(.secondary)
                     }
                     Spacer()
                     if let note = record.note, !note.isEmpty {
                         Text(note)
-                            .font(.caption)
+                            .appFont(size: AppFont.caption)
                             .foregroundColor(.secondary)
                     }
                 }
@@ -473,7 +475,7 @@ struct CalendarView: View {
             if row.records.count > 1,
                let payback = row.records.compactMap({ $0.paybackDate ?? $0.coverDate }).first {
                 Text("还班日：\(payback)")
-                    .font(.caption)
+                    .appFont(size: AppFont.caption)
                     .foregroundColor(.secondary)
                     .padding(.leading, 16)
             }
@@ -718,7 +720,7 @@ struct DayCell: View {
                             //（原来是绿字无底；只改字色会白底白字看不见，所以底色跟着换成绿，
                             // 位置/大小/布局不动）。请假的「假」见下面，用红色字体。
                             Text("假")
-                                .font(.system(size: 9, weight: .bold))
+                                .font(.system(size: 9)).appWeight(700)
                                 .foregroundColor(.white)
                                 .padding(.horizontal, 1)
                                 .padding(.vertical, 1)
@@ -726,7 +728,7 @@ struct DayCell: View {
                                 .cornerRadius(3)
                         } else {
                             Text("班")
-                                .font(.system(size: 9, weight: .bold))
+                                .font(.system(size: 9)).appWeight(700)
                                 .foregroundColor(.red)
                         }
                     } else {
@@ -736,7 +738,7 @@ struct DayCell: View {
                         // 1.1.5：请假的「假」用红色字体——红字配红底看不见，底色去掉变透明
                         //（位置/大小/布局不动，只换字色和底色，和放假的白字绿底区分开）。
                         Text("假")
-                            .font(.system(size: 8, weight: .bold))
+                            .font(.system(size: 8)).appWeight(700)
                             .foregroundColor(.red)
                             .padding(.horizontal, 2)
                             .padding(.vertical, 1)
@@ -744,7 +746,7 @@ struct DayCell: View {
                 }
                 .frame(width: 11, alignment: .leading)
                 Text("\(day.dayNumber)")
-                    .font(.system(size: dayNumberFontSize, weight: isToday ? .bold : .semibold))
+                    .font(.system(size: dayNumberFontSize)).appWeight(isToday ? 700 : 600).monospacedDigit()
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
                     .foregroundColor(isAdjacent ? .secondary : .primary)
@@ -754,7 +756,7 @@ struct DayCell: View {
                     if display.showLunar {
                         ForEach(Array(displayLunarText.enumerated()), id: \.offset) { _, ch in
                             Text(String(ch))
-                                .font(.system(size: 9))
+                                .font(.system(size: 9)).appWeight(400)
                                 .foregroundColor(extra.isRedText ? .red : AppStyle.tinySecondary)
                         }
                     }
@@ -774,7 +776,7 @@ struct DayCell: View {
                             HStack(spacing: 2) {
                                 ForEach(ShiftStyle.parts(of: day.shift), id: \.self) { part in
                                     Text(TeamInfo.shortName(part))
-                                        .font(.system(size: 10, weight: .bold))
+                                        .font(.system(size: 10)).appWeight(700)
                                         .foregroundColor(.white)
                                         .frame(maxWidth: .infinity)
                                         .frame(height: 15)
@@ -783,7 +785,7 @@ struct DayCell: View {
                                 }
                             }
                             Text("三薪")
-                                .font(.system(size: 9, weight: .bold))
+                                .font(.system(size: 9)).appWeight(700)
                                 .foregroundColor(AppStyle.whiteText(opacity: 0.9))
                                 .frame(maxWidth: .infinity)
                                 .frame(height: 13)
@@ -795,7 +797,7 @@ struct DayCell: View {
                         VStack(spacing: 2) {
                             ForEach(ShiftStyle.parts(of: day.shift), id: \.self) { part in
                                 Text(TeamInfo.shortName(part))
-                                    .font(.system(size: 10, weight: .bold))
+                                    .font(.system(size: 10)).appWeight(700)
                                     .foregroundColor(.white)
                                     .frame(maxWidth: .infinity)
                                     .frame(height: 13)
@@ -808,12 +810,12 @@ struct DayCell: View {
                 } else if isTriplePay && !isAdjacent {
                     VStack(spacing: 0) {
                         Text(day.isRest ? "休" : TeamInfo.shortName(day.shift))
-                            .font(.system(size: 12, weight: .bold))
+                            .font(.system(size: 12)).appWeight(700)
                             .foregroundColor(day.isRest ? ShiftStyle.color(for: "休息") : .white)
                             .frame(maxWidth: .infinity)
                             .frame(height: 15)
                         Text("三薪")
-                            .font(.system(size: 9, weight: .bold))
+                            .font(.system(size: 9)).appWeight(700)
                             .foregroundColor(AppStyle.whiteText(opacity: 0.85))
                             .frame(maxWidth: .infinity)
                             .frame(height: 13)
@@ -824,7 +826,7 @@ struct DayCell: View {
                     .cornerRadius(7)
                 } else {
                     Text(day.isRest ? "休" : TeamInfo.shortName(day.shift))
-                        .font(.system(size: 12, weight: .bold))
+                        .font(.system(size: 12)).appWeight(700)
                         .foregroundColor(day.isRest ? ShiftStyle.color(for: "休息") : .white)
                         .frame(maxWidth: .infinity)
                         .frame(height: pillHeight)
@@ -866,11 +868,11 @@ private struct TodayLiveRow: View {
             )
             VStack(alignment: .leading, spacing: 2) {
                 Text(countdownText(state: state, now: now))
-                    .font(.subheadline)
+                    .appFont(size: AppFont.bodySmall).monospacedDigit().blurIn(delay: 0.03)
                     .foregroundColor(.white)
                 if let money = moneyText(state: state) {
                     Text(money)
-                        .font(.subheadline)
+                        .appFont(size: AppFont.bodySmall).monospacedDigit().blurIn(delay: 0.06)
                         .foregroundColor(AppStyle.whiteText(opacity: 0.75))
                 }
             }

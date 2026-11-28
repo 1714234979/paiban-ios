@@ -31,17 +31,17 @@ struct WidgetPreviewGallery: View {
         case "week":
             WeekWidgetView(entry: entry, snapshot: snapshot)
                 .frame(width: 379, height: 184)
-                .background(Color(.systemBackground))
+                .background(AppStyle.surface1)
                 .cornerRadius(22)
         case "pay":
             PayWidgetView(entry: entry, snapshot: snapshot)
                 .frame(width: 379, height: 184)
-                .background(Color(.systemBackground))
+                .background(AppStyle.surface1)
                 .cornerRadius(22)
         case "month":
             MonthWidgetView(entry: entry, snapshot: snapshot)
                 .frame(width: 379, height: 390)
-                .background(Color(.systemBackground))
+                .background(AppStyle.surface1)
                 .cornerRadius(22)
         case "lock-circular":
             LockWidgetView(entry: entry, snapshot: snapshot, overrideFamily: .accessoryCircular)
@@ -59,12 +59,12 @@ struct WidgetPreviewGallery: View {
             // 窄屏小号（155×155，最小的小号尺寸）：验钱那行最长的情况完整显示。
             TodayWidgetView(entry: entry, snapshot: snapshot)
                 .frame(width: 155, height: 155)
-                .background(Color(.systemBackground))
+                .background(AppStyle.surface1)
                 .cornerRadius(22)
         default: // "today"
             TodayWidgetView(entry: entry, snapshot: snapshot)
                 .frame(width: 184, height: 184)
-                .background(Color(.systemBackground))
+                .background(AppStyle.surface1)
                 .cornerRadius(22)
         }
     }

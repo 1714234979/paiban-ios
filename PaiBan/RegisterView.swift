@@ -16,6 +16,9 @@ struct RegisterView: View {
     @State private var confirmPassword = ""
     @State private var errorText: String?
     @State private var isBusy = false
+    @FocusState private var focusedField: RegField?
+    /// 输入框聚焦态（统一规范 v2：聚焦变暗 + 阴影，不用亮色描边）。
+    private enum RegField { case nickname, username, smsCode, password, confirmPassword }
 
     var body: some View {
         NavigationStack {
@@ -23,10 +26,9 @@ struct RegisterView: View {
                 VStack(spacing: 24) {
                     VStack(spacing: 8) {
                         Text("注册账号")
-                            .font(.title2)
-                            .bold()
+                            .appFont(size: AppFont.titleLarge, weight: 700)
                         Text("注册后按引导填好班组和工资设置就能用")
-                            .font(.subheadline)
+                            .appFont(size: AppFont.bodySmall)
                             .foregroundColor(.secondary)
                             .multilineTextAlignment(.center)
                     }
@@ -37,43 +39,69 @@ struct RegisterView: View {
                             TextField("昵称", text: $nickname)
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
-                                .textFieldStyle(.roundedBorder)
+                                .textFieldStyle(.plain)
+                                .padding(10)
+                                .background(focusedField == .nickname ? AppStyle.surface2 : AppStyle.surface1)
+                                .cornerRadius(8)
+                                .shadow(color: focusedField == .nickname ? Color.black.opacity(0.12) : .clear, radius: 4, y: 1)
+                                .focused($focusedField, equals: .nickname)
                             Text("建议使用真实姓名，以便管理员管理")
-                                .font(.caption)
+                                .appFont(size: AppFont.caption)
                                 .foregroundColor(.secondary)
                         }
                         TextField("手机号（11 位大陆手机号）", text: $username)
                             .keyboardType(.numberPad)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
-                            .textFieldStyle(.roundedBorder)
+                            .textFieldStyle(.plain)
+                            .padding(10)
+                            .background(focusedField == .username ? AppStyle.surface2 : AppStyle.surface1)
+                            .cornerRadius(8)
+                            .shadow(color: focusedField == .username ? Color.black.opacity(0.12) : .clear, radius: 4, y: 1)
+                            .focused($focusedField, equals: .username)
                         HStack(spacing: 12) {
                             TextField("6 位验证码", text: $smsCode)
                                 .keyboardType(.numberPad)
-                                .textFieldStyle(.roundedBorder)
+                                .textFieldStyle(.plain)
+                                .padding(10)
+                                .background(focusedField == .smsCode ? AppStyle.surface2 : AppStyle.surface1)
+                                .cornerRadius(8)
+                                .shadow(color: focusedField == .smsCode ? Color.black.opacity(0.12) : .clear, radius: 4, y: 1)
+                                .focused($focusedField, equals: .smsCode)
                             Button {
                                 Task { await sendSmsCode() }
                             } label: {
                                 Text(smsCountdown > 0 ? "\(smsCountdown) 秒后重发" : "获取验证码")
-                                    .font(.subheadline)
+                                    .appFont(size: AppFont.bodySmall)
+                                    .monospacedDigit()
                                     .frame(minWidth: 104)
                             }
                             .buttonStyle(.bordered)
                             .disabled(smsSending || smsCountdown > 0 || !PhoneUtil.isValid(username))
                         }
                         SecureField("密码（至少 6 位，不能含冒号）", text: $password)
-                            .textFieldStyle(.roundedBorder)
+                            .textFieldStyle(.plain)
+                            .padding(10)
+                            .background(focusedField == .password ? AppStyle.surface2 : AppStyle.surface1)
+                            .cornerRadius(8)
+                            .shadow(color: focusedField == .password ? Color.black.opacity(0.12) : .clear, radius: 4, y: 1)
+                            .focused($focusedField, equals: .password)
                         SecureField("再输一次密码", text: $confirmPassword)
-                            .textFieldStyle(.roundedBorder)
+                            .textFieldStyle(.plain)
+                            .padding(10)
+                            .background(focusedField == .confirmPassword ? AppStyle.surface2 : AppStyle.surface1)
+                            .cornerRadius(8)
+                            .shadow(color: focusedField == .confirmPassword ? Color.black.opacity(0.12) : .clear, radius: 4, y: 1)
+                            .focused($focusedField, equals: .confirmPassword)
                     }
                     .padding(AppStyle.cardPadding)
-                    .background(Color(.systemBackground))
+                    .background(AppStyle.surface1)
                     .cornerRadius(16)
                     .shadow(color: .black.opacity(0.05), radius: 8, y: 2)
 
                     if let errorText {
                         Text(errorText)
-                            .font(.subheadline)
+                            .appFont(size: AppFont.bodySmall)
                             .foregroundColor(.red)
                             .multilineTextAlignment(.center)
                             .padding(.horizontal)
@@ -86,7 +114,7 @@ struct RegisterView: View {
                             if isBusy {
                                 ProgressView().tint(.white)
                             } else {
-                                Text("注册并登录").font(.headline)
+                                Text("注册并登录").appFont(size: AppFont.headline, weight: 600)
                             }
                         }
                         .frame(maxWidth: .infinity)
@@ -99,14 +127,14 @@ struct RegisterView: View {
                     .disabled(isBusy)
 
                     Text("注册只建普通同事账号；你的排班、请假、工资只归你自己，不会动别人的数据。")
-                        .font(.caption)
+                        .appFont(size: AppFont.caption)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
                 }
                 .padding(.horizontal, AppStyle.pagePadding)
                 .padding(.bottom, 24)
             }
-            .background(Color(.systemGroupedBackground))
+            .background(AppStyle.pageBackground)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
                     Button("取消") { dismiss() }

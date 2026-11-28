@@ -493,7 +493,7 @@ struct SettingsView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 8)
-            .background(selected ? Color(.systemBackground) : Color.clear)
+            .background(selected ? AppStyle.surface1 : Color.clear)
             .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .buttonStyle(.borderless)
@@ -1372,6 +1372,7 @@ struct AboutView: View {
                     Text("版本")
                     Spacer()
                     Text(UpdateChecker.currentVersion)
+                        .monospacedDigit()
                         .foregroundColor(.secondary)
                 }
                 HStack {
@@ -1431,6 +1432,15 @@ struct ChangelogView: View {
     var body: some View {
         Form {
             Section {
+                changelog(version: "1.3.2.001（内测）", items: [
+                    "界面统一翻新：深色模式分层更清楚，不再是一片黑；卡片和分隔线改成淡淡的明暗色阶，整体更干净高级",
+                    "深色下字不再发粗：字重自动降一档，看着和浅色一样舒服；倒计时、金额、日期都用等宽数字，数字跳动时不再左右抖",
+                    "动效分了性格：月份滑动干脆利落不回弹，保存成功的提示带一点回弹、2.5 秒自己消失；动态出现的文字像水墨一样晕开",
+                    "排班取消上下一年的限制，改成 10 年：排班页和工资页都能前后滑 10 年（前后各 5 年），滑到头也不怕",
+                ])
+                changelog(version: "1.3.2（正式版）", items: [
+                    "内容与 1.3.1.001 内测版相同：个税加专项附加扣除、负个税按 0 算、工资页首次进页改成空状态、登录页加忘记密码、切月更快、点某天能直接改班次。",
+                ])
                 changelog(version: "1.3.1.001（内测）", items: [
                     "个税加专项附加扣除：子女教育、赡养老人按自己填的每月金额扣，婴幼儿照护每孩自己填每月金额（每孩最多 2000），学历教育 400/月，职业资格取证当年一次性扣 3600（要填取证年月），大病医疗只在次年汇算时扣、不影响每月工资，房贷 1000/月或租金三档（二选一）；设置 → 工资设置 → 专项附加扣除里填；有工资权限的人第一次进工资页会问一次有没有专项扣除，只问一次；工资页奖金区多了一行「专项附加扣除」",
                     "个税算出来是负数时不再倒扣：按 0 算，多的留到以后月份再抵，不会从实发奖金里扣钱。",

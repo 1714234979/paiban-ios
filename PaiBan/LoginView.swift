@@ -20,6 +20,9 @@ struct LoginView: View {
     @State private var username = ""
     @State private var password = ""
     @State private var showPassword = false
+    @FocusState private var focusedField: LoginField?
+    /// 输入框聚焦态（统一规范 v2：聚焦变暗 + 阴影，不用亮色描边）。
+    private enum LoginField { case username, password, phone, smsCode }
     // 短信登录
     @State private var phone = ""
     @State private var smsCode = ""
@@ -107,31 +110,38 @@ struct LoginView: View {
     }
 
     /// 下划线输入框：只有底部一条细线，不要方框直角（1.2.6）。
-    private func underlineField<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+    private func underlineField<Content: View>(focused: Bool = false, @ViewBuilder content: () -> Content) -> some View {
         VStack(spacing: 0) {
             content()
                 .padding(.vertical, 12)
+                .padding(.horizontal, 12)
             Rectangle()
                 .fill(Color(.separator))
                 .frame(height: 1)
         }
+        .background(focused ? AppStyle.surface2 : Color.clear)
+        .cornerRadius(10)
+        .shadow(color: focused ? Color.black.opacity(0.12) : .clear, radius: 4, y: 1)
     }
 
     private var passwordForm: some View {
         VStack(spacing: 8) {
-            underlineField {
+            underlineField(focused: focusedField == .username) {
                 TextField("请输入手机号", text: $username)
                     .keyboardType(.numberPad)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .focused($focusedField, equals: .username)
             }
-            underlineField {
+            underlineField(focused: focusedField == .password) {
                 HStack(spacing: 8) {
                     Group {
                         if showPassword {
                             TextField("请输入密码", text: $password)
+                                .focused($focusedField, equals: .password)
                         } else {
                             SecureField("请输入密码", text: $password)
+                                .focused($focusedField, equals: .password)
                         }
                     }
                     .textInputAutocapitalization(.never)
@@ -150,23 +160,26 @@ struct LoginView: View {
     /// 短信登录：手机号 + 获取验证码（60 秒倒计时）+ 6 位码。
     private var smsForm: some View {
         VStack(spacing: 8) {
-            underlineField {
+            underlineField(focused: focusedField == .phone) {
                 TextField("请输入手机号", text: $phone)
                     .keyboardType(.numberPad)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .focused($focusedField, equals: .phone)
             }
-            underlineField {
+            underlineField(focused: focusedField == .smsCode) {
                 HStack(spacing: 12) {
                     TextField("请输入验证码", text: $smsCode)
                         .keyboardType(.numberPad)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .focused($focusedField, equals: .smsCode)
                     Button {
                         Task { await sendSmsCode() }
                     } label: {
                         Text(smsCountdown > 0 ? "\(smsCountdown) 秒后重发" : "获取验证码")
-                            .font(.subheadline)
+                            .appFont(size: AppFont.bodySmall)
+                            .monospacedDigit()
                             .foregroundColor(.blue)
                     }
                     .disabled(smsSending || smsCountdown > 0 || !isValidPhone(phone))
@@ -246,12 +259,9 @@ struct LoginView: View {
             VStack(spacing: 6) {
                 ZStack {
                     Circle()
-                        .fill(isActive ? AppStyle.navyAdaptive : Color(.systemBackground))
+                        .fill(isActive ? AppStyle.navyAdaptive : AppStyle.surface2)
                         .frame(width: 56, height: 56)
-                        .overlay(
-                            Circle()
-                                .stroke(isActive ? Color.clear : Color(.separator), lineWidth: 1)
-                        )
+                        .shadow(color: isActive ? Color.black.opacity(0.15) : .clear, radius: 4, y: 2)
                     Image(systemName: icon)
                         .font(.system(size: 22))
                         .foregroundColor(isActive ? .white : .secondary)
@@ -333,6 +343,9 @@ struct ForgotPasswordView: View {
     @State private var confirmPassword = ""
     @State private var showPassword = false
     @State private var showConfirmPassword = false
+    @FocusState private var focusedField: ForgotField?
+    /// 输入框聚焦态（统一规范 v2：聚焦变暗 + 阴影，不用亮色描边）。
+    private enum ForgotField { case phone, smsCode, newPassword, confirmPassword }
     @State private var smsCountdown = 0
     @State private var smsSending = false
     @State private var errorText: String?
@@ -371,35 +384,40 @@ struct ForgotPasswordView: View {
                 .foregroundColor(.secondary)
                 .multilineTextAlignment(.center)
             VStack(spacing: 8) {
-                underlineField {
+                underlineField(focused: focusedField == .phone) {
                     TextField("请输入手机号", text: $phone)
                         .keyboardType(.numberPad)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
+                        .focused($focusedField, equals: .phone)
                 }
-                underlineField {
+                underlineField(focused: focusedField == .smsCode) {
                     HStack(spacing: 12) {
                         TextField("请输入验证码", text: $smsCode)
                             .keyboardType(.numberPad)
                             .textInputAutocapitalization(.never)
                             .autocorrectionDisabled()
+                            .focused($focusedField, equals: .smsCode)
                         Button {
                             Task { await sendSmsCode() }
                         } label: {
                             Text(smsCountdown > 0 ? "\(smsCountdown) 秒后重发" : "获取验证码")
-                                .font(.subheadline)
+                                .appFont(size: AppFont.bodySmall)
+                                .monospacedDigit()
                                 .foregroundColor(.blue)
                         }
                         .disabled(smsSending || smsCountdown > 0 || !PhoneUtil.isValid(phone))
                     }
                 }
-                underlineField {
+                underlineField(focused: focusedField == .newPassword) {
                     HStack(spacing: 8) {
                         Group {
                             if showPassword {
                                 TextField("请输入新密码（至少 6 位）", text: $newPassword)
+                                    .focused($focusedField, equals: .newPassword)
                             } else {
                                 SecureField("请输入新密码（至少 6 位）", text: $newPassword)
+                                    .focused($focusedField, equals: .newPassword)
                             }
                         }
                         .textInputAutocapitalization(.never)
@@ -410,13 +428,15 @@ struct ForgotPasswordView: View {
                         }
                     }
                 }
-                underlineField {
+                underlineField(focused: focusedField == .confirmPassword) {
                     HStack(spacing: 8) {
                         Group {
                             if showConfirmPassword {
                                 TextField("请再输一次新密码", text: $confirmPassword)
+                                    .focused($focusedField, equals: .confirmPassword)
                             } else {
                                 SecureField("请再输一次新密码", text: $confirmPassword)
+                                    .focused($focusedField, equals: .confirmPassword)
                             }
                         }
                         .textInputAutocapitalization(.never)
@@ -482,14 +502,18 @@ struct ForgotPasswordView: View {
     }
 
     /// 下划线输入框：和登录页同一套（只有底部一条细线）。
-    private func underlineField<Content: View>(@ViewBuilder content: () -> Content) -> some View {
+    private func underlineField<Content: View>(focused: Bool = false, @ViewBuilder content: () -> Content) -> some View {
         VStack(spacing: 0) {
             content()
                 .padding(.vertical, 12)
+                .padding(.horizontal, 12)
             Rectangle()
                 .fill(Color(.separator))
                 .frame(height: 1)
         }
+        .background(focused ? AppStyle.surface2 : Color.clear)
+        .cornerRadius(10)
+        .shadow(color: focused ? Color.black.opacity(0.12) : .clear, radius: 4, y: 1)
     }
 
     private var canReset: Bool {

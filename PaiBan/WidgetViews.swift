@@ -321,7 +321,7 @@ struct PayWidgetView: View {
                         .font(.subheadline).bold()
                     Spacer()
                     Text(MoneyUtil.money(pay.grandTotal))
-                        .font(.headline).bold()
+                        .appFont(size: AppFont.headline, weight: 700).monospacedDigit()
                 }
             } else {
                 Text("打开 App 同步一下")
@@ -340,8 +340,9 @@ struct PayWidgetView: View {
                 .foregroundColor(.secondary)
             Spacer()
             Text(MoneyUtil.money(value))
+                .monospacedDigit()
         }
-        .font(.subheadline)
+        .appFont(size: AppFont.bodySmall)
     }
 }
 
@@ -513,7 +514,7 @@ struct LockWidgetView: View {
                 } else {
                     VStack(spacing: 0) {
                         Text(MoneyUtil.money0(earnedAmount))
-                            .font(.title3).bold()
+                            .font(.title3).appWeight(700).monospacedDigit()
                             .foregroundColor(shiftPillColor(today.shift))
                             .minimumScaleFactor(0.6)
                         Text("已挣")
@@ -539,7 +540,7 @@ struct LockWidgetView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         // 没工资权限不显示钱（第 29 条补充规矩）：只显示班次，倒计时那行照常。
                         Text(snapshot.payAccess ? "\(today.shift) · 已挣 \(MoneyUtil.money(earnedAmount))" : today.shift)
-                            .font(.headline)
+                            .appFont(size: AppFont.headline, weight: 600).monospacedDigit()
                             .lineLimit(1)
                             .minimumScaleFactor(0.8)
                         if let range = countdownRange {

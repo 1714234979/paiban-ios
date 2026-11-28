@@ -116,13 +116,54 @@ enum AppStyle {
     static let buttonHeight: CGFloat = 48
     /// 按钮圆角。
     static let buttonRadius: CGFloat = 12
+
+    // MARK: - 统一规范 v2（2026-11-28，老爷令：双端 UI 统一 + 视频 5 细节）
+
+    /// 双端统一色值（浅/深各一），少写重复的 UIColor 闭包。
+    static func adaptive(light: UIColor, dark: UIColor) -> Color {
+        Color(UIColor { t in t.userInterfaceStyle == .dark ? dark : light })
+    }
+
+    /// Surface 色阶（视频细节 1）：层与层只差 1%-3%，深色绝不用纯黑 #000。
+    /// surface0 页面底 / surface1 卡片 / surface2 抬高一层 / surface3 最高层。
+    static var pageBackground: Color {
+        adaptive(light: UIColor(red: 0.949, green: 0.949, blue: 0.969, alpha: 1),
+                 dark: UIColor(red: 0.043, green: 0.043, blue: 0.059, alpha: 1)) // #F2F2F7 / #0B0B0F
+    }
+    static var surface1: Color {
+        adaptive(light: UIColor(white: 1, alpha: 1),
+                 dark: UIColor(red: 0.082, green: 0.082, blue: 0.082, alpha: 1)) // #FFFFFF / #151515
+    }
+    static var surface2: Color {
+        adaptive(light: UIColor(red: 0.914, green: 0.914, blue: 0.933, alpha: 1),
+                 dark: UIColor(red: 0.102, green: 0.102, blue: 0.106, alpha: 1)) // #E9E9EE / #1A1A1B
+    }
+    static var surface3: Color {
+        adaptive(light: UIColor(white: 1, alpha: 1),
+                 dark: UIColor(red: 0.125, green: 0.125, blue: 0.122, alpha: 1)) // #FFFFFF / #20201F
+    }
+    /// 分隔线（outline）：浅色 #E5E5EA / 深色 #2C2C2E。
+    static var outline: Color {
+        adaptive(light: UIColor(red: 0.898, green: 0.898, blue: 0.918, alpha: 1),
+                 dark: UIColor(red: 0.173, green: 0.173, blue: 0.180, alpha: 1))
+    }
+    /// 主文字：浅色 #1C1C1E / 深色 #F5F5F7。
+    static var onSurface: Color {
+        adaptive(light: UIColor(red: 0.110, green: 0.110, blue: 0.118, alpha: 1),
+                 dark: UIColor(red: 0.961, green: 0.961, blue: 0.969, alpha: 1))
+    }
+    /// 次文字：浅色 #6C6C70 / 深色 #A1A1A6。
+    static var onSurfaceVariant: Color {
+        adaptive(light: UIColor(red: 0.424, green: 0.424, blue: 0.439, alpha: 1),
+                 dark: UIColor(red: 0.631, green: 0.631, blue: 0.651, alpha: 1))
+    }
 }
 
 /// 内容卡片：圆角 16、内边距 16。背景由调用方按页面底色选——
 /// 分组底色（工资/登录页）用 systemBackground（白卡），
 /// 白底页面（当天详情 sheet）用 secondarySystemBackground（浅灰卡）。
 struct AppCard: ViewModifier {
-    var background: Color = Color(.systemBackground)
+    var background: Color = AppStyle.surface1
     var shadow: Bool = false
 
     func body(content: Content) -> some View {
@@ -136,7 +177,7 @@ struct AppCard: ViewModifier {
 
 extension View {
     /// 内容卡片（圆角 16、内边距 16）。shadow 只在白卡上用。
-    func appCard(background: Color = Color(.systemBackground), shadow: Bool = false) -> some View {
+    func appCard(background: Color = AppStyle.surface1, shadow: Bool = false) -> some View {
         modifier(AppCard(background: background, shadow: shadow))
     }
 }
@@ -177,5 +218,118 @@ struct AppSecondaryButton: View {
                 .cornerRadius(AppStyle.buttonRadius)
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - 统一规范 v2：字号 / 字重 / 动效 / 晕入（2026-11-28）
+
+/// 双端统一字号（两端同值）：22 titleLarge、18 title、17 headline、16 body、
+/// 15 bodySmall、13 caption、12 captionSmall。
+enum AppFont {
+    static let titleLarge: CGFloat = 22
+    static let title: CGFloat = 18
+    static let headline: CGFloat = 17
+    static let body: CGFloat = 16
+    static let bodySmall: CGFloat = 15
+    static let caption: CGFloat = 13
+    static let captionSmall: CGFloat = 12
+
+    /// CSS 字重（100–900）→ iOS 字重值（regular 0 / medium 0.23 / semibold 0.3 /
+    /// bold 0.4），分段线性插值。SwiftUI Font.Weight 没有 360/460/560 这档，
+    /// 所以按 CSS 值换算后再用 Font.Weight(rawValue:) 桥接。
+    static func iosWeight(css: CGFloat) -> Font.Weight {
+        let stops: [(CGFloat, CGFloat)] = [
+            (100, -0.8), (200, -0.6), (300, -0.4), (400, 0.0),
+            (500, 0.23), (600, 0.3), (700, 0.4), (800, 0.56), (900, 0.62),
+        ]
+        let c = min(900, max(100, css))
+        for i in 0..<(stops.count - 1) {
+            let (x0, y0) = stops[i]
+            let (x1, y1) = stops[i + 1]
+            if c >= x0 && c <= x1 {
+                let t = (c - x0) / (x1 - x0)
+                return Font.Weight(rawValue: y0 + t * (y1 - y0))
+            }
+        }
+        return .regular
+    }
+
+    /// 统一字体：字号 + CSS 字重；深色自动 -40（视频细节 2：400→360、500→460、
+    /// 600→560、700→660），浅色保持原字重。
+    static func font(size: CGFloat, cssWeight: CGFloat, scheme: ColorScheme) -> Font {
+        .system(size: size, weight: iosWeight(css: scheme == .dark ? cssWeight - 40 : cssWeight))
+    }
+}
+
+/// 统一字号 + 字重（深色自动 -40）。
+struct AppFontModifier: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
+    let size: CGFloat
+    let cssWeight: CGFloat
+    func body(content: Content) -> some View {
+        content.font(AppFont.font(size: size, cssWeight: cssWeight, scheme: scheme))
+    }
+}
+
+/// 只改字重（深色自动 -40），字号沿用已有的 .font(...)。
+struct AppWeightModifier: ViewModifier {
+    @Environment(\.colorScheme) private var scheme
+    let cssWeight: CGFloat
+    func body(content: Content) -> some View {
+        content.fontWeight(AppFont.iosWeight(css: scheme == .dark ? cssWeight - 40 : cssWeight))
+    }
+}
+
+/// 双端统一动效（视频细节 5）：时长快 150 / 中 250 / 慢 350；
+/// 标准缓动 FastOutSlowIn，强调 CubicBezier(0.2, 0, 0, 1)。
+enum AppMotion {
+    static let fast: Double = 0.15
+    static let medium: Double = 0.25
+    static let slow: Double = 0.35
+    /// 拖拽类（月份滑动、sheet、分段滑块）：过阻尼，雷厉风行，过程尾 0% 回弹。
+    static let drag = Animation.spring(response: 0.3, dampingFraction: 1.0)
+    /// 反馈类（成功对勾、Toast）：欠阻尼，Q 弹感，2.5s 自动消失。
+    static let feedback = Animation.spring(response: 0.4, dampingFraction: 0.65)
+    /// 反馈类自动消失时间。
+    static let feedbackDismissDelay: Double = 2.5
+    /// 标准缓动 FastOutSlowIn；强调 CubicBezier(0.2, 0, 0, 1)。
+    static func standard(_ duration: Double = 0.25) -> Animation {
+        .timingCurve(0.2, 0, 0, 1, duration: duration)
+    }
+}
+
+/// 水墨晕染式出现（视频细节 3）：blur 6→0、120ms、cubic-bezier(.16,1,.3,1)，
+/// 逐行错开 delay，前一个没晕完下一个就开始（连成波浪）。
+struct BlurInModifier: ViewModifier {
+    let delay: Double
+    @State private var appeared = false
+    func body(content: Content) -> some View {
+        content
+            .blur(radius: appeared ? 0 : 6)
+            .opacity(appeared ? 1 : 0)
+            .onAppear {
+                withAnimation(.timingCurve(0.16, 1, 0.3, 1, duration: 0.12).delay(delay)) {
+                    appeared = true
+                }
+            }
+    }
+}
+
+extension View {
+    /// 统一字号 + 字重（深色自动 -40）。
+    func appFont(size: CGFloat, weight cssWeight: CGFloat = 400) -> some View {
+        modifier(AppFontModifier(size: size, cssWeight: cssWeight))
+    }
+    /// 只改字重（深色自动 -40），字号沿用已有的 .font(...)。
+    func appWeight(_ cssWeight: CGFloat) -> some View {
+        modifier(AppWeightModifier(cssWeight: cssWeight))
+    }
+    /// 水墨晕染式出现：blur 6→0、120ms；delay 逐行错开 30ms。
+    func blurIn(delay: Double = 0) -> some View {
+        modifier(BlurInModifier(delay: delay))
+    }
+    /// 行内图标下移 1/8 em（视频细节 3）：图标中心对齐文字中心，不再飘在基线上。
+    func iconAligned() -> some View {
+        baselineOffset(-2)
     }
 }
