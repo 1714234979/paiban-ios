@@ -125,9 +125,9 @@ struct PayView: View {
                 )
                 HStack(spacing: 0) {
                     payMiniColumn(label: "实发工资", value: store.moneyText(pay.salaryNet))
-                    Divider().frame(height: 28)
+                    Rectangle().fill(AppStyle.outline).frame(width: 1, height: 28)
                     payMiniColumn(label: "实发奖金", value: store.moneyText(pay.bonusAfterTax))
-                    Divider().frame(height: 28)
+                    Rectangle().fill(AppStyle.outline).frame(width: 1, height: 28)
                     payMiniColumn(label: "餐贴", value: store.moneyText(pay.mealAllowance))
                 }
             } else {

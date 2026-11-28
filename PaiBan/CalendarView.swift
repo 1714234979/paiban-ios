@@ -648,11 +648,11 @@ struct CalendarView: View {
                 VStack(spacing: 8) {
                     HStack(spacing: 0) {
                         statCell(value: "\(MoneyUtil.int(stats.actualShifts))班", label: "实际出勤")
-                        Divider().frame(height: 30)
+                        Rectangle().fill(AppStyle.outline).frame(width: 1, height: 30)
                         statCell(value: "\(MoneyUtil.int(stats.restDays))天", label: "休息")
-                        Divider().frame(height: 30)
+                        Rectangle().fill(AppStyle.outline).frame(width: 1, height: 30)
                         statCell(value: triple == "—" ? "—" : "\(triple)天", label: "三薪")
-                        Divider().frame(height: 30)
+                        Rectangle().fill(AppStyle.outline).frame(width: 1, height: 30)
                         statCell(value: overtime == "—" ? "—" : "\(overtime)天", label: "加班")
                     }
                     Text("当月应出勤 \(baseWorkDays) 天 · 基本天数 \(statutoryBasicDays) 天 · 请假 \(MoneyUtil.int(stats.leaveDays)) 天")
