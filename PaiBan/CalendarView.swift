@@ -557,7 +557,12 @@ struct MonthPageView: View {
         }
         // 1.1.5：裁剪 + 快照——内容不出本页；出现时拍一次快照，数据真变了
         //（calendarVersion / 换班组）才重拍，滑动中快照一动不动。
+        // 2026-11-28 慢滑卡顿修：整格 42 个 DayCell（每格十几个子视图）拼成一层
+        //（.drawingGroup），慢拖时合成器每帧只挪一层、不再逐个拼 400 多个子视图；
+        // 快滑本来就跟手，慢拖才看得出差别。点按不受影响（drawingGroup 只管渲染，
+        // 不动命中测试），选中态变了整格重栅格化一次即可。
         .clipped()
+        .drawingGroup()
         .task { takeSnapshot() }
         .onChange(of: store.calendarVersion) { _ in takeSnapshot() }
         .onChange(of: store.viewTeam) { _ in takeSnapshot() }
@@ -684,8 +689,10 @@ struct DayCell: View {
     /// 日期行里左 11pt 假/班列 + 右 8pt 阴历列是写死的，中间只剩约 24pt，
     /// 两位数的号在 16pt 下会被截成「…」；窄屏（<400pt）用 15pt，
     /// 宽屏保持 16pt；再加 lineLimit(1) + minimumScaleFactor(0.75) 兜底，绝不截断。
+    /// 屏宽只读一次（窄屏 <400pt 用 15pt，否则 16pt）；原来每格每次 body 都读一次 UIScreen.main.bounds。
+    private static let isNarrowScreen = UIScreen.main.bounds.width < 400
     private var dayNumberFontSize: CGFloat {
-        UIScreen.main.bounds.width < 400 ? 15 : 16
+        Self.isNarrowScreen ? 15 : 16
     }
 
     /// 当天的阴历/节气/节日/假班信息（查表 + 中国日历算，带缓存，渲染时不重算）。
@@ -867,12 +874,15 @@ private struct TodayLiveRow: View {
                 earlyRate: earlyRate, midRate: midRate, inputs: inputs
             )
             VStack(alignment: .leading, spacing: 2) {
+                // 2026-11-28 慢滑卡顿修：倒计时每秒重画一次，上面挂 .blurIn 等于每秒
+                // 多走一次离屏模糊；字本来就是等宽、宽度不动，模糊入场效果在每秒刷新的
+                // 文字上根本看不出来，直接去掉，只留等宽数字。
                 Text(countdownText(state: state, now: now))
-                    .appFont(size: AppFont.bodySmall).monospacedDigit().blurIn(delay: 0.03)
+                    .appFont(size: AppFont.bodySmall).monospacedDigit()
                     .foregroundColor(.white)
                 if let money = moneyText(state: state) {
                     Text(money)
-                        .appFont(size: AppFont.bodySmall).monospacedDigit().blurIn(delay: 0.06)
+                        .appFont(size: AppFont.bodySmall).monospacedDigit()
                         .foregroundColor(AppStyle.whiteText(opacity: 0.75))
                 }
             }
