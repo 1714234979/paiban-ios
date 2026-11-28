@@ -1,4 +1,5 @@
 import SwiftUI
+import Observation
 
 /// 月份切换与标题栏·重做（老爷 2026-11-28 14:30 亲口令「直接重做」）：
 /// 旧的 jumpToMonth（20pt 轻移 + 交叉淡入）、标题视差（PageGeom / PageOffsetKey）、
@@ -10,7 +11,8 @@ import SwiftUI
 ///    数据只跟落定页走：分页器内部用 scrollOffset 跟踪拖拽位置，只在滚动落定
 ///    （scrollPhase == .idle）时才把 selectedOffset 提交给数据；箭头点按 /
 ///    点“今天”是程序切页，selectedOffset 立刻换，标题立刻淡入过去
-///    （1.3.2.010：numericText 改淡入，快滑时数字滚动来不及滚完会糊）。
+///    （1.3.2.010 曾全改淡入；1.3.2.011 改回 Gemini 的做法：滑动中/连变禁动画、
+///    慢速单次点按保留数字滚动，标题只在 MonthTitleState 里变，不带动整页重算）。
 ///    拖一半松手弹回时标题跟着回来，可以接受。
 /// 2. 标题与网格绝不同步错位——网格就是分页器当前页，标题就是过半页/落定页，
 ///    两者同一个状态源；快速猛滑跳过一个月是系统原生分页行为，可以接受。
@@ -18,6 +20,66 @@ import SwiftUI
 /// 月份索引：固定数组相对基准月的偏移（-120..<120，共 240 个月，覆盖 10 年窗口
 /// 2016-11～2036-10），数组本身永远不变；基准月只在视图第一次创建时定一次（当月），
 /// 之后不再动——动态改数组 / 改基准都会让 scrollPosition 的 id 错位、跳月。
+
+// MARK: - 标题状态隔离（过半切月只重绘标题，不带动整页重算）
+
+/// 标题状态隔离（Gemini 1.3.2.011）：月份索引 + 滑动状态只活在这里，
+/// 过半回调 / 落定 / 按钮切月统一走 update(to:)；滑动中或 0.28s 内连续变月
+/// 直接禁动画，避免 numericText 数字叠糊；慢速单次点按箭头保留数字滚动。
+@Observable
+final class MonthTitleState {
+    var monthIndex: Int
+    var isScrolling: Bool = false
+    var countsDown: Bool = false
+    var suppressAnimation: Bool = false
+
+    @ObservationIgnored private var lastChangeTime: CFAbsoluteTime = 0
+
+    init(monthIndex: Int) {
+        self.monthIndex = monthIndex
+    }
+
+    /// 过半回调 / 落定 / 按钮切月统一走这里：滑动中或 0.28s 内连续变月直接禁动画，避免数字叠糊。
+    func update(to newIndex: Int) {
+        guard newIndex != monthIndex else { return }
+        let now = CFAbsoluteTimeGetCurrent()
+        countsDown = newIndex < monthIndex
+        suppressAnimation = isScrolling || (now - lastChangeTime) < 0.28
+        lastChangeTime = now
+        monthIndex = newIndex
+    }
+
+    func setScrolling(_ scrolling: Bool) {
+        guard isScrolling != scrolling else { return }
+        isScrolling = scrolling
+        if scrolling {
+            suppressAnimation = true
+        } else {
+            // 滚动停稳后恢复单次点按动画能力；monthIndex 未变不会触发多余动画。
+            suppressAnimation = false
+        }
+    }
+}
+
+/// 隔离观察 MonthTitleState 的标题栏包装：滑动中标题高频变化只在这一小块内重绘。
+struct ObservedMonthHeaderView: View {
+    let state: MonthTitleState
+    let onPrevious: () -> Void
+    let onNext: () -> Void
+
+    var body: some View {
+        let idx = state.monthIndex
+        MonthHeaderView(
+            year: idx / 12,
+            month: idx % 12 + 1,
+            onPrevious: onPrevious,
+            onNext: onNext,
+            isScrolling: state.isScrolling,
+            countsDown: state.countsDown,
+            suppressAnimation: state.suppressAnimation
+        )
+    }
+}
 
 // MARK: - 月份标题栏
 
@@ -28,16 +90,19 @@ import SwiftUI
 /// 标题行只剩 < 标题 >，标题真正居中；悬浮按钮只在非当月出现，点按走原来的 goToToday）。
 /// 标题跟左右按钮都没关系，再也不会被挤偏、也不会跟今天按钮撞车
 ///（录屏 00:10「20: 今天 2月」重叠的根）。
+/// 1.3.2.011（Gemini）：快滑/连点时切无动画纯文本，杜绝 numericText 叠成乱码；
+/// 慢速单次点按箭头或「今天」时保留克制的数字过渡。
 struct MonthHeaderView: View {
     let year: Int
     let month: Int
     let onPrevious: () -> Void
     let onNext: () -> Void
+    var isScrolling: Bool = false
+    var countsDown: Bool = false
+    var suppressAnimation: Bool = false
 
-    /// 减弱动态效果：标题只做 0.15s 淡入，不做数字滚动与位移（App 的统一规矩）。
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// 标题动画跟的月份绝对序号（年*12 + 月-1），换月就变，触发标题淡入。
     private var monthIndex: Int { year * 12 + (month - 1) }
 
     var body: some View {
@@ -50,7 +115,6 @@ struct MonthHeaderView: View {
                         .frame(width: 36, height: 36)
                         .background(AppStyle.surface1, in: Circle())
                         .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
-                        // 36pt 圆按钮，透明留白扩到 48pt，视觉不变（App 的 48pt 热区规矩）。
                         .touchTarget(vertical: 6, horizontal: 6)
                 }
                 .buttonStyle(PressableButtonStyle())
@@ -68,16 +132,23 @@ struct MonthHeaderView: View {
                 .buttonStyle(PressableButtonStyle())
             }
 
-            // 2. 绝对居中的月份标题（等宽数字，避免宽度跳动与裁切）。
-            // 1.3.2.010：numericText 改淡入——快滑时标题每过半页就变一次，numericText
-            // 0.25 秒的数字滚动来不及滚完就被下一次打断，数字一直卡在动画中途、
-            // 叠成一团糊（实测 f_22/f_24："2026" 的 6 和 "12" 的 2 叠成乱码）；
-            // 淡入是交叉溶解，不管变得多快都不会糊。减弱动态效果时一样是淡入（0.15s）。
-            Text(DateUtil.yearMonthTitle(year: year, month: month))
-                .font(.system(size: 18, weight: .bold))
-                .monospacedDigit()
-                .contentTransition(.opacity)
-                .animation(reduceMotion ? .easeInOut(duration: 0.15) : .snappy(duration: 0.25), value: monthIndex)
+            // 2. 绝对居中的月份标题：快滑/连点时切无动画纯文本，杜绝 numericText 叠成乱码；
+            //    慢速单次点按箭头或「今天」时保留克制的数字过渡。
+            let title = DateUtil.yearMonthTitle(year: year, month: month)
+            if isScrolling || suppressAnimation {
+                Text(title)
+                    .font(.system(size: 18, weight: .bold))
+                    .monospacedDigit()
+                    .id("plain-month-title")
+                    .transaction { $0.animation = nil }
+            } else {
+                Text(title)
+                    .font(.system(size: 18, weight: .bold))
+                    .monospacedDigit()
+                    .contentTransition(reduceMotion ? .opacity : .numericText(countsDown: countsDown))
+                    .animation(reduceMotion ? .easeInOut(duration: 0.15) : .snappy(duration: 0.2), value: monthIndex)
+                    .id("animated-month-title")
+            }
         }
         .padding(.horizontal, 16)
         .frame(height: 44)
@@ -87,10 +158,9 @@ struct MonthHeaderView: View {
 // MARK: - 月份分页容器
 
 /// 原生分页月份容器（老爷给的 SmoothMonthPager 代码为准，只加了一个落定提交和一个过半标题回调：
-/// 滚动位置（scrollOffset）与已落定月份（selectedOffset）分开管——拖拽中数据
-/// 用的 selectedOffset 不动，数据就不会在手指还没松开时提前跳变；
-/// 滚动停稳（idle）时才提交，数据与网格严格同步。拖一半松手弹回去时，
-/// scrollOffset 自己回到原页，等于没提交过。
+/// 滚动位置（scrollOffset）与已落定的月份（selectedOffset）分开管——拖拽中数据
+/// 用的 selectedOffset 不动，数据就不会在手指还没松开时提前跳变；滚动停稳（idle）
+/// 时才提交，数据与网格严格同步。拖一半松手弹回去时，scrollOffset 自己回到原页，等于没提交过。
 /// 标题另外走过半回调（onMidpointPageChange）：拖过一半标题就换（2026-11-28 改，
 /// 取代上一轮故意选的落定才变；拖一半松手弹回时标题跟着回来，可以接受）。
 /// 不用 DragGesture 手拼 offset / transition，不用自定义 Transition；
@@ -98,6 +168,9 @@ struct MonthHeaderView: View {
 /// 每页留白（pagePadding）画在容器宽度里面（先 padding 再 containerRelativeFrame），
 /// 每页正好一个容器宽——之前 padding 在容器外面，每页宽了 2*pagePadding，
 /// 落点整体右移 pagePadding、右边缘被切掉 pagePadding（2026-11-28 实测 +16pt）。
+/// 1.3.2.011（Gemini）：fillHeight 时绝不用 .containerRelativeFrame(.vertical)——
+/// 横向 ScrollView 不定义纵向容器轴，.vertical 会越级取到 NavigationStack 全高，
+/// 导致页面上下溢出、顶部黑卡被硬切；改用 GeometryReader 拿精确可视宽高。
 struct SmoothMonthPager<Content: View>: View {
     /// 固定月份偏移数组（相对基准月，-120..<120，共 240 个月）。数组本身永远不变。
     let monthOffsets: [Int]
@@ -112,6 +185,8 @@ struct SmoothMonthPager<Content: View>: View {
     /// 拖过一半时报一次（月份偏移）：标题跟它走，数据不跟（数据只跟落定页）。
     /// 不传就不报（标题仍跟落定页，旧行为）。
     var onMidpointPageChange: ((Int) -> Void)? = nil
+    /// 用户手势滑动状态回调（true = 拖拽/惯性滑动中，false = 已停稳）。
+    var onScrollingChange: ((Bool) -> Void)? = nil
     @ViewBuilder let content: (Int) -> Content
 
     /// 滚动位置（拖拽中跟着手指走；程序切页时由 selectedOffset 同步过来）。
@@ -127,6 +202,7 @@ struct SmoothMonthPager<Content: View>: View {
         pagePadding: CGFloat = 16,
         fillHeight: Bool = false,
         onMidpointPageChange: ((Int) -> Void)? = nil,
+        onScrollingChange: ((Bool) -> Void)? = nil,
         @ViewBuilder content: @escaping (Int) -> Content
     ) {
         self.monthOffsets = monthOffsets
@@ -134,6 +210,7 @@ struct SmoothMonthPager<Content: View>: View {
         self.pagePadding = pagePadding
         self.fillHeight = fillHeight
         self.onMidpointPageChange = onMidpointPageChange
+        self.onScrollingChange = onScrollingChange
         self.content = content
         // 初始就停在已选中的那一页，不先闪到数组头再跳回来。
         self._scrollOffset = State(initialValue: selectedOffset.wrappedValue)
@@ -156,11 +233,27 @@ struct SmoothMonthPager<Content: View>: View {
     }
 
     var body: some View {
+        // fillHeight == true（工资页）：绝不用 .containerRelativeFrame(.vertical)——
+        // 横向 ScrollView 不定义纵向容器轴，.vertical 会越级取到 NavigationStack 全高，
+        // 导致页面上下溢出、顶部黑卡被硬切；改用 GeometryReader 拿精确可视宽高。
+        if fillHeight {
+            GeometryReader { geo in
+                if geo.size.width > 0, geo.size.height > 0 {
+                    pagerContainer(pageSize: geo.size)
+                }
+            }
+        } else {
+            pagerContainer(pageSize: nil)
+        }
+    }
+
+    @ViewBuilder
+    private func pagerContainer(pageSize: CGSize?) -> some View {
         // onScrollPhaseChange 只要 iOS 18+（部署目标 17.0，不能升到 18）：
         // 18 走系统原生的落定信号，17 走等效的防抖落定判断，两边数据都只跟落定页走；
         // 标题另外走过半回调（拖过一半就换，2026-11-28 改，取代落定才变）。
         if #available(iOS 18.0, *) {
-            pagerView
+            pagerView(pageSize: pageSize)
                 // 标题过半就换：滚动几何每帧都来，按 contentOffset.x / 页宽四舍五入，
                 // 拖过一半标题立刻跟过去；拖一半松手弹回时几何值跟着回来，标题也回来。
                 // 只在页码真变了才回调（reportMidpoint 去重），不每帧都写父视图状态。
@@ -176,6 +269,8 @@ struct SmoothMonthPager<Content: View>: View {
                 // 一起换。拖一半松手弹回去时，scrollOffset 自己回到原页，等于没提交过。
                 // 快速猛滑一次滑过两页是系统原生分页行为，可以接受；数据跟落定页严格一致。
                 .onScrollPhaseChange { _, newPhase in
+                    let userScrolling = (newPhase == .tracking || newPhase == .interacting || newPhase == .decelerating)
+                    onScrollingChange?(userScrolling)
                     if newPhase == .idle, scrollOffset != selectedOffset {
                         withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : .snappy(duration: 0.25)) {
                             selectedOffset = scrollOffset
@@ -183,11 +278,14 @@ struct SmoothMonthPager<Content: View>: View {
                     }
                 }
         } else {
-            pagerView
+            pagerView(pageSize: pageSize)
                 // iOS 17 标题过半就换：scrollPosition 的 scrollOffset 拖拽中跟着手指变，
                 // 过半就翻到下一页的偏移，标题立刻跟过去；松手弹回时 scrollOffset 回到原页，
                 // 标题也回来。程序切页（箭头 / 今天）时 scrollOffset 同步变，标题一样立刻跟。
                 .onChange(of: scrollOffset) { newValue in
+                    if newValue != selectedOffset {
+                        onScrollingChange?(true)
+                    }
                     reportMidpoint(newValue)
                 }
                 // iOS 17 等效落定判断（.task(id:) 防抖）：scrollOffset 一变，旧任务取消、
@@ -201,6 +299,7 @@ struct SmoothMonthPager<Content: View>: View {
                     let captured = scrollOffset
                     try? await Task.sleep(for: .milliseconds(300))
                     guard !Task.isCancelled else { return }
+                    onScrollingChange?(false)
                     if scrollOffset == captured, scrollOffset != selectedOffset {
                         withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : .snappy(duration: 0.25)) {
                             selectedOffset = scrollOffset
@@ -212,15 +311,20 @@ struct SmoothMonthPager<Content: View>: View {
 
     /// 分页器本体（两条分支共用）：原生分页 ScrollView + scrollPosition 跟踪 +
     /// 程序切页同步。落定提交不在这里，两条分支各用各的落定信号。
-    private var pagerView: some View {
+    private func pagerView(pageSize: CGSize?) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            LazyHStack(spacing: 0) {
+            LazyHStack(alignment: .top, spacing: 0) {
                 ForEach(monthOffsets, id: \.self) { offset in
-                    content(offset)
-                        // 留白画在容器宽度里面（先 padding 再 containerRelativeFrame）：
-                        // 每页正好一个容器宽，落点不偏移、右边缘不被切（见上面）。
-                        .padding(.horizontal, pagePadding)
-                        .containerRelativeFrame(fillHeight ? [.horizontal, .vertical] : .horizontal)
+                    if let size = pageSize {
+                        content(offset)
+                            .padding(.horizontal, pagePadding)
+                            .frame(width: size.width, height: size.height, alignment: .top)
+                            .clipped()
+                    } else {
+                        content(offset)
+                            .padding(.horizontal, pagePadding)
+                            .containerRelativeFrame(.horizontal)
+                    }
                 }
             }
             .scrollTargetLayout()

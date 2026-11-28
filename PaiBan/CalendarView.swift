@@ -43,7 +43,15 @@ struct CalendarView: View {
     @State private var pageIndex: Int = CalendarView.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
     /// 标题跟的月份（2026-11-28 改，取代落定才变）：拖过一半就换（分页器的过半回调写这里），
     /// 落定时跟 pageIndex 同步；拖一半松手弹回时跟着回来。汇总/记录仍只跟 pageIndex（落定页）。
-    @State private var titleIndex: Int = CalendarView.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
+    /// 1.3.2.011（Gemini）：改成 MonthTitleState——过半变月只重绘标题，不带动整页重算与
+    /// Metal 重栅格化；滑动中/0.28s 内连变禁动画，慢速单次点按保留数字滚动。
+    @State private var titleState: MonthTitleState = {
+        let now = DateUtil.yearMonth(of: Date())
+        return MonthTitleState(monthIndex: CalendarView.monthIndex(year: now.year, month: now.month))
+    }()
+    /// 240 个月阴历预热 + 全年天数补齐只开一次（.task 切 Tab 回来会重跑，不加守卫
+    /// 每次回来都重开一遍循环）。
+    @State private var didStartBackgroundWarmup = false
     /// 冷启动回当天只做一次（切 Tab 闪跳的根因，见下面 .task）：
     /// .task 在切 Tab 回来时也会重跑（视图重进层级），不加标志每次回来都强制回当月，
     /// 先闪一帧离开时的月份再跳回当月；有了标志，只有第一次创建时才回当天。
@@ -71,10 +79,10 @@ struct CalendarView: View {
     /// 每页的格子在父视图提前算好存在这里，页滑过来时直接用，
     /// 不在滑动中现算、现拍快照（慢拖卡顿的根：下一页/上一页原来是现加载的）。
     private static let preloadRadius = 10
-    @State private var preloadedGrids: [Int: [(day: DaySchedule, kind: MonthPageView.GridDayKind)]] = [:]
+    @State private var preloadedGrids: [Int: [MonthPageView.GridDay]] = [:]
     /// 预加载格子的在途任务（1.3.2.010）：新任务来了旧任务直接取消，只留最新的；
     /// 取消时旧的 preloadedGrids 原样留着，不留半截状态。
-    @State private var preloadGridTask: Task<Void, Never>?
+    @State private var preloadTask: Task<Void, Never>?
 
     /// 共享班表页（1.2.7.001，第 24 条）。
     @State private var showShareSchedule = false
@@ -93,36 +101,67 @@ struct CalendarView: View {
     /// 快滑就抽帧。现在中心先算、相邻其次、外围最后，每算一月让出一次主线程，
     /// 落定动画的帧能插进来；整窗一次交出去，不等 21 页全完、算好的页随任务走。
     /// 任务可取消：快滑连续落定、旧任务被取消时，当前月也已经算好了，不会被打断。
-    private func preloadAround(_ center: Int) {
-        preloadGridTask?.cancel()
-        preloadGridTask = Task {
-            let order: [Int] = [center] + (1...Self.preloadRadius).flatMap { [center - $0, center + $0] }
-            var next: [Int: [(day: DaySchedule, kind: MonthPageView.GridDayKind)]] = [:]
-            next.reserveCapacity(2 * Self.preloadRadius + 1)
-            for idx in order {
-                if Task.isCancelled { return }
-                guard idx >= pageRange.lowerBound && idx < pageRange.upperBound else { continue }
+    /// 1.3.2.011（Gemini）：当前页与左右邻页若缺失立刻同步补齐（保证滑过去零等待），
+    /// 其余窗口内未缓存页按由近及远分步补齐，每次 yield 不抢滑动帧时间。
+    private func preloadAround(_ center: Int, forceRebuild: Bool = false) {
+        preloadTask?.cancel()
+        let lo = max(pageRange.lowerBound, center - Self.preloadRadius)
+        let hi = min(pageRange.upperBound - 1, center + Self.preloadRadius)
+
+        var next: [Int: [MonthPageView.GridDay]] = [:]
+        next.reserveCapacity(hi - lo + 1)
+        if !forceRebuild {
+            for idx in lo...hi {
                 if let cached = preloadedGrids[idx] {
                     next[idx] = cached
-                } else {
-                    let ym = yearMonth(from: idx)
-                    next[idx] = MonthPageView.buildGridDays(year: ym.year, month: ym.month, store: store)
-                    // 每算一月让出一次主线程（冷启动 21 页同步算完会堵住落定动画）。
-                    await Task.yield()
                 }
             }
-            // 整窗一次交出去（只留 21 页，窗口外的旧页丢掉）；中途被取消就直接丢弃，
-            // 旧的 preloadedGrids 原样留着，不留半截状态。
+        }
+
+        // 当前页与左右邻页若缺失立刻补齐，保证滑过去零等待。
+        let immediateIndices = [center, center + 1, center - 1].filter { $0 >= lo && $0 <= hi && next[$0] == nil }
+        for idx in immediateIndices {
+            let ym = yearMonth(from: idx)
+            next[idx] = MonthPageView.buildGridDays(year: ym.year, month: ym.month, store: store)
+        }
+        if forceRebuild || !immediateIndices.isEmpty || next.count != preloadedGrids.count {
             preloadedGrids = next
+        }
+
+        // 其余窗口内未缓存页按由近及远分步补齐，每次 yield 不抢滑动帧时间。
+        var remaining: [Int] = []
+        for d in 2...Self.preloadRadius {
+            let p = center + d
+            let m = center - d
+            if p <= hi, next[p] == nil { remaining.append(p) }
+            if m >= lo, next[m] == nil { remaining.append(m) }
+        }
+        guard !remaining.isEmpty else { return }
+
+        preloadTask = Task { @MainActor in
+            var batch: [Int: [MonthPageView.GridDay]] = [:]
+            for idx in remaining {
+                if Task.isCancelled { return }
+                let ym = yearMonth(from: idx)
+                batch[idx] = MonthPageView.buildGridDays(year: ym.year, month: ym.month, store: store)
+                await Task.yield()
+            }
+            guard !Task.isCancelled, !batch.isEmpty else { return }
+            var merged = preloadedGrids
+            for (k, v) in batch where k >= lo && k <= hi {
+                merged[k] = v
+            }
+            preloadedGrids = merged
         }
     }
 
     /// 箭头 / 今天 / 邻月点按切月（重做）：直接改 pageIndex（已落定），标题立刻淡入过去
-    ///（1.3.2.010：numericText 改淡入，见 MonthHeaderView）；分页器收到 selectedOffset
+    ///（1.3.2.011：标题走 MonthTitleState，慢速单次点按保留数字滚动）；分页器收到 selectedOffset
     /// 变化滑过去（0.25s snappy，减弱动态效果时 0.15s 淡入）。不做位移、不做交叉淡入、
     /// 不碰视差——旧的 jumpToMonth（20pt 轻移 + 交叉淡入）整段删掉。
     private func goToMonth(_ index: Int) {
         let target = min(max(index, pageRange.lowerBound), pageRange.upperBound - 1)
+        titleState.update(to: target)
         withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : .snappy(duration: 0.25)) {
             pageIndex = target
         }
@@ -238,7 +277,7 @@ struct CalendarView: View {
                 didInitialMonthAlign = true
                 let now = DateUtil.yearMonth(of: Date())
                 pageIndex = min(max(Self.monthIndex(year: now.year, month: now.month), pageRange.lowerBound), pageRange.upperBound - 1)
-                titleIndex = pageIndex
+                titleState.update(to: pageIndex)
                 store.setCurrentMonth(year: now.year, month: now.month)
             }
             if store.month == nil {
@@ -255,16 +294,20 @@ struct CalendarView: View {
             // 阴历按月分批算（主线程，DateFormatter 不线程安全），每批之间让出主线程，
             // 避免一次算 240 个月堵住界面；滑到新月时阴历已是缓存，不再现算。
             // 工资输入（全年天数 + 配置）后台补，到了 payInputsVersion +1 触发重画。
-            Task {
-                for idx in pageRange {
-                    let ym = yearMonth(from: idx)
-                    ChineseCalendar.warmMonth(year: ym.year, month: ym.month)
-                    await Task.yield()
+            // 切 Tab 回来 .task 会重跑，这两趟只开一次（didStartBackgroundWarmup 守卫）。
+            if !didStartBackgroundWarmup {
+                didStartBackgroundWarmup = true
+                Task {
+                    for idx in pageRange {
+                        let ym = yearMonth(from: idx)
+                        ChineseCalendar.warmMonth(year: ym.year, month: ym.month)
+                        await Task.yield()
+                    }
                 }
-            }
-            Task {
-                let years = Set(pageRange.map { yearMonth(from: $0).year })
-                await store.ensureYearDays(years: Array(years).sorted())
+                Task {
+                    let years = Set(pageRange.map { yearMonth(from: $0).year })
+                    await store.ensureYearDays(years: Array(years).sorted())
+                }
             }
         }
         // 滑到哪页，汇总、调班/请假记录跟着走（但要等落定）。
@@ -275,7 +318,7 @@ struct CalendarView: View {
         // displayedMonth），不经过 store.currentYearMonth，所以落定前也不错位。
         .onChange(of: pageIndex) { newIndex in
             // 落定就跟标题同步（标题平时跟过半回调走，落定时一定等于 pageIndex）。
-            titleIndex = newIndex
+            titleState.update(to: newIndex)
             // 1.3.2.004：落到哪页就以那页为中心重算 21 页——下一页还没滑到就已经算好了。
             preloadAround(newIndex)
             refreshTask?.cancel()
@@ -293,13 +336,14 @@ struct CalendarView: View {
         }
         .onChange(of: store.viewTeam) { _ in
             // 1.3.2.004：换班组立刻按新班组重算 21 页（monthFor 按新班组算），再后台刷新。
-            preloadAround(pageIndex)
+            preloadAround(pageIndex, forceRebuild: true)
             Task { await store.refreshMonth() }
         }
         // 1.3.2.004：日历真数据到了 / 显示设置（周一首日、显示上下月）改了，
         // 预加载的 21 页整窗重算，已缓存的页直接复用。
-        .onChange(of: store.calendarVersion) { _ in preloadAround(pageIndex) }
-        .onChange(of: store.calendarDisplay) { _ in preloadAround(pageIndex) }
+        .onChange(of: store.calendarVersion) { _ in preloadAround(pageIndex, forceRebuild: true) }
+        .onChange(of: store.calendarDisplay) { _ in preloadAround(pageIndex, forceRebuild: true) }
+        .onChange(of: store.holidaysUpdatedAt) { _ in preloadAround(pageIndex, forceRebuild: true) }
         .sheet(isPresented: $showDayDetail) {
             if let selectedDay {
                 DayDetailView(day: selectedDay)
@@ -403,15 +447,14 @@ struct CalendarView: View {
     }
 
     /// 月份标题栏（重做，老爷 2026-11-28 14:30 亲口令）：共用的 MonthHeaderView——
-    /// 标题绝对居中（等宽数字 + 淡入，1.3.2.010：numericText 改淡入，快滑会糊），
-    /// 标题跟 titleIndex（过半就换），再也不会被挤偏（录屏 00:03/00:10 的毛病）。旧的 HStack
+    /// 标题绝对居中（等宽数字，1.3.2.011：标题走 MonthTitleState，滑动中只重绘标题），
+    /// 标题跟 titleState（过半就换），再也不会被挤偏（录屏 00:03/00:10 的毛病）。旧的 HStack
     ///（左右箭头 + Spacer + 标题 + 今天 + Spacer + 箭头）整段删掉。
     /// “今天”按钮不在标题栏里（2026-11-28 老爷亲口令：改成右下角悬浮按钮，见下面
     /// todayFloatingButton；标题行只剩 < 标题 >，标题真正居中）。
     private var monthNavigator: some View {
-        MonthHeaderView(
-            year: yearMonth(from: titleIndex).year,
-            month: yearMonth(from: titleIndex).month,
+        ObservedMonthHeaderView(
+            state: titleState,
             onPrevious: { goToMonth(pageIndex - 1) },
             onNext: { goToMonth(pageIndex + 1) }
         )
@@ -478,7 +521,9 @@ struct CalendarView: View {
             // 每页高度由卡片自己定（星期栏 + 414pt 网格 + 12pt 内边距，全月恒定），
             // 不再在分页器上写死 414pt（那是旧结构、卡片在外面的高度）。
             SmoothMonthPager(monthOffsets: monthOffsets, selectedOffset: selectedOffsetBinding, pagePadding: 0, onMidpointPageChange: { offset in
-                titleIndex = baseIndex + offset
+                titleState.update(to: baseIndex + offset)
+            }, onScrollingChange: { scrolling in
+                titleState.setScrolling(scrolling)
             }) { offset in
                 let ym = yearMonth(from: baseIndex + offset)
                 VStack(spacing: 4) {
@@ -530,7 +575,11 @@ struct CalendarView: View {
     /// 其他几项（应出勤、实际出勤、请假、休息）不动。
     /// 第 41 条（2026-11-26）：应出勤后面加「基本天数 N 天」（取当月 BASIC_DAYS，11 月 21 天），随月份变。
     private var summaryLine: some View {
-        Group {
+        // payInputsVersion 订阅从 MonthPageView.body 挪到这里（Gemini 1.3.2.011）：
+        // 工资输入到齐时底部统计（三薪 X 天 / 加班 X 天）要重算，这里订阅就够了；
+        // MonthPageView 的格子是快照/预计算，不依赖工资输入，不用跟着重画。
+        let _ = store.payInputsVersion
+        return Group {
             if let stats = displayedMonth?.stats {
                 Text(summaryText(stats: stats))
                     .appFont(size: AppFont.bodySmall).monospacedDigit()
@@ -789,7 +838,9 @@ struct MonthPageView: View {
     /// 父视图预加载好的本页格子（前后 10 个月共 21 页）：有就直接用，不拍快照、
     /// 不等出现时现算；没有（窗口外、刚翻过来的新页）才走原来的快照兜底。
     /// 1.3.2.004（老爷 2026-11-28 11:32 亲口定预加载 21 页）。
-    let preloadedDays: [(day: DaySchedule, kind: GridDayKind)]?
+    /// 1.3.2.011（Gemini）：格子改成预计算好的 GridDay（三薪标/假班标/阴历文案
+    /// 都在 buildGridDays 里一次算好），渲染 42 格时零字典分配、零线性扫描。
+    let preloadedDays: [GridDay]?
     let isSelected: (String) -> Bool
     let onSelectDay: (DaySchedule) -> Void
     /// 点到上月/下月补的日期时跳到对应月。
@@ -804,7 +855,7 @@ struct MonthPageView: View {
     init(
         year: Int,
         month: Int,
-        preloadedDays: [(day: DaySchedule, kind: GridDayKind)]?,
+        preloadedDays: [GridDay]?,
         isSelected: @escaping (String) -> Bool,
         onSelectDay: @escaping (DaySchedule) -> Void,
         onSelectAdjacentMonth: @escaping (Int, Int) -> Void,
@@ -822,17 +873,53 @@ struct MonthPageView: View {
     /// 一格的身份：上月补的 / 本月 / 下月补的（点上月/下月补的跳到对应月）。
     enum GridDayKind { case leading, current, trailing }
 
+    /// 预计算好三薪标、假/班标、阴历文案的格子数据，渲染 42 格时零字典分配、零线性扫描。
+    struct GridDay {
+        let day: DaySchedule
+        let kind: GridDayKind
+        let isTriplePay: Bool
+        let holidayMark: String?
+        let lunarText: String
+        let isLunarRed: Bool
+    }
+
     /// 1.1.5：本页的数据快照——出现时从 store 取一次存在 @State 里，滑动中只读快照，
     /// store 再怎么写（prefetch 回来、setCurrentMonth、refresh）都动不了正在滑的这一页。
     /// 只在三处重拍：刚出现（.task）、日历数据真变了（store.calendarVersion +1：
     /// 调班/请假保存、刷新成功）、换了班组（viewTeam 变了）。
     /// 快照没拍好之前的第一帧先用 live 的 gridDays 顶上（只此一帧，不在滑动中）。
-    @State private var snapDays: [(day: DaySchedule, kind: GridDayKind)] = []
+    @State private var snapDays: [GridDay] = []
     @State private var snapLoaded = false
 
     private func takeSnapshot() {
         snapDays = gridDays
         snapLoaded = true
+    }
+
+    private static func makeGridDay(_ day: DaySchedule, kind: GridDayKind, statutory: [String: String], store: AppStore) -> GridDay {
+        let extra = ChineseCalendar.info(for: day.date)
+        let lunarRaw = extra.lunarText
+        let lunarText = (lunarRaw.count == 3 && lunarRaw.hasSuffix("节")) ? String(lunarRaw.dropLast()) : lunarRaw
+        let holidayMark: String?
+        if let h = store.holiday(for: day.date) {
+            switch h.kind {
+            case "legal", "rest": holidayMark = "假"
+            case "workday": holidayMark = "班"
+            default: holidayMark = nil
+            }
+        } else if let mark = extra.mark {
+            holidayMark = mark == .holiday ? "假" : "班"
+        } else {
+            holidayMark = nil
+        }
+        return GridDay(
+            day: day,
+            kind: kind,
+            isTriplePay: kind == .current && statutory[day.date] != nil,
+            holidayMark: holidayMark,
+            lunarText: lunarText,
+            isLunarRed: extra.isRedText
+        )
     }
 
     /// 整页的格子（上月补 + 本月 + 下月补，拼满整周再补满 42 格）：数据走 store.monthFor
@@ -846,43 +933,52 @@ struct MonthPageView: View {
     /// 固定 6 行——补满整周后不到 42 格，再从下月开头多补整周，kind 仍是 .trailing
     ///（暗色、点按跳到下月，跟现有尾随格一致）。5 行的月多出一行下月开头的暗色日期，
     /// 这是固定 6 行的正常样子，先让老爷看效果，不要藏起来。
-    static func buildGridDays(year: Int, month: Int, store: AppStore) -> [(day: DaySchedule, kind: GridDayKind)] {
+    /// 1.3.2.011（Gemini）：三薪标/假班标/阴历文案在建格子时一次算好进 GridDay；
+    /// 法定表每页只建一次（原来每格都调 tripleDates、内部反复建 statutoryMap 字典，
+    /// 每页约 900 次字典分配），三薪只按法定表标（和原来 tripleDates 一个口径）。
+    static func buildGridDays(year: Int, month: Int, store: AppStore) -> [GridDay] {
         let prev = month == 1 ? (year - 1, 12) : (year, month - 1)
         let next = month == 12 ? (year + 1, 1) : (year, month + 1)
         let mondayFirst = store.calendarDisplay.mondayFirst
         let firstWeekday = DateUtil.firstWeekday(year: year, month: month)
-        // 每月第一周前面补上月末尾几天（周一为首日时，前导数按周一偏移）。
         let leading = mondayFirst ? (firstWeekday + 6) % 7 : firstWeekday
-        var result: [(day: DaySchedule, kind: GridDayKind)] = []
+        let statutory = PayCalc.statutoryMap(year: year)
+
+        var result: [GridDay] = []
+        result.reserveCapacity(42)
         if leading > 0 {
             let prevMonth = store.monthFor(year: prev.0, month: prev.1)
-            result += (prevMonth.days ?? []).suffix(leading).map { ($0, GridDayKind.leading) }
+            result += (prevMonth.days ?? []).suffix(leading).map {
+                makeGridDay($0, kind: .leading, statutory: statutory, store: store)
+            }
         }
         let current = store.monthFor(year: year, month: month)
-        result += (current.days ?? []).map { ($0, GridDayKind.current) }
-        // 每月最后一周后面补下月开头几天，补满整周。
+        result += (current.days ?? []).map {
+            makeGridDay($0, kind: .current, statutory: statutory, store: store)
+        }
         let days = DateUtil.daysInMonth(year: year, month: month)
         let remainder = (leading + days) % 7
         let trailing = remainder == 0 ? 0 : 7 - remainder
         let nextMonth = store.monthFor(year: next.0, month: next.1)
         var usedTrailing = 0
         if trailing > 0 {
-            result += (nextMonth.days ?? []).prefix(trailing).map { ($0, GridDayKind.trailing) }
+            result += (nextMonth.days ?? []).prefix(trailing).map {
+                makeGridDay($0, kind: .trailing, statutory: statutory, store: store)
+            }
             usedTrailing = trailing
         }
-        // 补满 42 格（6 周）：每次多补一周，跳过已用掉的尾随天数。
-        // 常见是 35 格补一周；28 格的月（周一为首日的平年 2 月，如 2027-02）补两周。
-        // 下月至少 28 天，已用最多 6 + 7，取 7 格一定够；guard 是防万一的兜底。
         while result.count < 42 {
             let extra = (nextMonth.days ?? []).dropFirst(usedTrailing).prefix(7)
             guard extra.count == 7 else { break }
-            result += extra.map { ($0, GridDayKind.trailing) }
+            result += extra.map {
+                makeGridDay($0, kind: .trailing, statutory: statutory, store: store)
+            }
             usedTrailing += 7
         }
         return result
     }
 
-    private var gridDays: [(day: DaySchedule, kind: GridDayKind)] {
+    private var gridDays: [GridDay] {
         Self.buildGridDays(year: year, month: month, store: store)
     }
 
@@ -894,21 +990,20 @@ struct MonthPageView: View {
         // 关键：行数从快照 snapDays 里算（days.count / 7，恒为 6），快照在滑动中一动不动，
         // 所以行距在动画中途绝不变；快照 + 防抖换月 + 裁剪三件不变。
         // 周几行已抽到 TabView 外面固定不动，这里只画日期网格。
-        // 订阅 payInputsVersion：工资输入到齐时底部统计（三薪 X 天 / 加班 X 天）要重算，
-        // 日历得重画（之前没订阅，输入到了也不重画，统计要等别的状态变了才冒出来）。
-        // 三薪标本身（第 33 条）只按法定表，不依赖工资输入；网格本身（snapDays）是快照，滑动中不动。
-        let _ = store.payInputsVersion
+        // 1.3.2.011：payInputsVersion 订阅挪到 summaryLine（见 CalendarView），
+        // 这里不再订阅——格子是快照/预计算，不依赖工资输入，输入到了不用整页重画。
         // 1.3.2.004：父视图预加载好的格子直接用（21 页窗口内）；窗口外才走快照兜底。
         let days = preloadedDays ?? (snapLoaded ? snapDays : gridDays)
-        // 格子恒为 42 格，行数恒为 6（days.count / 7）；行数从快照算，滑动中不动。
         let weeks = max(1, days.count / 7)
+        // 每页只格式化一次“今天”，避免在 42 格循环里重复调 DateFormatter。
+        let todayStr = DateUtil.string(from: Date())
         VStack(spacing: calendarRowSpacing(weeks: weeks)) {
             ForEach(0..<weeks, id: \.self) { w in
                 HStack(spacing: 4) {
                     ForEach(0..<7, id: \.self) { c in
                         let idx = w * 7 + c
                         if idx < days.count {
-                            gridCell(day: days[idx].day, kind: days[idx].kind)
+                            gridCell(item: days[idx], todayStr: todayStr)
                         } else {
                             Color.clear.frame(height: calendarCellHeight)
                         }
@@ -938,7 +1033,9 @@ struct MonthPageView: View {
     /// 以前只有 onTapGesture、没有任何按压反馈。Button 的按压态与 TabView 滑页共存（系统在
     /// 拖动开始时取消按压），不会抢滑页手势。
     @ViewBuilder
-    private func gridCell(day: DaySchedule, kind: GridDayKind) -> some View {
+    private func gridCell(item: GridDay, todayStr: String) -> some View {
+        let day = item.day
+        let kind = item.kind
         if (kind == .leading || kind == .trailing) && !store.calendarDisplay.showAdjacentMonths {
             Color.clear.frame(height: calendarCellHeight)
                 .frame(maxWidth: .infinity)
@@ -946,36 +1043,43 @@ struct MonthPageView: View {
             switch kind {
             case .leading:
                 Button { onSelectAdjacentMonth(prevYearMonth.year, prevYearMonth.month) } label: {
-                    DayCell(day: day, isToday: false, isSelected: false, isAdjacent: true)
-                        .frame(maxWidth: .infinity)
+                    DayCell(
+                        day: day, isToday: false, isSelected: false, isAdjacent: true,
+                        precomputedHolidayMark: .some(item.holidayMark),
+                        precomputedLunarText: item.lunarText,
+                        precomputedLunarRed: item.isLunarRed
+                    )
+                    .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(DayCellPressStyle())
             case .current:
                 Button { onSelectDay(day) } label: {
-                    DayCell(day: day, isToday: day.date == DateUtil.string(from: Date()), isSelected: isSelected(day.date), isTriplePay: tripleDates.contains(day.date), isFlashing: flashDate == day.date)
-                        .frame(maxWidth: .infinity)
+                    DayCell(
+                        day: day,
+                        isToday: day.date == todayStr,
+                        isSelected: isSelected(day.date),
+                        isTriplePay: item.isTriplePay,
+                        isFlashing: flashDate == day.date,
+                        precomputedHolidayMark: .some(item.holidayMark),
+                        precomputedLunarText: item.lunarText,
+                        precomputedLunarRed: item.isLunarRed
+                    )
+                    .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(DayCellPressStyle())
             case .trailing:
                 Button { onSelectAdjacentMonth(nextYearMonth.year, nextYearMonth.month) } label: {
-                    DayCell(day: day, isToday: false, isSelected: false, isAdjacent: true)
-                        .frame(maxWidth: .infinity)
+                    DayCell(
+                        day: day, isToday: false, isSelected: false, isAdjacent: true,
+                        precomputedHolidayMark: .some(item.holidayMark),
+                        precomputedLunarText: item.lunarText,
+                        precomputedLunarRed: item.isLunarRed
+                    )
+                    .frame(maxWidth: .infinity)
                 }
                 .buttonStyle(DayCellPressStyle())
             }
         }
-    }
-
-    /// 本月三薪日（第 33 条，2026-11-26）：只按法定节假日表标，不管本班上班还是休息——
-    /// 2027-01-01 元旦 B班休息也要标「三薪」。不走工资算法的 tripleDates
-    ///（那份只含实际上班的法定日，是工资口径，底部「三薪 X 天」仍用它，不动）。
-    /// 法定表是全队的事实，看哪个班都标；也不依赖工资输入，输入没到齐也照常标。
-    private var tripleDates: Set<String> {
-        Set((monthData.days ?? []).map(\.date).filter { PayCalc.isStatutoryDay($0) })
-    }
-
-    private var monthData: MonthSchedule {
-        store.monthFor(year: year, month: month)
     }
 
     /// 上月年月 / 下月年月。
@@ -1011,6 +1115,12 @@ struct DayCell: View {
     var isAdjacent: Bool = false
     /// 三薪日（工资算法里 tripleDays 的那几天）：色块里加一行半透明「三薪」。
     var isTriplePay: Bool = false
+    /// 预计算字段（Gemini 1.3.2.011）：MonthPageView.buildGridDays 里一次算好传进来，
+    /// 渲染 42 格时不再每格重复查表/建字典；不传（nil）就按原来逻辑现算，兼容外部已有调用。
+    /// precomputedHolidayMark 是双层 Optional：外层 nil = 没传、现算；.some(nil) = 传了、就是没标。
+    var precomputedHolidayMark: String?? = nil
+    var precomputedLunarText: String? = nil
+    var precomputedLunarRed: Bool? = nil
     /// 点“今天”后的微闪（1.3.2.007，iOS.docx §3.2）：目标格一次底色微闪，不放大。
     var isFlashing: Bool = false
     /// 微闪的不透明度（1 → 0，0.55s easeOut）。
@@ -1038,7 +1148,9 @@ struct DayCell: View {
     /// 当天的法定/调休标：服务端节假日数据优先（已按官方通知修正），
     /// 没有服务端数据时用内置 ChineseCalendar 的标。
     /// kind：legal → 假（放假），rest → 假（放假），workday → 班（调休上班）。
+    /// 预计算值优先（MonthPageView 传进来的就是同一份逻辑算好的）。
     private var holidayMark: String? {
+        if let pre = precomputedHolidayMark { return pre }
         if let h = store.holiday(for: day.date) {
             switch h.kind {
             case "legal", "rest": return "假"
@@ -1074,9 +1186,15 @@ struct DayCell: View {
     /// 节气名（冬至、小寒等）没有「节」字，也不动。只改这里的显示，
     /// 不动 ChineseCalendar 的原始数据（当天详情等别处不受影响）。
     private var displayLunarText: String {
+        if let pre = precomputedLunarText { return pre }
         let t = extra.lunarText
         if t.count == 3 && t.hasSuffix("节") { return String(t.dropLast()) }
         return t
+    }
+
+    /// 阴历小字是不是红字（节气/节日）：预计算值优先。
+    private var isLunarRed: Bool {
+        precomputedLunarRed ?? extra.isRedText
     }
 
     var body: some View {
@@ -1181,7 +1299,7 @@ struct DayCell: View {
                 ForEach(Array(displayLunarText.enumerated()), id: \.offset) { _, ch in
                     Text(String(ch))
                         .appFont(size: 9, weight: 400)
-                        .foregroundColor(extra.isRedText ? .red : AppStyle.tinySecondary)
+                        .foregroundColor(isLunarRed ? .red : AppStyle.tinySecondary)
                 }
             }
         }

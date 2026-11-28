@@ -173,6 +173,19 @@ final class AppStore {
     /// 工资输入（payConfig / 全年天数）版本号：日历要靠它重画三薪标与底部统计，
     /// 输入到齐就 +1 触发重画（yearDaysCache / payConfig 本身是 @ObservationIgnored，不触发重画）。
     var payInputsVersion = 0
+    /// 工资缓存版本号（Gemini 1.3.2.011）：后台离主线程算好写入 payCache 后 +1，驱动工资页刷新。
+    /// 必须是 @Observable 追踪的普通 var（不能加 @ObservationIgnored），
+    /// cachedPay / isComputingPay 里 `let _ = payCacheVersion` 靠它订阅。
+    var payCacheVersion = 0
+    /// 正在后台计算的工资月份 key → 归属任务 token（用于避免缓存未命中瞬间误显示“暂无工资数据”）。
+    /// token 制：旧预热任务被取消时，它的 defer 只清自己名下的 key，不会把新任务刚登记的同月 key 误删。
+    @ObservationIgnored private var computingPayKeys: [String: UUID] = [:]
+    /// 工资输入变更代数：输入变化时 +1，防止过期的后台计算结果写回 payCache。
+    @ObservationIgnored private var payCalcGeneration = 0
+    /// 后台邻月工资预热任务。
+    @ObservationIgnored private var prewarmPayTask: Task<Void, Never>?
+    /// 本地磁盘缓存写入串行队列，避免 JSONEncoder + 写盘卡住主线程。
+    @ObservationIgnored private static let cacheSaveQueue = DispatchQueue(label: "paiban.cache.save", qos: .utility)
     /// 日历数据版本号（1.1.5）：日历每页只存一份数据快照，滑动中不读 store；
     /// 只有真正的数据变更才 +1 让各页重拍快照——调班/请假保存、刷新成功、换班组。
     /// 滑页中的 prefetch / setCurrentMonth 不碰它，滑稳之前快照一动不动。
@@ -471,6 +484,10 @@ final class AppStore {
         payConfig = nil
         yearDaysCache = [:]
         payCache = [:]
+        prewarmPayTask?.cancel()
+        computingPayKeys.removeAll()
+        payCalcGeneration += 1
+        payCacheVersion += 1
         monthCache = [:]
         swapsCache = [:]
         leavesCache = [:]
@@ -531,6 +548,8 @@ final class AppStore {
         payConfig = cache.payConfig
         yearDaysCache = cache.yearDays ?? [:]
         payCache = cache.payMonths ?? [:]
+        payCalcGeneration += 1
+        payCacheVersion += 1
         if let cachedPay = payCache[payCacheKey(year: payYearMonth.year, month: payYearMonth.month)] {
             pay = cachedPay
         } else if let cachedPay = cache.pay,
@@ -542,10 +561,10 @@ final class AppStore {
         lastSyncAt = cache.savedAt
     }
 
+    /// 写磁盘缓存（Gemini 1.3.2.011）：主线程只拍轻量值快照，JSONEncoder 编码 +
+    /// 写盘移到后台串行队列，不再每次切月都卡主线程；小组件快照仍在主线程发。
     private func persistCache() {
         guard let id = cacheUserId() else { return }
-        // 只缓存自己班组的数据：看别的班时 swaps/leaves 是空的，
-        // 写回会把自己班的调班/请假记录盖掉。
         if viewTeam == myTeam {
             let ym = currentYearMonth
             monthCache[monthCacheKey(team: viewTeam, year: ym.year, month: ym.month)] = month
@@ -553,16 +572,19 @@ final class AppStore {
             leavesCache[payCacheKey(year: ym.year, month: ym.month)] = leaves
             overtimeCache[payCacheKey(year: ym.year, month: ym.month)] = overtime
         }
-        CacheStore.save(userId: id, cache: CachedData(
+        let now = Date()
+        let snapshot = CachedData(
             user: user, month: month, pay: pay, swaps: swaps, leaves: leaves,
             months: monthCache, monthSwaps: swapsCache, monthLeaves: leavesCache,
             monthOvertime: overtimeCache,
             yearDays: yearDaysCache, payConfig: payConfig, payMonths: payCache,
             userMonths: userMonths,
-            savedAt: Date()
-        ))
-        cacheSavedAt = Date()
-        // 数据写盘后顺手给小组件发一份快照（内容不变时不重复发，见 publishWidgetSnapshot）。
+            savedAt: now
+        )
+        cacheSavedAt = now
+        Self.cacheSaveQueue.async {
+            CacheStore.save(userId: id, cache: snapshot)
+        }
         publishWidgetSnapshot()
     }
 
@@ -874,6 +896,8 @@ final class AppStore {
             lastSyncAt = Date()
             // 全年天数变了，本地算好的工资可能过时：只清当年已算的月份。
             for m in 1...12 { payCache.removeValue(forKey: payCacheKey(year: year, month: m)) }
+            payCalcGeneration += 1
+            payCacheVersion += 1
         }
     }
 
@@ -908,65 +932,148 @@ final class AppStore {
         return nil
     }
 
-    /// 只读缓存的取数（工资页 body 用，1.3.2.010）：命中直接回，未命中回 nil、
-    /// 绝不同步算。切月那一刻主线程上不许有同步工资计算，body 只能读缓存；
-    /// 未命中时页面显示占位（黑卡 "—"、明细骨架/暂无数据），预热任务在后台算好、
-    /// 写缓存、把 pay 写回来，页面再重画换真数。公式与 payFor 同一份，
-    /// 只是不触发计算（不读缓存以外的数据）。
-    func payForCached(year: Int, month: Int) -> PayMonth? {
-        payCache[payCacheKey(year: year, month: month)]
+    /// 只读工资缓存（O(1)，绝不在主线程同步算工资）：PayView 渲染专用。
+    /// 订阅 payCacheVersion：后台算好写缓存就 +1，页面跟着刷新。
+    func cachedPay(year: Int, month: Int) -> PayMonth? {
+        let _ = payCacheVersion
+        return payCache[payCacheKey(year: year, month: month)]
     }
 
-    /// 某年工资计算的全部输入快照（1.3.2.010）：配置 + 全年天数 + 单月记录 +
-    /// 生效表 + 年假抵扣 + 用户设置。全是值类型（struct / Array / Dictionary），
-    /// 快照后可安全带到后台线程算。输入没到齐返回 nil（算不出，等补输入）。
-    private func payInputsSnapshot(year: Int) -> (cfg: PayGlobalSettings, days: [DaySchedule], recorded: [String: PayMonthRecord], effective: [String: PayEffective], offset: Int, userSettings: PaySettings?)? {
-        guard let cfg = payConfig?.settings,
-              let days = yearDaysCache[String(year)], !days.isEmpty else { return nil }
-        let recorded = isOwner ? (payConfig?.months ?? [:]) : userMonths
-        let effective = isOwner ? (payConfig?.effective ?? [:]) : [:]
-        let offset = isOwner ? (cfg.annualLeaveUsedOffset?[String(year)] ?? 0) : 0
-        return (cfg, days, recorded, effective, offset, user?.paySettings)
+    /// 某月是否正在后台计算中（PayView 用来区分“计算中”与“无数据”）。
+    func isComputingPay(year: Int, month: Int) -> Bool {
+        let _ = payCacheVersion
+        return computingPayKeys[payCacheKey(year: year, month: month)] != nil
     }
 
-    /// 后台算某月工资并写进缓存（1.3.2.010，不占主线程）：输入在主线程快照成值类型，
-    /// 计算本身在后台线程跑（PayCalc.computePay 是纯函数：只读静态表与传入的值，
-    /// 不碰共享 DateFormatter/可变状态，可安全并发），算好回主线程写缓存。
-    /// 算好回主线程时再核对一次输入没变（refreshPayInputs 可能中途换了输入），
-    /// 变了就丢弃这次结果（不写缓存、不返回），等下一轮预热/刷新用新输入重算。
-    /// 输入没到齐返回 nil。只算不画：要不要把 pay 写回来由调用方定。
-    func warmPayMonth(year: Int, month: Int) async -> PayMonth? {
-        let key = payCacheKey(year: year, month: month)
-        if let cached = payCache[key] { return cached }
-        guard let snap = payInputsSnapshot(year: year) else { return nil }
-        let computed = await Task.detached(priority: .userInitiated) {
-            PayCalc.computePay(
-                yearDays: snap.days, global: snap.cfg, userSettings: snap.userSettings,
-                recordedMonths: snap.recorded, effective: snap.effective,
-                annualLeaveOffset: snap.offset, year: year, month: month
-            )
+    /// 使某年工资缓存失效（单月录入改动后调用，确保当月及后续累计个税月份都会重算）。
+    private func invalidatePayCache(year: Int) {
+        for m in 1...12 {
+            payCache.removeValue(forKey: payCacheKey(year: year, month: m))
+        }
+        payCalcGeneration += 1
+        payCacheVersion += 1
+    }
+
+    /// 后台离主线程批量算工资（不改 PayCalc 公式，只在 Task.detached 里跑）。
+    private func computePayOffMain(months: [(year: Int, month: Int)]) async -> [(key: String, value: PayMonth)] {
+        guard let cfg = payConfig?.settings else { return [] }
+        let yearDaysSnapshot = yearDaysCache
+        let userSettingsSnapshot = user?.paySettings
+        let recordedSnapshot = isOwner ? (payConfig?.months ?? [:]) : userMonths
+        let effectiveSnapshot = isOwner ? (payConfig?.effective ?? [:]) : [:]
+        let isOwnerSnapshot = isOwner
+        let offsetsSnapshot = cfg.annualLeaveUsedOffset ?? [:]
+
+        return await Task.detached(priority: .userInitiated) {
+            var results: [(key: String, value: PayMonth)] = []
+            results.reserveCapacity(months.count)
+            for item in months {
+                if Task.isCancelled { break }
+                guard let days = yearDaysSnapshot[String(item.year)], !days.isEmpty else { continue }
+                let offset = isOwnerSnapshot ? (offsetsSnapshot[String(item.year)] ?? 0) : 0
+                let pm = PayCalc.computePay(
+                    yearDays: days, global: cfg, userSettings: userSettingsSnapshot,
+                    recordedMonths: recordedSnapshot, effective: effectiveSnapshot,
+                    annualLeaveOffset: offset, year: item.year, month: item.month
+                )
+                let key = String(format: "%04d-%02d", item.year, item.month)
+                results.append((key: key, value: pm))
+            }
+            return results
         }.value
-        // 回主线程核对输入：快照还是不是当前那份（元组全是 Equatable，直接比），
-        // 变了说明中途换了输入，这次结果是旧输入算的，丢弃。
-        // 注意：payInputsSnapshot 回的是 Optional 元组，不能直接和已解包的 snap 比，
-        // 必须先解包再比（否则编不过）。
-        guard let current = payInputsSnapshot(year: year), current == snap else { return nil }
-        // 另一路可能同时算好了同一月（refreshPay/上一次预热）：以缓存为准，不覆盖。
-        if let cached = payCache[key] { return cached }
-        payCache[key] = computed
-        return computed
     }
 
-    /// 切月（工资页）：只改月份、只读缓存（1.3.2.010，之前同步算好当月工资、
-    /// 写进缓存——那份同步计算正好落在落定那帧上，每次切月都顿一下）。
-    /// 命中就把 pay 写回来（页面重画用缓存数）；未命中留着旧的 pay
-    ///（页面读 payForCached，未命中显示占位），预热任务（中心优先）在后台
-    /// 算好后把 pay 写回来再换真数。月份切换重做（老爷 2026-11-28 14:30 亲口令）：
-    /// 切月动画走原生分页容器，数据照旧同步换，动画只由分页器管——这里不包任何动画事务。
+    /// 以指定年月为中心，由近及远（0, +1, -1, +2, -2 ... ±radius）后台预热工资缓存；
+    /// 全部在离主线程计算，切月瞬间主线程零同步计算。
+    /// 登记“计算中”在创建 Task 之前同步做（不在 Task 体内才登记）：
+    /// setPayMonth 到 Task 启动之间有空档，晚登记会让 monthBreakdown 闪一下“暂无工资数据”。
+    /// token 制：旧任务被取消后，它的 defer 只清自己名下的 key，不会误删新任务刚登记的同月 key。
+    func prewarmPayAround(year: Int, month: Int, radius: Int = 10) {
+        let center = year * 12 + (month - 1)
+        var ordered: [(year: Int, month: Int)] = [(year, month)]
+        for d in 1...radius {
+            let plus = center + d
+            let minus = center - d
+            ordered.append((plus / 12, plus % 12 + 1))
+            ordered.append((minus / 12, minus % 12 + 1))
+        }
+
+        // 先筛选出还没算好的月份与缺全年天数的年份。
+        let missingMonths = ordered.filter { payCache[payCacheKey(year: $0.year, month: $0.month)] == nil }
+        let missingYears = Array(Set(missingMonths.map { $0.year }).filter { yearDaysCache[String($0)] == nil }).sorted()
+        guard !missingMonths.isEmpty else { return }
+
+        let missingKeys = missingMonths.map { payCacheKey(year: $0.year, month: $0.month) }
+        prewarmPayTask?.cancel()
+        let token = UUID()
+        for k in missingKeys { computingPayKeys[k] = token }
+        payCacheVersion += 1
+        prewarmPayTask = Task {
+            let generation = payCalcGeneration
+            defer {
+                for k in missingKeys {
+                    if computingPayKeys[k] == token { computingPayKeys.removeValue(forKey: k) }
+                }
+                payCacheVersion += 1
+            }
+
+            // 第一批：先算已有全年天数的近邻月份（当前页与左右页最优先），尽快上屏。
+            let readyNow = missingMonths.filter { yearDaysCache[String($0.year)] != nil }
+            let immediate = Array(readyNow.prefix(3))
+            let restReady = Array(readyNow.dropFirst(3))
+
+            if !immediate.isEmpty {
+                let computed = await computePayOffMain(months: immediate)
+                guard !Task.isCancelled, generation == payCalcGeneration else { return }
+                if !computed.isEmpty {
+                    for entry in computed { payCache[entry.key] = entry.value }
+                    let currentKey = payCacheKey(year: payYearMonth.year, month: payYearMonth.month)
+                    if let cur = payCache[currentKey] { pay = cur }
+                    payCacheVersion += 1
+                }
+            }
+
+            if !restReady.isEmpty {
+                let computed = await computePayOffMain(months: restReady)
+                guard !Task.isCancelled, generation == payCalcGeneration else { return }
+                if !computed.isEmpty {
+                    for entry in computed { payCache[entry.key] = entry.value }
+                    payCacheVersion += 1
+                }
+            }
+
+            // 若窗口覆盖了还没拉全年天数的年份（如跨年到 2027），后台补拉后再离主线程算完。
+            if payConfig == nil || !missingYears.isEmpty {
+                await ensureYearDays(years: missingYears)
+                guard !Task.isCancelled, generation == payCalcGeneration else { return }
+                let stillMissing = ordered.filter {
+                    payCache[payCacheKey(year: $0.year, month: $0.month)] == nil
+                        && yearDaysCache[String($0.year)] != nil
+                }
+                if !stillMissing.isEmpty {
+                    let computed = await computePayOffMain(months: stillMissing)
+                    guard !Task.isCancelled, generation == payCalcGeneration else { return }
+                    if !computed.isEmpty {
+                        for entry in computed { payCache[entry.key] = entry.value }
+                        let currentKey = payCacheKey(year: payYearMonth.year, month: payYearMonth.month)
+                        if let cur = payCache[currentKey] { pay = cur }
+                        payCacheVersion += 1
+                    }
+                }
+            }
+        }
+    }
+
+    /// 切月（工资页）：只读 payCache，不在主线程同步算工资、不每次切月写盘；
+    /// 万一未命中缓存则交给后台 prewarm 算完刷新。
     func setPayMonth(year: Int, month: Int) {
         payYearMonth = (year, month)
-        if let cached = payCache[payCacheKey(year: year, month: month)] {
+        let key = payCacheKey(year: year, month: month)
+        if let cached = payCache[key] {
             pay = cached
+        } else {
+            pay = nil
+            prewarmPayAround(year: year, month: month, radius: 10)
         }
     }
 
@@ -1010,40 +1117,63 @@ final class AppStore {
         return (tripleSet, pay.tripleDays ?? 0, pay.overtimeDays ?? 0)
     }
 
-    /// 刷新工资：优先走本地缓存与本地算，切月秒出。
-    /// 1) 本地有输入（配置 + 全年天数）就直接算、立刻显示；
-    /// 2) 没输入就先取输入（配置 + 全年天数各一趟）再本地算；
-    /// 3) 输入取不到才走服务端 /me/pay 兜底。
-    func refreshPay() async {
-        let key = payCacheKey(year: payYearMonth.year, month: payYearMonth.month)
-        // 1) 缓存命中直接回，不同步算（1.3.2.010：切月落定那帧不许有同步工资计算）。
-        if let cached = payCache[key] {
+    /// 刷新工资：优先命中缓存；需要计算时一律离主线程跑，不阻塞切月。
+    func refreshPay(forceRecompute: Bool = false) async {
+        let year = payYearMonth.year
+        let month = payYearMonth.month
+        let key = payCacheKey(year: year, month: month)
+
+        if !forceRecompute, let cached = payCache[key] {
             pay = cached
             return
         }
-        // 2) 输入齐时后台算（不占主线程），算好写缓存、把 pay 写回来。
-        if let warmed = await warmPayMonth(year: payYearMonth.year, month: payYearMonth.month) {
-            pay = warmed
-            persistCache()
-            return
+
+        if payConfig?.settings != nil, let days = yearDaysCache[String(year)], !days.isEmpty {
+            let gen = payCalcGeneration
+            // token 制：算的过程中 prewarm 可能给同月登了新的记，算完只清自己名下的，
+            // 不误删 prewarm 的登记（否则 isComputingPay 提前变 false、闪“暂无工资数据”）。
+            let token = UUID()
+            computingPayKeys[key] = token
+            payCacheVersion += 1
+            let computed = await computePayOffMain(months: [(year, month)])
+            if computingPayKeys[key] == token { computingPayKeys.removeValue(forKey: key) }
+            if gen == payCalcGeneration, let first = computed.first {
+                pay = first.value
+                payCache[first.key] = first.value
+                payCacheVersion += 1
+                persistCache()
+                return
+            }
         }
-        // 3) 输入没到齐：走原来的取输入 + 服务端兜底（下面一字不动）。
-        isLoadingPay = true
+
+        if let cached = payCache[key] {
+            pay = cached
+        } else {
+            isLoadingPay = true
+        }
         defer { isLoadingPay = false }
-        // 本地算不出：先补取输入（只在缺输入时才走这两趟，取到就本地算，不用再问 /me/pay）。
+
         await refreshPayInputs()
-        if let local = computeLocalPay(year: payYearMonth.year, month: payYearMonth.month) {
-            pay = local
-            payCache[key] = local
-            isLoadingPay = false
-            persistCache()
-            return
+        if payConfig?.settings != nil, let days = yearDaysCache[String(year)], !days.isEmpty {
+            let gen = payCalcGeneration
+            let computed = await computePayOffMain(months: [(year, month)])
+            if gen == payCalcGeneration, let first = computed.first {
+                pay = first.value
+                payCache[first.key] = first.value
+                payCacheVersion += 1
+                isLoadingPay = false
+                persistCache()
+                return
+            }
         }
-        AppLogger.shared.log("工资 \(payYearMonth.year)-\(payYearMonth.month) 本地算不出，走服务端 /me/pay 兜底", tag: "Pay")
+
+        AppLogger.shared.log("工资 \(year)-\(month) 本地算不出，走服务端 /me/pay 兜底", tag: "Pay")
         do {
-            pay = try await api.fetchPay(year: payYearMonth.year, month: payYearMonth.month)
+            let fetched = try await api.fetchPay(year: year, month: month)
+            pay = fetched
+            payCache[key] = fetched
+            payCacheVersion += 1
             isOffline = false
-            // 1.3.2.005：服务端兜底取数成功了，更新“数据更新于”时间。
             lastSyncAt = Date()
         } catch {
             if (error as? APIError)?.message == APIError.unreachable.message {
@@ -1270,7 +1400,11 @@ final class AppStore {
         } else {
             userMonths[monthKey] = applying(userMonths[monthKey] ?? PayMonthRecord())
         }
-        await refreshPay()
+        if let year = Int(monthKey.prefix(4)) {
+            invalidatePayCache(year: year)
+        }
+        await refreshPay(forceRecompute: true)
+        prewarmPayAround(year: payYearMonth.year, month: payYearMonth.month, radius: 10)
         persistCache()
         Task {
             do {
@@ -1285,7 +1419,11 @@ final class AppStore {
                     user = me
                     if let pm = me.payMonths { userMonths = pm }
                 }
-                await refreshPay()
+                if let year = Int(monthKey.prefix(4)) {
+                    invalidatePayCache(year: year)
+                }
+                await refreshPay(forceRecompute: true)
+                prewarmPayAround(year: payYearMonth.year, month: payYearMonth.month, radius: 10)
             }
         }
     }

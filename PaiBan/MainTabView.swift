@@ -83,8 +83,13 @@ struct MainTabView: View {
             }
             // 1.3.2.004：启动时就把工资算好——不然第一次点工资 Tab 才现算现取，
                 // 切换过去要等一下，快不起来。没权限 / 设定没填完时 refreshPay 自己会停。
-                if store.payAccess && store.pay == nil {
-                    await store.refreshPay()
+                // 1.3.2.011（Gemini）：进 App 就在后台把前后 10 个月工资先预热好。
+                if store.payAccess {
+                    if store.pay == nil {
+                        await store.refreshPay()
+                    }
+                    let now = DateUtil.yearMonth(of: Date())
+                    store.prewarmPayAround(year: now.year, month: now.month, radius: 10)
                 }
             }
             // 工资权限没了（管理员关了）而当前正停在工资 Tab：切回排班。
