@@ -450,20 +450,17 @@ struct AccountSecurityView: View {
 
     var body: some View {
         Form {
-            // 头像区（1.3.2.020，按老爷发的头像版设计图重做）：圆形姓氏头像 + 姓名 +
-            // 脱敏手机号，不在白卡里、直接放灰底上；蓝色「B班」徽标删掉（班组行里已有）。
+            // 头像区（1.3.3，老爷 2026-11-28 23:34 亲口令，图一参考）：头像居中放
+            // 顶部，下面居中放打码手机号；名字删掉（只在「个人信息」昵称行里留
+            // 着）。头像还是灰渐变圆 + 白色粗体姓，80pt（图一那个约 180pt 太大，不用）。
             Section {
-                HStack(spacing: 14) {
+                VStack(spacing: 10) {
                     SurnameAvatarView(name: store.displayUsername, size: 80)
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(store.displayUsername)
-                            .font(.title3)
-                            .bold()
-                        Text(PhoneUtil.masked(store.user?.phone) ?? "未绑定手机号")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
+                    Text(PhoneUtil.masked(store.user?.phone) ?? "未绑定手机号")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
                 }
+                .frame(maxWidth: .infinity)
                 .padding(.vertical, 8)
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
@@ -1448,6 +1445,21 @@ struct ChangelogView: View {
             // 另一组直接不显示。按 UpdateChecker.installedChannel 定。
             if UpdateChecker.installedChannel != "beta" {
                 Section("正式版") {
+                    changelog(version: "1.3.3", items: [
+                        "排班页和工资页滑动更顺了，月份左右滑跟手，标题不再错位、跳月，切月更快",
+                        "界面统一翻新，深色模式分层更清楚，卡片和分隔线更干净，深色下字重自动降一档，金额、日期用等宽数字",
+                        "排班能前后滑 10 年",
+                        "2027 年节假日改准了，端午 6 月 9 日、中秋 9 月 15 日",
+                        "排班页和工资页顶卡改成白框、更紧凑，高度固定，工资页默认看上个月",
+                        "登录/注册页统一了，底划线输入框、胶囊按钮、密码框带眼睛，登录方式是双 Tab，加了协议勾选，协议全文都能在 App 里看",
+                        "密码规则改成 8-16 位、须同时含字母和数字",
+                        "当天详情页大改，调班/请假/记加班/改排班单行四列，当前开的那个唯一高亮，请假单日/多日一个卡片里切换，连班禁令收进「? 规则」",
+                        "全站输入框改成底线样式，昵称最多 10 个字",
+                        "账号与安全页改成头像版，灰色渐变圆头像加姓名和手机号，下面分「个人信息」「登录与安全」两组，退出登录是白色圆角按钮，注销账号是按钮下面一行红字",
+                        "账号可以注销了，注销后 30 天删数据，30 天内重新注册可以找回旧账号",
+                        "已经调班的日子再点「调班」，会轻震一下并提示一行字",
+                        "更新日志只显示当前渠道，内测版只看内测版的，正式版只看正式版的",
+                    ])
                     changelog(version: "1.3.2", items: [
                         "个税加专项附加扣除",
                         "负个税按 0 算",
