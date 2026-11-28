@@ -55,7 +55,7 @@ struct SettingsView: View {
             }
 
             // 分组 2：排班与工资。
-            Section("排班与工资") {
+            Section {
                 // 倒班与班次（只读的「班次设置」已合并进这页顶部卡片，不再单列一行）。
                 NavigationLink {
                     RotationSettingsView().toolbar(.hidden, for: .tabBar)
@@ -87,6 +87,8 @@ struct SettingsView: View {
                         Text("班次提醒")
                     }
                 }
+            } header: {
+                Text("排班与工资")
             } footer: {
                 Text("开启后将在班次开始前 30 分钟推送提醒，自动覆盖未来 7 天。")
             }
@@ -233,6 +235,7 @@ struct SettingsView: View {
         }
         .modifier(AlwaysVisibleScrollIndicator())
         .navigationTitle("设置")
+        .navigationBarTitleDisplayMode(.inline)
         // 导航栏毛玻璃隔离（2026-11-28，和排班页同一毛病）：向上滚时卡片文字透过导航栏、
         // 和「设置」标题打架；设置页之前没写 toolbarBackground，走系统默认就是 .automatic，
         // 这里显式写出来，和排班页/工资页保持一致。
@@ -419,11 +422,12 @@ struct AccountSecurityView: View {
                         .foregroundColor(.secondary)
                 }
                 // 登录用的账号名（username）：显示名可以改，这个不动；和显示名不一样才单独列一行。
+                // 脱敏与手机号行保持一致：登录账号若是手机号也只显示中间四位星号。
                 if let username = store.user?.username, !username.isEmpty, username != store.displayUsername {
                     HStack {
                         Text("登录账号")
                         Spacer()
-                        Text(username)
+                        Text(PhoneUtil.masked(username) ?? username)
                             .foregroundColor(.secondary)
                     }
                 }
@@ -459,7 +463,7 @@ struct AccountSecurityView: View {
                     HStack {
                         Text("修改昵称")
                         Spacer()
-                        Text("改显示名，登录账号不变")
+                        Text("仅修改展示名称，不影响登录账号。")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -494,10 +498,11 @@ struct AccountSecurityView: View {
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
             } footer: {
-                Text("退出后只清除本机的登录状态，离线缓存保留，下次登同一账号直接用缓存顶着。")
+                Text("退出后仅清除当前登录状态，本地离线缓存将予以保留，重新登录同账号后可继续离线查看。")
             }
         }
         .navigationTitle("账号与安全")
+        .navigationBarTitleDisplayMode(.inline)
         .alert("切换账号", isPresented: $showSwitchConfirm) {
             Button("取消", role: .cancel) { }
             Button("切换", role: .destructive) {
@@ -759,6 +764,7 @@ struct PaySettingsView: View {
             }
         }
         .navigationTitle("工资设置")
+        .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: fillPayFields)
         .onChange(of: store.user?.paySettings) { _ in fillPayFields() }
     }
@@ -1085,6 +1091,7 @@ struct SpecialDeductionsView: View {
             }
         }
         .navigationTitle("专项附加扣除")
+        .navigationBarTitleDisplayMode(.inline)
         .onAppear(perform: fillFields)
         .onChange(of: store.user?.paySettings?.specialDeductions) { _ in fillFields() }
         // 第一次打开专项扣除且还没问过：弹窗问一次「有没有专项附加扣除」。
@@ -1231,6 +1238,7 @@ struct AboutView: View {
             }
         }
         .navigationTitle("关于")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -1281,6 +1289,7 @@ struct UsageGuideView: View {
             }
         }
         .navigationTitle("使用帮助")
+        .navigationBarTitleDisplayMode(.inline)
     }
 }
 
@@ -1295,6 +1304,10 @@ struct ChangelogView: View {
                     "小组件页直接展示 5 张预览卡片，数据同步改成轻提示「已刷新」",
                     "使用说明改成问答式，点问题展开答案；个税算法拆成清单更好读",
                     "倒班与班次页改成白底卡片 + 细描边选中态，班次时段直接放在页顶",
+                    "全站标题统一居中，切页时头部不再跳；点月份标题可直接选年月，不用连点箭头",
+                    "黑卡右上角加了眼睛，点一下金额全部藏起来，再点恢复；黑卡上还标了「B班 · 我的今日」",
+                    "工资单更好读：扣款项带负号、0 元的行变浅、公积金补上费率",
+                    "更换班组页的保存按钮改成独立大按钮，轮次预览改成彩色小标签",
                 ])
                 changelog(version: "1.3.2.012（内测）", items: [
                     "排班页黑卡重新排版：日期与班次在左，今日已挣放大在右，一眼看清",
@@ -1657,6 +1670,7 @@ struct ChangelogView: View {
             }
         }
         .navigationTitle("更新日志")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private func changelog(version: String, items: [String]) -> some View {
@@ -2056,15 +2070,27 @@ struct WidgetsView: View {
     }
 
     /// 介绍图卡片：图 + SwiftUI 标题/说明。方图（今日）居中限宽 200，宽图通栏。
+    /// 预览图是静态截图（11 月 26 日那天裁的），日期不是当天；右上角加极淡的
+    /// 「示例」标签，免得误以为小组件不会自动刷新（1.3.2.013）。
     private func introCard(image: String, title: String, desc: String, imageWidth: CGFloat? = nil) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Spacer(minLength: 0)
-                Image(image)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(maxWidth: imageWidth ?? .infinity)
-                    .cornerRadius(12)
+                ZStack(alignment: .topTrailing) {
+                    Image(image)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(maxWidth: imageWidth ?? .infinity)
+                        .cornerRadius(12)
+                    Text("示例")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(Color(.systemBackground).opacity(0.85))
+                        .clipShape(Capsule())
+                        .padding(6)
+                }
                 Spacer(minLength: 0)
             }
             Text(title)

@@ -34,6 +34,8 @@ struct CalendarView: View {
     /// 换班组时日历内容先淡出、数据换好再淡入，和胶囊滑入对称；减弱动态效果时不淡，直接换。
     @State private var teamFade = false
     @State private var teamFadeTask: Task<Void, Never>? = nil
+    /// 年月快选弹窗（1.3.2.013）：点月份标题弹出，选年月直接跳过去。
+    @State private var showMonthJump = false
     /// 班组胶囊滑动（1.3.2.007，iOS.docx §3.2）：选中底色用 matchedGeometryEffect 在四个 pill 间滑动。
     @Namespace private var teamCapsuleNamespace
     /// 减弱动态效果（重做，1.3.2.008）：月份切换只做 0.15s 淡入，不做位移、不做数字滚动。
@@ -210,6 +212,9 @@ struct CalendarView: View {
                 // 两页标题与黑卡同高，切 Tab 不再有割裂感。
                 monthNavigator
                     .padding(.top, 8)
+                    .sheet(isPresented: $showMonthJump) {
+                        MonthJumpSheet(currentIndex: pageIndex, range: pageRange) { goToMonth($0) }
+                    }
                 headerCard
                     .opacity(teamFade ? 0 : 1)
                 // 1.2.7.002：日历只留月视图（周视图已删）。
@@ -386,25 +391,43 @@ struct CalendarView: View {
     /// 上班/休息黑卡高度基本不变。倒计时和金额各走自己的 TimelineView 每秒刷新，
     /// 不带动整页（1.2.7 的隔离还在）。
     private var headerCard: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(todayDateLine)
-                    .appFont(size: AppFont.titleLarge, weight: 700)
-                    .fadeIn()
-                    .foregroundColor(.white)
-                Text(todayShiftLine)
-                    .appFont(size: AppFont.bodySmall)
-                    .fadeIn()
+        VStack(spacing: 8) {
+            // 顶行（1.3.2.013）：黑卡始终显示登录用户自己的今日（看别班时也不变），
+            // 右上角角标「B班 · 我的今日」点明归属；眼睛开关一键隐藏全部金额（只有
+            // 有工资权限的人才有金额可藏，没权限时只留角标）。
+            HStack {
+                Spacer()
+                Text("\(store.myTeam)班 · 我的今日")
+                    .appFont(size: AppFont.caption)
                     .foregroundColor(AppStyle.whiteText(opacity: 0.75))
-                if let day = store.todaySchedule {
-                    let inputs = store.todayEstimateInputs
-                    TodayStatusLine(day: day, earlyRate: inputs.earlyRate, midRate: inputs.midRate, inputs: inputs.inputs)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(Color.white.opacity(0.15))
+                    .clipShape(Capsule())
+                if store.payAccess {
+                    HideAmountsEyeButton()
                 }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            if let day = store.todaySchedule, store.payAccess {
-                let inputs = store.todayEstimateInputs
-                TodayMoneyHero(day: day, earlyRate: inputs.earlyRate, midRate: inputs.midRate, inputs: inputs.inputs)
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(todayDateLine)
+                        .appFont(size: AppFont.titleLarge, weight: 700)
+                        .fadeIn()
+                        .foregroundColor(.white)
+                    Text(todayShiftLine)
+                        .appFont(size: AppFont.bodySmall)
+                        .fadeIn()
+                        .foregroundColor(AppStyle.whiteText(opacity: 0.75))
+                    if let day = store.todaySchedule {
+                        let inputs = store.todayEstimateInputs
+                        TodayStatusLine(day: day, earlyRate: inputs.earlyRate, midRate: inputs.midRate, inputs: inputs.inputs)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if let day = store.todaySchedule, store.payAccess {
+                    let inputs = store.todayEstimateInputs
+                    TodayMoneyHero(day: day, earlyRate: inputs.earlyRate, midRate: inputs.midRate, inputs: inputs.inputs, hideAmounts: store.hideAmounts)
+                }
             }
         }
         .padding(16)
@@ -492,7 +515,8 @@ struct CalendarView: View {
         ObservedMonthHeaderView(
             state: titleState,
             onPrevious: { goToMonth(pageIndex - 1) },
-            onNext: { goToMonth(pageIndex + 1) }
+            onNext: { goToMonth(pageIndex + 1) },
+            onTitleTap: { showMonthJump = true }
         )
     }
 
@@ -1456,6 +1480,8 @@ private struct TodayMoneyHero: View {
     let earlyRate: Double
     let midRate: Double
     let inputs: PayCalc.DayEstimateInputs
+    /// 金额隐藏开关（1.3.2.013）：打开时金额一律 ¥****。
+    let hideAmounts: Bool
 
     var body: some View {
         TimelineView(.periodic(from: Date(), by: 1)) { context in
@@ -1487,17 +1513,19 @@ private struct TodayMoneyHero: View {
     /// 第 40 条：三薪/加班以后缀看当日种类（不是法定日就一定是三薪——超额的法定日转加班）。
     private func moneyParts(state: PayCalc.TodayLiveState) -> (label: String, amount: String, sub: String?)? {
         let suffix = inputs.isTriple ? "（三薪）" : (inputs.isOvertime ? "（加班）" : "")
+        // 隐藏时金额一律 ¥****（1.3.2.013），三薪/加班后缀照常显示。
+        let m: (Double?) -> String = { hideAmounts ? "¥****" : MoneyUtil.money($0) }
         switch state {
         case .rest:
             return nil
         case .before(_, let total):
-            return ("已挣", MoneyUtil.money(0), "预估 \(MoneyUtil.money(total))\(suffix)")
+            return ("已挣", m(0), "预估 \(m(total))\(suffix)")
         case .working(_, let earned, let total):
-            return ("已挣", MoneyUtil.money(earned), "预估 \(MoneyUtil.money(total))\(suffix)")
+            return ("已挣", m(earned), "预估 \(m(total))\(suffix)")
         case .between(_, let earned, let total):
-            return ("已挣", MoneyUtil.money(earned), "预估 \(MoneyUtil.money(total))\(suffix)")
+            return ("已挣", m(earned), "预估 \(m(total))\(suffix)")
         case .done(let total):
-            return ("今日已挣\(suffix)", MoneyUtil.money(total), nil)
+            return ("今日已挣\(suffix)", m(total), nil)
         }
     }
 }

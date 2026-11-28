@@ -46,6 +46,16 @@ enum AppStyle {
                 : UIColor(red: 0.11, green: 0.15, blue: 0.23, alpha: 1)
         })
     }
+    /// 低饱和蓝（1.3.2.013，全站操作色规范）：轻量可编辑/链接态（「可改」徽标），
+    /// 不用系统高饱和蓝；深色提亮一档保证对比度。主按钮与选中态走 navyAdaptive，
+    /// 破坏性操作走系统 destructive 红，各司其职。
+    static var editableBlue: Color {
+        Color(UIColor { t in
+            t.userInterfaceStyle == .dark
+                ? UIColor(red: 0.58, green: 0.70, blue: 0.92, alpha: 1)
+                : UIColor(red: 0.33, green: 0.46, blue: 0.66, alpha: 1)
+        })
+    }
     /// 半透明白字（1.2.8.001 深色修）：浅色保持原来那个透明度，深色改纯白。
     /// 深色下 75%/85%/90% 的白字发灰发虚，是「深色模式字体模糊」的头号原因。
     static func whiteText(opacity lightOpacity: Double) -> Color {
@@ -349,5 +359,27 @@ struct SkeletonBar: View {
         RoundedRectangle(cornerRadius: 6)
             .fill(AppStyle.surface2)
             .frame(width: width, height: height)
+    }
+}
+
+/// 金额一键隐藏开关（1.3.2.013）：黑卡右上角的眼睛，点一下排班黑卡与工资页的
+/// 全部金额脱敏为 ¥****，再点恢复；状态存在 Store.hideAmounts（UserDefaults），
+/// 下次进 App 还在。极轻量：白字 0.85 透明度、无底块，只一个小眼睛。
+struct HideAmountsEyeButton: View {
+    @Environment(AppStore.self) private var store: AppStore
+
+    var body: some View {
+        Button {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+            store.hideAmounts.toggle()
+        } label: {
+            Image(systemName: store.hideAmounts ? "eye.slash" : "eye")
+                .font(.system(size: 15))
+                .foregroundColor(AppStyle.whiteText(opacity: 0.85))
+                .padding(6)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(store.hideAmounts ? "显示金额" : "隐藏金额")
     }
 }

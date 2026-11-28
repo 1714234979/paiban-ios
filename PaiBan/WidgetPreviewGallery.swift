@@ -324,6 +324,7 @@ private struct HireYearGalleryPreview: View {
                 }
             }
             .navigationTitle("入职时间")
+            .navigationBarTitleDisplayMode(.inline)
         }
     }
 }

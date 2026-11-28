@@ -21,6 +21,8 @@ struct PayView: View {
     @State private var showPayGuide = false
     /// 专项扣除询问弹窗里点「有，去填写」后打开的编辑页（第 52 条）。
     @State private var showSpecialDeductions = false
+    /// 年月快选弹窗（1.3.2.013）：点月份标题弹出，选年月直接跳过去。
+    @State private var showMonthJump = false
     /// 滑页的页码 = 月份绝对序号（年*12 + 月-1），与排班页同一套。
     /// 1.2.6 冷启动回当天：默认当月。
     @State private var pageIndex: Int = PayView.monthIndex(year: DateUtil.yearMonth(of: Date()).year, month: DateUtil.yearMonth(of: Date()).month)
@@ -95,11 +97,16 @@ struct PayView: View {
     private func headerCard(for ym: (year: Int, month: Int)) -> some View {
         let pay = store.cachedPay(year: ym.year, month: ym.month)
         return VStack(alignment: .leading, spacing: 4) {
-            Text("本月实发合计")
-                .appFont(size: AppFont.bodySmall)
-                .foregroundColor(AppStyle.whiteText(opacity: 0.75))
+            HStack {
+                Text("本月实发合计")
+                    .appFont(size: AppFont.bodySmall)
+                    .foregroundColor(AppStyle.whiteText(opacity: 0.75))
+                Spacer()
+                // 金额一键隐藏（1.3.2.013）：右上角眼睛，点一下本页全部金额脱敏为 ¥****。
+                HideAmountsEyeButton()
+            }
             if let pay = pay, !isPayTBD {
-                Text(MoneyUtil.money(pay.grandTotal))
+                Text(store.moneyText(pay.grandTotal))
                     .appFont(size: AppFont.titleLarge, weight: 700)
                     .foregroundColor(.white)
             } else {
@@ -242,9 +249,13 @@ struct PayView: View {
             ObservedMonthHeaderView(
                 state: titleState,
                 onPrevious: { goToMonth(pageIndex - 1) },
-                onNext: { goToMonth(pageIndex + 1) }
+                onNext: { goToMonth(pageIndex + 1) },
+                onTitleTap: { showMonthJump = true }
             )
             .padding(.top, 8)
+            .sheet(isPresented: $showMonthJump) {
+                MonthJumpSheet(currentIndex: pageIndex, range: pageRange) { goToMonth($0) }
+            }
             // 月份分页重做（老爷 2026-11-28 14:30 亲口令）：共用的 SmoothMonthPager——
             // 原生分页 ScrollView + .scrollTargetBehavior(.paging)，手势物理曲线、回弹与
             // 打断全交给系统；每页一个 ScrollView 竖滚，横滑归分页器、竖滚归页内，两边
@@ -410,8 +421,8 @@ struct PayView: View {
                 salarySection(pay: pay)
                 bonusSection(pay: pay)
                 paySection(title: "合计", rows: [
-                    ("实发工资 + 实发奖金", MoneyUtil.money(pay.grandTotal)),
-                    ("餐贴", MoneyUtil.money(pay.mealAllowance)),
+                    ("实发工资 + 实发奖金", store.moneyText(pay.grandTotal)),
+                    ("餐贴", store.moneyText(pay.mealAllowance)),
                 ])
                 paySection(title: "出勤", rows: [
                     ("当月应出勤", pay.basicDays.map { "\($0) 天" } ?? "—"),
@@ -519,42 +530,56 @@ struct PayView: View {
             Text("奖金")
                 .appFont(size: AppFont.headline, weight: 600)
                 .padding(.bottom, 8)
-            editableRow(title: "科室绩效", valueText: MoneyUtil.money(pay.deptPerf), field: .deptPerf,
+            editableRow(title: "科室绩效", valueText: store.moneyText(pay.deptPerf), field: .deptPerf,
                         currentValue: pay.deptPerf.map { String(format: "%.2f", $0) } ?? "4000",
                         placeholder: "科室绩效（如 3800）")
-            staticRow(title: "其他奖罚", valueText: MoneyUtil.money(pay.otherReward), bold: false)
-            staticRow(title: "缺员补贴", valueText: MoneyUtil.money(pay.shortageSubsidy), bold: false)
+            staticRow(title: "其他奖罚", valueText: store.moneyText(pay.otherReward), bold: false, dimmed: (pay.otherReward ?? 0) == 0)
+            staticRow(title: "缺员补贴", valueText: store.moneyText(pay.shortageSubsidy), bold: false, dimmed: (pay.shortageSubsidy ?? 0) == 0)
             editableRow(title: "绩效系数", valueText: MoneyUtil.number(pay.perfCoef), field: .perfCoef,
                         currentValue: pay.perfCoef.map { String(format: "%.2f", $0) } ?? "1",
                         placeholder: "绩效系数（如 1.2）")
             editableRow(title: "奖金系数", valueText: MoneyUtil.number(pay.bonusCoef), field: .bonusCoef,
                         currentValue: pay.bonusCoef.map { String(format: "%.2f", $0) } ?? "1",
                         placeholder: "奖金系数（如 1.2）")
-            staticRow(title: "加班费（含三薪）", valueText: MoneyUtil.money(pay.overtimePay), bold: false)
+            staticRow(title: "加班费（含三薪）", valueText: store.moneyText(pay.overtimePay), bold: false, dimmed: (pay.overtimePay ?? 0) == 0)
             staticRow(title: "三薪天数", valueText: pay.tripleDays.map { String(format: "%.1f 天", $0) } ?? "—", bold: false)
-            staticRow(title: "三薪金额", valueText: MoneyUtil.money(pay.triplePay), bold: false)
+            staticRow(title: "三薪金额", valueText: store.moneyText(pay.triplePay), bold: false, dimmed: (pay.triplePay ?? 0) == 0)
             editableRow(title: "加班天数", valueText: pay.overtimeDays.map { String(format: "%.1f 天", $0) } ?? "—", field: .overtimeDays,
                         currentValue: pay.overtimeDays.map { String(format: "%.1f", $0) } ?? "0",
                         placeholder: "加班天数（如 2）")
-            staticRow(title: "税前奖金", valueText: MoneyUtil.money(pay.bonusTotal), bold: true)
+            staticRow(title: "税前奖金", valueText: store.moneyText(pay.bonusTotal), bold: true)
             // 专项附加扣除（第 52 条）：这个月扣了多少，一眼就能看到税少了是因为扣了专项。
+            // 负号改走 staticRow 的 deduction 旗标（和别的扣款行同一套样式），值里不再自带“−”。
             if (pay.specialDeductionMonthly ?? 0) > 0 {
-                staticRow(title: "专项附加扣除", valueText: "−\(MoneyUtil.money(pay.specialDeductionMonthly))/月", bold: false)
+                staticRow(title: "专项附加扣除", valueText: "\(store.moneyText(pay.specialDeductionMonthly))/月", bold: false, deduction: true)
             }
             // 大病医疗（修订版）：只汇算时扣，不进月度预扣；填了年度自付总额就提示一句。
             if let selfPay = store.user?.paySettings?.specialDeductions?.medicalSelfPayAnnual, selfPay > 0 {
-                Text("大病医疗需在次年汇算时扣除，未计入本月预扣；年度自付 \(MoneyUtil.money(selfPay))，预计汇算可扣 \(MoneyUtil.money(PayCalc.medicalAnnualDeduction(store.user?.paySettings?.specialDeductions)))。")
+                Text("大病医疗需在次年汇算时扣除，未计入本月预扣；年度自付 \(store.moneyText(selfPay))，预计汇算可扣 \(store.moneyText(PayCalc.medicalAnnualDeduction(store.user?.paySettings?.specialDeductions)))。")
                     .appFont(size: AppFont.caption)
                     .foregroundColor(.secondary)
                     .padding(.vertical, 4)
             }
-            staticRow(title: "个税（累计预扣，税从奖金里扣）", valueText: MoneyUtil.money(pay.incomeTax), bold: false)
-            staticRow(title: "实发奖金", valueText: MoneyUtil.money(pay.bonusAfterTax), bold: true)
+            staticRow(title: "个税（累计预扣，税从奖金里扣）", valueText: store.moneyText(pay.incomeTax), bold: false, dimmed: (pay.incomeTax ?? 0) == 0)
+            staticRow(title: "实发奖金", valueText: store.moneyText(pay.bonusAfterTax), bold: true)
         }
         .padding(AppStyle.cardPadding)
         .background(AppStyle.surface1)
         .cornerRadius(AppStyle.cardRadius)
         .padding(.horizontal, 16)
+    }
+
+    /// 公积金标题（1.3.2.013）：费率是反推的（公积金金额 ÷ 缴费基数），不是存量——
+    /// 老爷的是 403 ÷ 5938 = 6.8%，不是别的 AI 猜的 12%；算不出来（没填公积金或
+    /// 没基数）就不标，只写「公积金」。
+    private func housingFundTitle(pay: PayMonth) -> String {
+        guard let hf = pay.housingFund, hf > 0, let base = pay.contributionBase, base > 0 else {
+            return "公积金"
+        }
+        let pct = hf / base * 100
+        let s = String(format: "%.1f", pct)
+        let trimmed = s.hasSuffix(".0") ? String(s.dropLast(2)) : s
+        return "公积金（\(trimmed)%）"
     }
 
     /// 工资区：水电费那行点一下就能改当月那个数（只有老爷能改），其余行只看。
@@ -564,22 +589,22 @@ struct PayView: View {
             Text("工资")
                 .appFont(size: AppFont.headline, weight: 600)
                 .padding(.bottom, 8)
-            staticRow(title: "基本工资", valueText: MoneyUtil.money(pay.baseSalary), bold: false)
+            staticRow(title: "基本工资", valueText: store.moneyText(pay.baseSalary), bold: false)
             staticRow(title: "岗位", valueText: pay.position ?? "—", bold: false)
-            staticRow(title: "早夜班补贴", valueText: MoneyUtil.money(pay.allowance), bold: false)
-            staticRow(title: "学历补贴", valueText: MoneyUtil.money(pay.educationSubsidy), bold: false)
-            staticRow(title: "高温费", valueText: MoneyUtil.money(pay.heat), bold: false)
-            staticRow(title: "工龄津贴", valueText: MoneyUtil.money(pay.seniority), bold: false)
-            staticRow(title: "应发工资", valueText: MoneyUtil.money(pay.salarySubtotal), bold: true)
-            staticRow(title: "养老（8%）", valueText: MoneyUtil.money(pay.pension), bold: false)
-            staticRow(title: "医疗（2%）", valueText: MoneyUtil.money(pay.medical), bold: false)
-            staticRow(title: "失业（0.3%）", valueText: MoneyUtil.money(pay.unemployment), bold: false)
-            staticRow(title: "五险一金合计", valueText: MoneyUtil.money(pay.contributionTotal), bold: true)
-            staticRow(title: "公积金", valueText: MoneyUtil.money(pay.housingFund), bold: false)
-            editableRow(title: "水电费", valueText: MoneyUtil.money(pay.utilities), field: .utilities,
+            staticRow(title: "早夜班补贴", valueText: store.moneyText(pay.allowance), bold: false, dimmed: (pay.allowance ?? 0) == 0)
+            staticRow(title: "学历补贴", valueText: store.moneyText(pay.educationSubsidy), bold: false, dimmed: (pay.educationSubsidy ?? 0) == 0)
+            staticRow(title: "高温费", valueText: store.moneyText(pay.heat), bold: false, dimmed: (pay.heat ?? 0) == 0)
+            staticRow(title: "工龄津贴", valueText: store.moneyText(pay.seniority), bold: false)
+            staticRow(title: "应发工资", valueText: store.moneyText(pay.salarySubtotal), bold: true)
+            staticRow(title: "养老（8%）", valueText: store.moneyText(pay.pension), bold: false, deduction: true)
+            staticRow(title: "医疗（2%）", valueText: store.moneyText(pay.medical), bold: false, deduction: true)
+            staticRow(title: "失业（0.3%）", valueText: store.moneyText(pay.unemployment), bold: false, deduction: true)
+            staticRow(title: "五险一金合计", valueText: store.moneyText(pay.contributionTotal), bold: true, deduction: true)
+            staticRow(title: housingFundTitle(pay: pay), valueText: store.moneyText(pay.housingFund), bold: false, deduction: true)
+            editableRow(title: "水电费", valueText: store.moneyText(pay.utilities), field: .utilities,
                         currentValue: pay.utilities.map { String(format: "%.2f", $0) } ?? "0",
-                        placeholder: "水电费（如 60）")
-            staticRow(title: "实发工资", valueText: MoneyUtil.money(pay.salaryNet), bold: true)
+                        placeholder: "水电费（如 60）", deduction: true)
+            staticRow(title: "实发工资", valueText: store.moneyText(pay.salaryNet), bold: true)
         }
         .padding(AppStyle.cardPadding)
         .background(AppStyle.surface1)
@@ -588,15 +613,19 @@ struct PayView: View {
     }
 
     /// 只看的行（标签 + 值 + 分隔线），样式跟原来 paySection 里的一致。
-    private func staticRow(title: String, valueText: String, bold: Bool) -> some View {
+    /// 1.3.2.013：扣款项（deduction）补负号并用浅色（.secondary）区分——养老/医疗/
+    /// 失业/五险一金合计/公积金/水电费都是从应发里扣减的；金额为 0 的行（dimmed）
+    /// 金额也降为浅灰，让真正有钱的项目跳出来。两者都不影响标题色（本来就是 .secondary）。
+    private func staticRow(title: String, valueText: String, bold: Bool, deduction: Bool = false, dimmed: Bool = false) -> some View {
         VStack(spacing: 0) {
             HStack {
                 Text(title)
                     .foregroundColor(.secondary)
                 Spacer()
-                Text(valueText)
+                Text(deduction ? "−\(valueText)" : valueText)
                     .appFont(size: AppFont.bodySmall, weight: bold ? 700 : 400)
                     .monospacedDigit()
+                    .foregroundColor(deduction || dimmed ? .secondary : .primary)
             }
             .appFont(size: AppFont.bodySmall)
             .padding(.vertical, 5)
@@ -615,7 +644,7 @@ struct PayView: View {
     /// 1.3.2.012（Gemini 2026-11-28 逐帧复核）：「可改」徽标放金额左边——
     /// 原来放金额右边，徽标把金额往左顶了一截，金额和上下没徽标的行对不齐；
     /// 放左边后金额全部贴右沿对齐，徽标仍是同一按钮、点法不变。
-    private func editableRow(title: String, valueText: String, field: PayRecordField, currentValue: String, placeholder: String) -> some View {
+    private func editableRow(title: String, valueText: String, field: PayRecordField, currentValue: String, placeholder: String, deduction: Bool = false) -> some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
                 Text(title)
@@ -626,18 +655,20 @@ struct PayView: View {
                 } label: {
                     Text("可改")
                         .appFont(size: AppFont.caption)
-                        .foregroundColor(.blue)
+                        .foregroundColor(AppStyle.editableBlue)
                         .padding(.horizontal, 6)
                         .padding(.vertical, 2)
-                        .background(Color.blue.opacity(0.08))
+                        .background(AppStyle.editableBlue.opacity(0.10))
                         .cornerRadius(6)
                         // 1.3.2.005（方案 §3.3）：徽标只有约 20pt 高，透明留白扩到 48pt；
                         // 行会跟着变高一点（可改的 5 行），换点得准，值。
                         .touchTarget(vertical: 14, horizontal: 4)
                 }
                 .buttonStyle(.plain)
-                Text(valueText)
+                // 扣款项（水电费，1.3.2.013）同样补负号并用浅色，和 staticRow 的扣款行一致。
+                Text(deduction ? "−\(valueText)" : valueText)
                     .monospacedDigit()
+                    .foregroundColor(deduction ? .secondary : .primary)
             }
             .appFont(size: AppFont.bodySmall)
             .padding(.vertical, 5)

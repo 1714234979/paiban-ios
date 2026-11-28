@@ -12,7 +12,7 @@ struct FeedbackView: View {
         var id: String { rawValue }
         var label: String {
             switch self {
-            case .bug: return "Bug（问题反馈）"
+            case .bug: return "问题反馈"
             case .suggestion: return "建议"
             }
         }
@@ -44,12 +44,11 @@ struct FeedbackView: View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                Text("遇到什么问题？")
-                    .font(.title2).bold()
                 Text("请选择问题类型与所在页面，并简要描述具体情况。提交时将自动附带近 24 小时运行日志（不含任何账号密码及隐私数据），以便快速定位。")
                     .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.secondary)
 
+                // 两个下拉项加轻微底块，提示可点击切换（1.3.2.013）。
                 HStack {
                     Text("反馈类型")
                     Spacer()
@@ -60,6 +59,10 @@ struct FeedbackView: View {
                     }
                     .pickerStyle(.menu)
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(AppStyle.surface2)
+                .cornerRadius(AppStyle.buttonRadius)
 
                 HStack {
                     Text("出问题的页面")
@@ -71,6 +74,10 @@ struct FeedbackView: View {
                     }
                     .pickerStyle(.menu)
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(AppStyle.surface2)
+                .cornerRadius(AppStyle.buttonRadius)
 
                 HStack(alignment: .top, spacing: 12) {
                     PhotosPicker(selection: $pickerItem, matching: .images, photoLibrary: .shared()) {
@@ -102,12 +109,22 @@ struct FeedbackView: View {
 
                 Text("问题描述")
                     .appFont(size: AppFont.bodySmall, weight: 700)
-                TextEditor(text: $message)
-                    .frame(minHeight: 100, maxHeight: 180)
-                    .scrollContentBackground(.hidden)
-                    .padding(8)
-                    .background(AppStyle.surface2)
-                    .cornerRadius(AppStyle.buttonRadius)
+                ZStack(alignment: .topLeading) {
+                    TextEditor(text: $message)
+                        .frame(minHeight: 100, maxHeight: 180)
+                        .scrollContentBackground(.hidden)
+                        .padding(8)
+                        .background(AppStyle.surface2)
+                        .cornerRadius(AppStyle.buttonRadius)
+                    if message.isEmpty {
+                        Text("请简述操作步骤或异常现象…")
+                            .appFont(size: AppFont.bodySmall)
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 14)
+                            .allowsHitTesting(false)
+                    }
+                }
                 if let resultText {
                     Text(resultText)
                         .appFont(size: AppFont.bodySmall)

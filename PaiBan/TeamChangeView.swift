@@ -15,7 +15,7 @@ struct TeamChangeView: View {
     var body: some View {
         Form {
             Section {
-                Text("从生效日零点起，你的排班按新班组算；工资也跟着变。")
+                Text("自生效日 00:00 起按新班组计算排班与预估工资，生效日前记录保持不变。")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             }
@@ -45,19 +45,34 @@ struct TeamChangeView: View {
                 }
                 .pickerStyle(.segmented)
                 DatePicker("生效日", selection: $effectiveFrom, displayedComponents: .date)
-                Text(TeamInfo.cycleText(team: newTeam))
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                cyclePreview
+            }
+
+            // 保存换班（1.3.2.013）：移出卡片，独立居中的深炭黑胶囊主按钮。
+            Section {
                 Button {
                     Task { await addEntry() }
                 } label: {
-                    if isBusy {
-                        ProgressView()
-                    } else {
-                        Text("保存换班")
+                    HStack {
+                        Spacer()
+                        if isBusy {
+                            ProgressView()
+                                .tint(.white)
+                        } else {
+                            Text("保存换班")
+                                .font(.headline)
+                                .foregroundColor(.white)
+                        }
+                        Spacer()
                     }
+                    .padding(.vertical, 12)
+                    .background(AppStyle.navyAdaptive)
+                    .clipShape(Capsule())
                 }
+                .buttonStyle(.plain)
                 .disabled(isBusy)
+                .listRowBackground(Color.clear)
+                .listRowInsets(EdgeInsets(top: 4, leading: 16, bottom: 4, trailing: 16))
             }
 
             if let errorText {
@@ -77,6 +92,32 @@ struct TeamChangeView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             await loadHistory()
+        }
+    }
+
+    /// 轮次预览（1.3.2.013）：复用日历里的微型彩色圆角小标签（紫早 / 绿日 / 红中 / 灰休），
+    /// 核对班次比纯文字直观；8 天一排横向可滑。
+    private var cyclePreview: some View {
+        let shifts = TeamInfo.cycles[newTeam] ?? []
+        return ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 4) {
+                ForEach(shifts.indices, id: \.self) { idx in
+                    HStack(spacing: 4) {
+                        Text(TeamInfo.shortName(shifts[idx]))
+                            .font(.caption)
+                            .bold()
+                            .foregroundColor(.white)
+                            .frame(width: 26, height: 22)
+                            .background(ShiftStyle.color(for: shifts[idx]))
+                            .clipShape(Capsule())
+                        if idx < shifts.count - 1 {
+                            Image(systemName: "arrow.right")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+            }
         }
     }
 

@@ -66,6 +66,8 @@ struct ObservedMonthHeaderView: View {
     let state: MonthTitleState
     let onPrevious: () -> Void
     let onNext: () -> Void
+    /// 点月份标题弹出年月快选（1.3.2.013）。
+    var onTitleTap: (() -> Void)? = nil
 
     var body: some View {
         let idx = state.monthIndex
@@ -76,7 +78,8 @@ struct ObservedMonthHeaderView: View {
             onNext: onNext,
             isScrolling: state.isScrolling,
             countsDown: state.countsDown,
-            suppressAnimation: state.suppressAnimation
+            suppressAnimation: state.suppressAnimation,
+            onTitleTap: onTitleTap
         )
     }
 }
@@ -100,6 +103,8 @@ struct MonthHeaderView: View {
     var isScrolling: Bool = false
     var countsDown: Bool = false
     var suppressAnimation: Bool = false
+    /// 点月份标题弹出年月快选（1.3.2.013）。
+    var onTitleTap: (() -> Void)? = nil
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -134,24 +139,117 @@ struct MonthHeaderView: View {
 
             // 2. 绝对居中的月份标题：快滑/连点时切无动画纯文本，杜绝 numericText 叠成乱码；
             //    慢速单次点按箭头或「今天」时保留克制的数字过渡。
+            //    1.3.2.013：标题可点，弹出年月快选（不用连点箭头翻去年/明年）。
             let title = DateUtil.yearMonthTitle(year: year, month: month)
-            if isScrolling || suppressAnimation {
-                Text(title)
-                    .font(.system(size: 18, weight: .bold))
-                    .monospacedDigit()
-                    .id("plain-month-title")
-                    .transaction { $0.animation = nil }
-            } else {
-                Text(title)
-                    .font(.system(size: 18, weight: .bold))
-                    .monospacedDigit()
-                    .contentTransition(reduceMotion ? .opacity : .numericText(countsDown: countsDown))
-                    .animation(reduceMotion ? .easeInOut(duration: 0.15) : .snappy(duration: 0.2), value: monthIndex)
-                    .id("animated-month-title")
+            Button(action: { onTitleTap?() }) {
+                if isScrolling || suppressAnimation {
+                    Text(title)
+                        .font(.system(size: 18, weight: .bold))
+                        .monospacedDigit()
+                        .id("plain-month-title")
+                        .transaction { $0.animation = nil }
+                } else {
+                    Text(title)
+                        .font(.system(size: 18, weight: .bold))
+                        .monospacedDigit()
+                        .contentTransition(reduceMotion ? .opacity : .numericText(countsDown: countsDown))
+                        .animation(reduceMotion ? .easeInOut(duration: 0.15) : .snappy(duration: 0.2), value: monthIndex)
+                        .id("animated-month-title")
+                }
             }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 16)
         .frame(height: 44)
+    }
+}
+
+// MARK: - 年月快选
+
+/// 年月快选（1.3.2.013）：点月份标题弹出，选年月直接跳过去，不用连点箭头翻去年/明年。
+/// 年份步进 + 12 个月网格；当前月深炭黑高亮；超出 10 年窗口（2016-11～2036-10）
+/// 的月份置灰不可点（goToMonth 本来也会 clamp，这里先拦住）。
+struct MonthJumpSheet: View {
+    let currentIndex: Int
+    let range: Range<Int>
+    var onJump: (Int) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var year: Int
+
+    init(currentIndex: Int, range: Range<Int>, onJump: @escaping (Int) -> Void) {
+        self.currentIndex = currentIndex
+        self.range = range
+        self.onJump = onJump
+        _year = State(initialValue: currentIndex / 12)
+    }
+
+    private var minYear: Int { range.lowerBound / 12 }
+    private var maxYear: Int { (range.upperBound - 1) / 12 }
+    private func index(year: Int, month: Int) -> Int { year * 12 + (month - 1) }
+    private func inRange(year: Int, month: Int) -> Bool { range.contains(index(year: year, month: month)) }
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 24) {
+                // 年份步进。
+                HStack(spacing: 24) {
+                    Button { year -= 1 } label: {
+                        Image(systemName: "chevron.left")
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(width: 36, height: 36)
+                            .background(AppStyle.surface1, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(year <= minYear)
+                    .opacity(year <= minYear ? 0.4 : 1)
+                    Text("\(year)年")
+                        .font(.system(size: 18, weight: .bold))
+                        .monospacedDigit()
+                        .frame(minWidth: 90)
+                    Button { year += 1 } label: {
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 16, weight: .semibold))
+                            .frame(width: 36, height: 36)
+                            .background(AppStyle.surface1, in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(year >= maxYear)
+                    .opacity(year >= maxYear ? 0.4 : 1)
+                }
+                // 12 个月网格。
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 12), count: 4), spacing: 12) {
+                    ForEach(1...12, id: \.self) { m in
+                        let selected = (year == currentIndex / 12 && m == currentIndex % 12 + 1)
+                        let enabled = inRange(year: year, month: m)
+                        Button {
+                            onJump(index(year: year, month: m))
+                            dismiss()
+                        } label: {
+                            Text("\(m)月")
+                                .font(.system(size: 16, weight: selected ? 700 : 400))
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 12)
+                                .background(selected ? AppStyle.navyAdaptive : AppStyle.surface1, in: RoundedRectangle(cornerRadius: 10))
+                                .foregroundColor(selected ? .white : .primary)
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(!enabled)
+                        .opacity(enabled ? 1 : 0.35)
+                    }
+                }
+                Spacer()
+            }
+            .padding(20)
+            .navigationTitle("选择年月")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("取消") { dismiss() }
+                }
+            }
+        }
+        .presentationDetents([.medium])
     }
 }
 

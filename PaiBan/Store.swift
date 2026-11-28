@@ -111,6 +111,16 @@ final class AppStore {
     var appearance: AppearanceMode = AppearanceMode.loadLocal() {
         didSet { appearance.saveLocal() }
     }
+    /// 金额一键隐藏（1.3.2.013）：排班黑卡与工资页的金额全部脱敏为 ¥****；
+    /// 状态存本地（UserDefaults），下次进 App 还在；@Observable 改动即重绘。
+    var hideAmounts: Bool = UserDefaults.standard.bool(forKey: "paiban-hide-amounts") {
+        didSet { UserDefaults.standard.set(hideAmounts, forKey: "paiban-hide-amounts") }
+    }
+
+    /// 金额文案：隐藏时一律 ¥****，否则正常格式化（nil 显示“—”，和 MoneyUtil.money 一致）。
+    func moneyText(_ value: Double?) -> String {
+        hideAmounts ? "¥****" : MoneyUtil.money(value)
+    }
     /// 1.2.7.001：节假日缓存（key 日期，value 节假日一天；服务端拉取，挂了用内置表）。
     var holidays: [String: HolidayDay] = [:]
     var holidaysUpdatedAt: String?
