@@ -77,7 +77,7 @@ struct PayView: View {
         }
     }
 
-    /// 点“本月”：切回当月（工资页没有日期格要闪，只跳页）。
+    /// 点顶卡右下角“回到今天”：切回当月（工资页没有日期格要闪，只跳页）。
     private func goToCurrentMonth() {
         goToMonth(currentMonthIndex)
     }
@@ -140,6 +140,14 @@ struct PayView: View {
                         .foregroundColor(.secondary)
                 }
             }
+            // 回到今天（1.3.2.014，老爷令）：不在当月时才出现，放在顶卡右下角；
+            // 导航栏「本月」胶囊不要了，排班/工资两页统一放这里。
+            if PayView.monthIndex(year: ym.year, month: ym.month) != currentMonthIndex {
+                HStack {
+                    Spacer()
+                    backToTodayButton
+                }
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
@@ -161,6 +169,28 @@ struct PayView: View {
                 .minimumScaleFactor(0.8)
         }
         .frame(maxWidth: .infinity)
+    }
+
+    /// 回到今天按钮（1.3.2.014，老爷令）：顶卡右下角的小胶囊——不在当月时才出现，
+    /// 点按回到当月（走 goToCurrentMonth）。排班/工资两页一样。样式跟顶卡角标同款
+    ///（surface2 底 + 主字），轻，不抢顶卡的数字。热区扩到 48pt。
+    private var backToTodayButton: some View {
+        Button(action: goToCurrentMonth) {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.counterclockwise")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("回到今天")
+                    .appFont(size: AppFont.caption, weight: 600)
+            }
+            .foregroundColor(AppStyle.onSurface)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(AppStyle.surface2)
+            .clipShape(Capsule())
+            .touchTarget(vertical: 9, horizontal: 4)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("回到今天")
     }
 
 /// 本月实发构成条（1.3.2.014，Gemini 排版）：实发工资（绿）+ 实发奖金（蓝）+
@@ -311,8 +341,8 @@ private struct PayCompositionBar: View {
         } else {
         VStack(spacing: 16) {
             // 月份标题栏（重做）：共用的 MonthHeaderView，跟排班页同一套。
-            // 标题走 titleState（过半就换），“本月”按钮不在标题栏里（1.3.2.012：
-            // 挪到导航栏右上角做胶囊；标题行只剩 < 标题 >）。
+            // 标题走 titleState（过半就换），“回到今天”按钮不在标题栏里（1.3.2.014：
+            // 顶卡右下角；标题行只剩 < 标题 >）。
             ObservedMonthHeaderView(
                 state: titleState,
                 onPrevious: { goToMonth(pageIndex - 1) },
@@ -352,30 +382,9 @@ private struct PayCompositionBar: View {
         // 改回系统原生 .automatic（排班页见 CalendarView；设置页见 SettingsView）。
         // 工资页之前没写 toolbarBackground，走的是系统默认（就是 .automatic），
         // 这里显式写出来，和两边保持一致、以后改一处就能对上。
+        // 1.3.2.014：导航栏右上角「本月」胶囊删了（老爷令）——回到今天改成顶卡
+        // 右下角的「回到今天」按钮（见 headerCard），排班/工资两页一样。
         .toolbarBackground(.automatic, for: .navigationBar)
-        // 1.3.2.012（Gemini 2026-11-28 逐帧复核、老爷转来）：右下角悬浮「今天」按钮
-        // 挪到导航栏右上角，做成轻量「本月」胶囊——悬浮圆钮正好压住「科室绩效」的
-        // 「可改」，导航栏右上角现在是空的，放这里既不挡列表、底部 TabBar 附近也清爽。
-        // 工资页按月统计，叫「本月」比「今天」准；当月不显示（已经在本月就不用回）。
-        // 另注：Gemini 说它“半秒就自己消失、是真 Bug”——婉儿逐帧核过，f_21/22/23/28/29
-        // 里它一直都在，所谓两次“消失”都是老爷切回排班 Tab，不是按钮自己没了；
-        // 挪位置只为不挡「可改」，不是修消失，别再当 Bug 追。
-        .toolbar {
-            ToolbarItem(placement: .navigationBarTrailing) {
-                if pageIndex != currentMonthIndex {
-                    Button(action: goToCurrentMonth) {
-                        Text("本月")
-                            .font(.system(size: 14, weight: .semibold))
-                            .foregroundColor(.white)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(AppStyle.navyAdaptive, in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("回到本月")
-                }
-            }
-        }
         // 滑到哪页，Store 就跟到哪月（setPayMonth 只改月份、只读缓存，
         // 1.3.2.011：落定那帧不同步算，未命中 pay 置空、后台 prewarm 算好再换）；
         // 切月时把敞着的编辑框收起（那是上个月的数，别留在新月上误触）。

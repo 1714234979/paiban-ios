@@ -232,20 +232,9 @@ struct CalendarView: View {
             // 2026-11-28 底栏改成永不收起（.never）：底栏一直在、统计栏上面还有调班/请假卡
             // + 同步时间，统计栏本身在底栏上方，完整露出，不再被收起的小圆球盖住。
         }
-        // 右下角悬浮「今天」按钮（2026-11-28 老爷亲口令）：放在底栏上方、安全区之上，
-        // 右边留 16pt；当月不显示。safeAreaInset 让它固定在安全区底边（= 底栏顶边）
-        // 上方 12pt，不跟内容滚；内容底部因此多出按钮的高度，能滚到按钮上面去，
-        // 调班/请假长条的关键内容（标题、记录行）不会被它盖住。
-        .safeAreaInset(edge: .bottom, alignment: .trailing, spacing: 0) {
-            Group {
-                if pageIndex != currentMonthIndex {
-                    todayFloatingButton
-                        .padding(.trailing, 16)
-                        .padding(.bottom, 12)
-                }
-            }
-            .animation(reduceMotion ? .easeInOut(duration: 0.15) : .snappy(duration: 0.25), value: pageIndex == currentMonthIndex)
-        }
+        // 1.3.2.014：右下角悬浮「今天」删了（老爷令）——回到今天改成顶卡右下角的
+        // 「回到今天」按钮（见 headerCard），排班/工资两页一样；悬浮钮压底栏、
+        // 又多一个浮层，不要了。
         // 1.3.0.013：滚动指示条常显（老爷 19:24 说「没有滑动框」）——.visible 没用，
         // 画廊实拍证明它根本不画出来，改走自绘滑块 AlwaysVisibleScrollIndicator。
         .modifier(AlwaysVisibleScrollIndicator())
@@ -413,6 +402,14 @@ struct CalendarView: View {
                 let inputs = store.todayEstimateInputs
                 TodayMoneyRow(day: day, earlyRate: inputs.earlyRate, midRate: inputs.midRate, inputs: inputs.inputs, hideAmounts: store.hideAmounts)
             }
+            // 回到今天（1.3.2.014，老爷令）：不在当月时才出现，放在顶卡右下角；
+            // 悬浮「今天」和导航栏「本月」都不要了，两页统一放这里。
+            if pageIndex != currentMonthIndex {
+                HStack {
+                    Spacer()
+                    backToTodayButton
+                }
+            }
         }
         .padding(16)
         .background(AppStyle.surface1)
@@ -496,8 +493,8 @@ struct CalendarView: View {
     /// 标题绝对居中（等宽数字，1.3.2.011：标题走 MonthTitleState，滑动中只重绘标题），
     /// 标题跟 titleState（过半就换），再也不会被挤偏（录屏 00:03/00:10 的毛病）。旧的 HStack
     ///（左右箭头 + Spacer + 标题 + 今天 + Spacer + 箭头）整段删掉。
-    /// “今天”按钮不在标题栏里（2026-11-28 老爷亲口令：改成右下角悬浮按钮，见下面
-    /// todayFloatingButton；标题行只剩 < 标题 >，标题真正居中）。
+    /// “今天”按钮不在标题栏里（1.3.2.014：顶卡右下角的「回到今天」按钮；
+    /// 标题行只剩 < 标题 >，标题真正居中）。
     private var monthNavigator: some View {
         ObservedMonthHeaderView(
             state: titleState,
@@ -507,24 +504,26 @@ struct CalendarView: View {
         )
     }
 
-    /// 右下角悬浮「今天」按钮（2026-11-28 老爷亲口令）：点按回到当月（走原来的 goToToday）。
-    /// 样式和左下角收起的底栏小圆球对称：同尺寸（48pt 圆）、同风格（毛玻璃圆 + 阴影），
-    /// 放在底栏上方、安全区之上，右边留 16pt。当月不显示（已经在当月就不用回，免得成个死按钮）。
-    /// 底栏已改成永不收起（.never），小圆球不会再出现，也就不会盖住这张卡；这个按钮
-    /// 固定在右下角，只盖右下角一小块，记录卡的内容能往上滚开（底部留白见 safeAreaInset）。
-    private var todayFloatingButton: some View {
+    /// 回到今天按钮（1.3.2.014，老爷令）：顶卡右下角的小胶囊——不在当月时才出现，
+    /// 点按回到当月（走 goToToday）。排班/工资两页一样。样式跟顶卡角标同款
+    ///（surface2 底 + 主字），轻，不抢顶卡的数字。热区扩到 48pt。
+    private var backToTodayButton: some View {
         Button(action: goToToday) {
-            Text("今天")
-                .font(.system(size: 14, weight: .semibold))
-                .foregroundColor(.primary)
-                .frame(width: 48, height: 48)
-                .background(.ultraThinMaterial, in: Circle())
-                .overlay(Circle().stroke(Color.primary.opacity(0.08), lineWidth: 0.5))
-                .shadow(color: .black.opacity(0.18), radius: 8, y: 4)
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.counterclockwise")
+                    .font(.system(size: 11, weight: .semibold))
+                Text("回到今天")
+                    .appFont(size: AppFont.caption, weight: 600)
+            }
+            .foregroundColor(AppStyle.onSurface)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(AppStyle.surface2)
+            .clipShape(Capsule())
+            .touchTarget(vertical: 9, horizontal: 4)
         }
         .buttonStyle(.plain)
         .accessibilityLabel("回到今天")
-        .transition(.scale(scale: 0.85).combined(with: .opacity))
     }
 
     // MARK: 日历滑页（原生分页，跟着手指走）
@@ -624,6 +623,9 @@ struct CalendarView: View {
     /// 底部统计卡（1.3.2.014，Gemini 排版）：四列大数字（实际出勤/休息/三薪/加班），
     /// 下面一行小字放应出勤、基本天数、请假——信息一个不少，只是从一行小字改成
     /// 四列大数字 + 一行小字，好扫得多。
+    /// 计算放 statsCard（普通函数）里，不塞进 Group 的 ViewBuilder——
+    /// 几个 let/if-let 再加一个 VStack 全挤在 builder 里，编译器推不出类型
+    ///（报 TableColumn 错，两轮编包都挂在这）。
     private var summaryLine: some View {
         // payInputsVersion 订阅从 MonthPageView.body 挪到这里（Gemini 1.3.2.011）：
         // 工资输入到齐时底部统计（三薪 X 天 / 加班 X 天）要重算，这里订阅就够了；
@@ -631,41 +633,46 @@ struct CalendarView: View {
         let _ = store.payInputsVersion
         return Group {
             if let stats = displayedMonth?.stats {
-                // 第 44 条（2026-11-26）：应出勤是排班算的出勤（基础轮班天数，
-                // PayCalc.countBaseWork：数 baseShift 不是休息的天数，调班请假不影响），
-                // 基本天数是法定口径（PayCalc.basicDays，与工资页同表），两个数不一样。
-                // 之前应出勤那格误用了 stats.basicDays（那是法定基本天数），10 月/11 月
-                // 和基本天数撞成两个一样的数（18/18、21/21）。
-                let ym = yearMonth(from: pageIndex)
-                var triple = "—"
-                var overtime = "—"
-                if let info = store.triplePayInfo(year: ym.year, month: ym.month) {
-                    triple = formatDays(info.tripleDays)
-                    overtime = formatDays(info.overtimeDays)
-                }
-                let baseWorkDays = PayCalc.countBaseWork(yearDays: displayedMonth?.days ?? [], year: ym.year, month: ym.month)
-                let statutoryBasicDays = PayCalc.basicDays(year: ym.year, month: ym.month)
-                VStack(spacing: 8) {
-                    HStack(spacing: 0) {
-                        statCell(value: "\(MoneyUtil.int(stats.actualShifts))班", label: "实际出勤")
-                        Rectangle().fill(AppStyle.outline).frame(width: 1, height: 30)
-                        statCell(value: "\(MoneyUtil.int(stats.restDays))天", label: "休息")
-                        Rectangle().fill(AppStyle.outline).frame(width: 1, height: 30)
-                        statCell(value: triple == "—" ? "—" : "\(triple)天", label: "三薪")
-                        Rectangle().fill(AppStyle.outline).frame(width: 1, height: 30)
-                        statCell(value: overtime == "—" ? "—" : "\(overtime)天", label: "加班")
-                    }
-                    Text("当月应出勤 \(baseWorkDays) 天 · 基本天数 \(statutoryBasicDays) 天 · 请假 \(MoneyUtil.int(stats.leaveDays)) 天")
-                        .appFont(size: AppFont.caption)
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .center)
-                }
-                .padding(AppStyle.cardPadding)
-                .frame(maxWidth: .infinity)
-                .background(AppStyle.surface1)
-                .cornerRadius(AppStyle.cardRadius)
+                statsCard(stats: stats)
             }
         }
+    }
+
+    /// 底部统计卡本体（普通函数）：四列大数字 + 一行小字。
+    private func statsCard(stats: MonthStats) -> some View {
+        // 第 44 条（2026-11-26）：应出勤是排班算的出勤（基础轮班天数，
+        // PayCalc.countBaseWork：数 baseShift 不是休息的天数，调班请假不影响），
+        // 基本天数是法定口径（PayCalc.basicDays，与工资页同表），两个数不一样。
+        // 之前应出勤那格误用了 stats.basicDays（那是法定基本天数），10 月/11 月
+        // 和基本天数撞成两个一样的数（18/18、21/21）。
+        let ym = yearMonth(from: pageIndex)
+        var triple = "—"
+        var overtime = "—"
+        if let info = store.triplePayInfo(year: ym.year, month: ym.month) {
+            triple = formatDays(info.tripleDays)
+            overtime = formatDays(info.overtimeDays)
+        }
+        let baseWorkDays = PayCalc.countBaseWork(yearDays: displayedMonth?.days ?? [], year: ym.year, month: ym.month)
+        let statutoryBasicDays = PayCalc.basicDays(year: ym.year, month: ym.month)
+        return VStack(spacing: 8) {
+            HStack(spacing: 0) {
+                statCell(value: "\(MoneyUtil.int(stats.actualShifts))班", label: "实际出勤")
+                Rectangle().fill(AppStyle.outline).frame(width: 1, height: 30)
+                statCell(value: "\(MoneyUtil.int(stats.restDays))天", label: "休息")
+                Rectangle().fill(AppStyle.outline).frame(width: 1, height: 30)
+                statCell(value: triple == "—" ? "—" : "\(triple)天", label: "三薪")
+                Rectangle().fill(AppStyle.outline).frame(width: 1, height: 30)
+                statCell(value: overtime == "—" ? "—" : "\(overtime)天", label: "加班")
+            }
+            Text("当月应出勤 \(baseWorkDays) 天 · 基本天数 \(statutoryBasicDays) 天 · 请假 \(MoneyUtil.int(stats.leaveDays)) 天")
+                .appFont(size: AppFont.caption)
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+        }
+        .padding(AppStyle.cardPadding)
+        .frame(maxWidth: .infinity)
+        .background(AppStyle.surface1)
+        .cornerRadius(AppStyle.cardRadius)
     }
 
     /// 统计卡里的一列：上面大号数字 + 单位，下面小字标签。
