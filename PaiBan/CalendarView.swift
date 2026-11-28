@@ -72,6 +72,9 @@ struct CalendarView: View {
     /// 不在滑动中现算、现拍快照（慢拖卡顿的根：下一页/上一页原来是现加载的）。
     private static let preloadRadius = 10
     @State private var preloadedGrids: [Int: [(day: DaySchedule, kind: MonthPageView.GridDayKind)]] = [:]
+    /// 预加载格子的在途任务（1.3.2.010）：新任务来了旧任务直接取消，只留最新的；
+    /// 取消时旧的 preloadedGrids 原样留着，不留半截状态。
+    @State private var preloadGridTask: Task<Void, Never>?
 
     /// 共享班表页（1.2.7.001，第 24 条）。
     @State private var showShareSchedule = false
@@ -85,26 +88,39 @@ struct CalendarView: View {
     /// 网络预取由 monthFor 里已有的 prefetchMonth 顺带做，调班/请假一起回来）。
     /// 窗口外的旧页直接丢掉，只留 21 页；数据变了（日历数据/换班组/显示设置）
     /// 就整窗重算，已缓存的页直接复用、不重复算。
+    /// 1.3.2.010：改成异步任务、中心优先——原来 21 页同步一口气算完，
+    /// 冷启动（或缓存失效后）几十毫秒全堵在主线程上，正好撞上落定动画，
+    /// 快滑就抽帧。现在中心先算、相邻其次、外围最后，每算一月让出一次主线程，
+    /// 落定动画的帧能插进来；整窗一次交出去，不等 21 页全完、算好的页随任务走。
+    /// 任务可取消：快滑连续落定、旧任务被取消时，当前月也已经算好了，不会被打断。
     private func preloadAround(_ center: Int) {
-        let lo = max(pageRange.lowerBound, center - Self.preloadRadius)
-        let hi = min(pageRange.upperBound - 1, center + Self.preloadRadius)
-        var next: [Int: [(day: DaySchedule, kind: MonthPageView.GridDayKind)]] = [:]
-        next.reserveCapacity(hi - lo + 1)
-        for idx in lo...hi {
-            if let cached = preloadedGrids[idx] {
-                next[idx] = cached
-            } else {
-                let ym = yearMonth(from: idx)
-                next[idx] = MonthPageView.buildGridDays(year: ym.year, month: ym.month, store: store)
+        preloadGridTask?.cancel()
+        preloadGridTask = Task {
+            let order: [Int] = [center] + (1...Self.preloadRadius).flatMap { [center - $0, center + $0] }
+            var next: [Int: [(day: DaySchedule, kind: MonthPageView.GridDayKind)]] = [:]
+            next.reserveCapacity(2 * Self.preloadRadius + 1)
+            for idx in order {
+                if Task.isCancelled { return }
+                guard idx >= pageRange.lowerBound && idx < pageRange.upperBound else { continue }
+                if let cached = preloadedGrids[idx] {
+                    next[idx] = cached
+                } else {
+                    let ym = yearMonth(from: idx)
+                    next[idx] = MonthPageView.buildGridDays(year: ym.year, month: ym.month, store: store)
+                    // 每算一月让出一次主线程（冷启动 21 页同步算完会堵住落定动画）。
+                    await Task.yield()
+                }
             }
+            // 整窗一次交出去（只留 21 页，窗口外的旧页丢掉）；中途被取消就直接丢弃，
+            // 旧的 preloadedGrids 原样留着，不留半截状态。
+            preloadedGrids = next
         }
-        preloadedGrids = next
     }
 
-    /// 箭头 / 今天 / 邻月点按切月（重做）：直接改 pageIndex（已落定），标题立刻用
-    /// numericText 滚动过去；分页器收到 selectedOffset 变化滑过去（0.25s snappy，
-    /// 减弱动态效果时 0.15s 淡入）。不做位移、不做交叉淡入、不碰视差——旧的
-    /// jumpToMonth（20pt 轻移 + 交叉淡入）整段删掉。
+    /// 箭头 / 今天 / 邻月点按切月（重做）：直接改 pageIndex（已落定），标题立刻淡入过去
+    ///（1.3.2.010：numericText 改淡入，见 MonthHeaderView）；分页器收到 selectedOffset
+    /// 变化滑过去（0.25s snappy，减弱动态效果时 0.15s 淡入）。不做位移、不做交叉淡入、
+    /// 不碰视差——旧的 jumpToMonth（20pt 轻移 + 交叉淡入）整段删掉。
     private func goToMonth(_ index: Int) {
         let target = min(max(index, pageRange.lowerBound), pageRange.upperBound - 1)
         withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : .snappy(duration: 0.25)) {
@@ -387,8 +403,8 @@ struct CalendarView: View {
     }
 
     /// 月份标题栏（重做，老爷 2026-11-28 14:30 亲口令）：共用的 MonthHeaderView——
-    /// 标题绝对居中（等宽数字 + numericText），标题跟 titleIndex（过半就换），
-    /// 再也不会被挤偏（录屏 00:03/00:10 的毛病）。旧的 HStack
+    /// 标题绝对居中（等宽数字 + 淡入，1.3.2.010：numericText 改淡入，快滑会糊），
+    /// 标题跟 titleIndex（过半就换），再也不会被挤偏（录屏 00:03/00:10 的毛病）。旧的 HStack
     ///（左右箭头 + Spacer + 标题 + 今天 + Spacer + 箭头）整段删掉。
     /// “今天”按钮不在标题栏里（2026-11-28 老爷亲口令：改成右下角悬浮按钮，见下面
     /// todayFloatingButton；标题行只剩 < 标题 >，标题真正居中）。

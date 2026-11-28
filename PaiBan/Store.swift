@@ -908,16 +908,63 @@ final class AppStore {
         return nil
     }
 
-    /// 切月（工资页）：同步改月份并立刻用本地算好的工资顶上（有输入时秒出），
-    /// 工资页切月才有真正的左右滑动动画；本地算不出时照旧走异步 refreshPay（onChange 兜底）。
-    /// 月份切换重做（老爷 2026-11-28 14:30 亲口令）：切月动画走原生分页容器，
-    /// 数据照旧同步换，动画只由分页器管——这里不包任何动画事务。
+    /// 只读缓存的取数（工资页 body 用，1.3.2.010）：命中直接回，未命中回 nil、
+    /// 绝不同步算。切月那一刻主线程上不许有同步工资计算，body 只能读缓存；
+    /// 未命中时页面显示占位（黑卡 "—"、明细骨架/暂无数据），预热任务在后台算好、
+    /// 写缓存、把 pay 写回来，页面再重画换真数。公式与 payFor 同一份，
+    /// 只是不触发计算（不读缓存以外的数据）。
+    func payForCached(year: Int, month: Int) -> PayMonth? {
+        payCache[payCacheKey(year: year, month: month)]
+    }
+
+    /// 某年工资计算的全部输入快照（1.3.2.010）：配置 + 全年天数 + 单月记录 +
+    /// 生效表 + 年假抵扣 + 用户设置。全是值类型（struct / Array / Dictionary），
+    /// 快照后可安全带到后台线程算。输入没到齐返回 nil（算不出，等补输入）。
+    private func payInputsSnapshot(year: Int) -> (cfg: PayGlobalSettings, days: [DaySchedule], recorded: [String: PayMonthRecord], effective: [String: PayEffective], offset: Int, userSettings: PaySettings?)? {
+        guard let cfg = payConfig?.settings,
+              let days = yearDaysCache[String(year)], !days.isEmpty else { return nil }
+        let recorded = isOwner ? (payConfig?.months ?? [:]) : userMonths
+        let effective = isOwner ? (payConfig?.effective ?? [:]) : [:]
+        let offset = isOwner ? (cfg.annualLeaveUsedOffset?[String(year)] ?? 0) : 0
+        return (cfg, days, recorded, effective, offset, user?.paySettings)
+    }
+
+    /// 后台算某月工资并写进缓存（1.3.2.010，不占主线程）：输入在主线程快照成值类型，
+    /// 计算本身在后台线程跑（PayCalc.computePay 是纯函数：只读静态表与传入的值，
+    /// 不碰共享 DateFormatter/可变状态，可安全并发），算好回主线程写缓存。
+    /// 算好回主线程时再核对一次输入没变（refreshPayInputs 可能中途换了输入），
+    /// 变了就丢弃这次结果（不写缓存、不返回），等下一轮预热/刷新用新输入重算。
+    /// 输入没到齐返回 nil。只算不画：要不要把 pay 写回来由调用方定。
+    func warmPayMonth(year: Int, month: Int) async -> PayMonth? {
+        let key = payCacheKey(year: year, month: month)
+        if let cached = payCache[key] { return cached }
+        guard let snap = payInputsSnapshot(year: year) else { return nil }
+        let computed = await Task.detached(priority: .userInitiated) {
+            PayCalc.computePay(
+                yearDays: snap.days, global: snap.cfg, userSettings: snap.userSettings,
+                recordedMonths: snap.recorded, effective: snap.effective,
+                annualLeaveOffset: snap.offset, year: year, month: month
+            )
+        }.value
+        // 回主线程核对输入：快照还是不是当前那份（元组全是 Equatable，直接比），
+        // 变了说明中途换了输入，这次结果是旧输入算的，丢弃。
+        guard payInputsSnapshot(year: year) == snap else { return nil }
+        // 另一路可能同时算好了同一月（refreshPay/上一次预热）：以缓存为准，不覆盖。
+        if let cached = payCache[key] { return cached }
+        payCache[key] = computed
+        return computed
+    }
+
+    /// 切月（工资页）：只改月份、只读缓存（1.3.2.010，之前同步算好当月工资、
+    /// 写进缓存——那份同步计算正好落在落定那帧上，每次切月都顿一下）。
+    /// 命中就把 pay 写回来（页面重画用缓存数）；未命中留着旧的 pay
+    ///（页面读 payForCached，未命中显示占位），预热任务（中心优先）在后台
+    /// 算好后把 pay 写回来再换真数。月份切换重做（老爷 2026-11-28 14:30 亲口令）：
+    /// 切月动画走原生分页容器，数据照旧同步换，动画只由分页器管——这里不包任何动画事务。
     func setPayMonth(year: Int, month: Int) {
         payYearMonth = (year, month)
-        if let local = computeLocalPay(year: year, month: month) {
-            pay = local
-            payCache[payCacheKey(year: year, month: month)] = local
-            persistCache()
+        if let cached = payCache[payCacheKey(year: year, month: month)] {
+            pay = cached
         }
     }
 
@@ -967,17 +1014,19 @@ final class AppStore {
     /// 3) 输入取不到才走服务端 /me/pay 兜底。
     func refreshPay() async {
         let key = payCacheKey(year: payYearMonth.year, month: payYearMonth.month)
-        if let local = computeLocalPay(year: payYearMonth.year, month: payYearMonth.month) {
-            pay = local
-            payCache[key] = local
+        // 1) 缓存命中直接回，不同步算（1.3.2.010：切月落定那帧不许有同步工资计算）。
+        if let cached = payCache[key] {
+            pay = cached
+            return
+        }
+        // 2) 输入齐时后台算（不占主线程），算好写缓存、把 pay 写回来。
+        if let warmed = await warmPayMonth(year: payYearMonth.year, month: payYearMonth.month) {
+            pay = warmed
             persistCache()
             return
         }
-        if let cached = payCache[key] {
-            pay = cached
-        } else {
-            isLoadingPay = true
-        }
+        // 3) 输入没到齐：走原来的取输入 + 服务端兜底（下面一字不动）。
+        isLoadingPay = true
         defer { isLoadingPay = false }
         // 本地算不出：先补取输入（只在缺输入时才走这两趟，取到就本地算，不用再问 /me/pay）。
         await refreshPayInputs()

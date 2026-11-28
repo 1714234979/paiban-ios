@@ -9,7 +9,8 @@ import SwiftUI
 /// 1. 标题跟过半页走（2026-11-28 改，取代落定才变）——拖过一半标题就换；
 ///    数据只跟落定页走：分页器内部用 scrollOffset 跟踪拖拽位置，只在滚动落定
 ///    （scrollPhase == .idle）时才把 selectedOffset 提交给数据；箭头点按 /
-///    点“今天”是程序切页，selectedOffset 立刻换，标题立刻用 numericText 滚动过去。
+///    点“今天”是程序切页，selectedOffset 立刻换，标题立刻淡入过去
+///    （1.3.2.010：numericText 改淡入，快滑时数字滚动来不及滚完会糊）。
 ///    拖一半松手弹回时标题跟着回来，可以接受。
 /// 2. 标题与网格绝不同步错位——网格就是分页器当前页，标题就是过半页/落定页，
 ///    两者同一个状态源；快速猛滑跳过一个月是系统原生分页行为，可以接受。
@@ -36,7 +37,7 @@ struct MonthHeaderView: View {
     /// 减弱动态效果：标题只做 0.15s 淡入，不做数字滚动与位移（App 的统一规矩）。
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    /// 标题动画跟的月份绝对序号（年*12 + 月-1），换月就变，触发 numericText 滚动。
+    /// 标题动画跟的月份绝对序号（年*12 + 月-1），换月就变，触发标题淡入。
     private var monthIndex: Int { year * 12 + (month - 1) }
 
     var body: some View {
@@ -67,11 +68,15 @@ struct MonthHeaderView: View {
                 .buttonStyle(PressableButtonStyle())
             }
 
-            // 2. 绝对居中的月份标题（等宽数字 + numericText，避免宽度跳动与裁切）。
+            // 2. 绝对居中的月份标题（等宽数字，避免宽度跳动与裁切）。
+            // 1.3.2.010：numericText 改淡入——快滑时标题每过半页就变一次，numericText
+            // 0.25 秒的数字滚动来不及滚完就被下一次打断，数字一直卡在动画中途、
+            // 叠成一团糊（实测 f_22/f_24："2026" 的 6 和 "12" 的 2 叠成乱码）；
+            // 淡入是交叉溶解，不管变得多快都不会糊。减弱动态效果时一样是淡入（0.15s）。
             Text(DateUtil.yearMonthTitle(year: year, month: month))
                 .font(.system(size: 18, weight: .bold))
                 .monospacedDigit()
-                .contentTransition(reduceMotion ? .opacity : .numericText())
+                .contentTransition(.opacity)
                 .animation(reduceMotion ? .easeInOut(duration: 0.15) : .snappy(duration: 0.25), value: monthIndex)
         }
         .padding(.horizontal, 16)

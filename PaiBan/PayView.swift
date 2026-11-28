@@ -55,14 +55,21 @@ struct PayView: View {
 
     /// 邻月工资预热的在途任务（1.3.2.004）：翻得快时旧任务直接取消，只留最新的。
     @State private var preloadPayTask: Task<Void, Never>?
+    /// 每页竖滚 ScrollView 的滚动位置（1.3.2.010）：竖滚偏移不归任何 SwiftUI 状态管，
+    /// 嵌套在横向分页器里的 ScrollView 会把竖向偏移漂移（实测静止就偏约 42pt，
+    /// 横滑一来回再多约 30pt），黑卡在它里面就被顶出可视区、顶部横切。
+    /// 每页记一个偏移，落定时按阈值纠回顶部（见 onChange）；用户自己滚下去
+    /// 超过 120pt 的不纠（那是他在看下面，不是漂移）。
+    @State private var payPageScrollPoints: [Int: CGPoint] = [:]
     /// 月明细骨架延迟 150ms 的在途任务（1.3.2.006）：加载开始后 150ms 再现骨架，
     /// 数据快回来就不闪；加载结束或视图消失时取消。
     @State private var paySkeletonTask: Task<Void, Never>?
     /// 月明细的骨架是否显示（同上，150ms 延迟后才置 true）。
     @State private var showPaySkeleton = false
-    /// 箭头 / 今天点按切月（重做）：直接改 pageIndex（已落定），标题立刻用 numericText
-    /// 滚动过去；分页器收到 selectedOffset 变化滑过去（0.25s snappy，减弱动态效果时
-    /// 0.15s 淡入）。不做位移、不做交叉淡入——旧的 jumpToMonth 整段删掉。
+    /// 箭头 / 今天点按切月（重做）：直接改 pageIndex（已落定），标题立刻淡入过去
+    ///（1.3.2.010：numericText 改淡入，见 MonthHeaderView）；分页器收到 selectedOffset
+    /// 变化滑过去（0.25s snappy，减弱动态效果时 0.15s 淡入）。不做位移、不做交叉淡入——
+    /// 旧的 jumpToMonth 整段删掉。
     private func goToMonth(_ index: Int) {
         let target = min(max(index, pageRange.lowerBound), pageRange.upperBound - 1)
         withAnimation(reduceMotion ? .easeInOut(duration: 0.15) : .snappy(duration: 0.25)) {
@@ -102,10 +109,12 @@ struct PayView: View {
     /// 放进去，和排班页顶部黑卡视觉统一（AppStyle.navyAdaptive + 16pt 圆角）。
     /// 数从当月工资数据里取已有的 grandTotal（下面合计行同一个数），不重算、不改公式；
     /// 当月工资还没算出来显示“—”；12h/6h 方式工资口径待定时也显示“—”并注一句。
-    /// 2026-11-28 改：从固定在分页器上方改成每个月页面的 ScrollView 最顶部（见 body），
-    /// 跟着月份一起翻页、一起滚动；所以改成函数、按页面的年月取数，不再读 pageIndex。
+    /// 2026-11-28 改：从固定在分页器上方改成每个月页面的页眉（见 body），
+    /// 跟着月份一起翻页；所以改成函数、按页面的年月取数，不再读 pageIndex。
+    /// 1.3.2.010：页眉放在页内、纵向 ScrollView 外（之前在 ScrollView 顶部，
+    /// 嵌套 ScrollView 的竖向偏移一漂移就把黑卡顶出可视区、顶部横切）。
     private func headerCard(for ym: (year: Int, month: Int)) -> some View {
-        let pay = store.payFor(year: ym.year, month: ym.month)
+        let pay = store.payForCached(year: ym.year, month: ym.month)
         return VStack(alignment: .leading, spacing: 4) {
             Text("本月实发合计")
                 .appFont(size: AppFont.bodySmall)
@@ -135,18 +144,39 @@ struct PayView: View {
     static func monthIndex(year: Int, month: Int) -> Int { year * 12 + (month - 1) }
     private func yearMonth(from index: Int) -> (year: Int, month: Int) { (index / 12, index % 12 + 1) }
 
-    /// 邻月工资预热（1.3.2.004）：切月动画改成平滑的之后，邻月的工资也要提前算好——
-    /// 不然滑到新月那一刻才现算整月工资（累计个税要从 1 月算起），主线程一顿就是卡。
-    /// 每算一月让出一次主线程，不堵界面；输入没到齐算不出就跳过，等 refreshPay 补。
+    /// 某页竖滚 ScrollView 的 scrollPosition 绑定（1.3.2.010）：
+    /// 没记过就是 nil（不控，默认 0）；滚过就记下来，落定时按阈值纠。
+    /// 绑定的值是 ScrollView 真实的 contentOffset（双向回流），漂移改了偏移，
+    /// 这里也跟着变，落定时写回 .zero 才能真把偏移纠回去。
+    private func scrollPointBinding(for offset: Int) -> Binding<CGPoint?> {
+        Binding(
+            get: { payPageScrollPoints[offset] },
+            set: { payPageScrollPoints[offset] = $0 ?? .zero }
+        )
+    }
+
+    /// 邻月工资预热（1.3.2.004，1.3.2.010 改顺序与执行方式）：
+    /// 中心优先——当前月先算，相邻月其次，外围最后；算到哪月、哪月就能显示。
+    /// 原来从 center-10 开始顺算，当前月排第 11 个，快滑连续落定、旧任务被取消时
+    /// 当前月永远排在队尾，滑到的那月现算、落定那帧就顿一下。
+    /// 计算走后台（store.warmPayMonth）：输入快照成值类型、算在后台线程，
+    /// 主线程只写缓存；每算一月让出一次主线程，不堵界面。
+    /// 取消逻辑不变：落定（手势之后）才重开，当前月已是第一个、取消也打断不了它。
     private func preloadPayAround(_ center: Int) {
         preloadPayTask?.cancel()
         preloadPayTask = Task {
-            let lo = max(pageRange.lowerBound, center - 10)
-            let hi = min(pageRange.upperBound - 1, center + 10)
-            for idx in lo...hi {
+            let order: [Int] = [center] + (1...10).flatMap { [center - $0, center + $0] }
+            for idx in order {
                 if Task.isCancelled { return }
+                guard idx >= pageRange.lowerBound && idx < pageRange.upperBound else { continue }
                 let ym = yearMonth(from: idx)
-                _ = store.payFor(year: ym.year, month: ym.month)
+                if let warmed = await store.warmPayMonth(year: ym.year, month: ym.month) {
+                    // 算好的是当前月就把 pay 写回来（追踪属性，写它触发重画），
+                    // 页面从占位换成真数；不是当前月只进缓存，滑过去时直接读。
+                    if (ym.year, ym.month) == (store.payYearMonth.year, store.payYearMonth.month) {
+                        store.pay = warmed
+                    }
+                }
                 await Task.yield()
             }
         }
@@ -241,32 +271,51 @@ struct PayView: View {
             // 分页器只预渲染当前页与相邻页，切月不整页重算（工资走 payFor 缓存）。
             // pagePadding 传 0：明细卡片自带 16pt 横向留白，两页卡片之间自然有 32pt
             // 间距，不粘连；再加 16pt 会把卡片挤得过窄。
-            // 黑卡进页（2026-11-28 改）：原来固定在标题栏下方、分页器上方，不跟页内滚动走，
-            // 切月时黑卡不动、只有下面明细在滑，看着像卡住了；现在放进每个月页面的纵向
-            // ScrollView 最顶部，跟着月份一起翻页、一起滚动。内容和数字不变（grandTotal，
-            // 不重算、不改公式），只是位置从固定改成随页走。
+            // 黑卡进页（2026-11-28 改，1.3.2.010 再改）：原来固定在标题栏下方、分页器上方，
+            // 不跟页内滚动走，切月时黑卡不动、只有下面明细在滑，看着像卡住了；.009 放进
+            // 每个月页面的纵向 ScrollView 最顶部，跟着月份一起翻页、一起滚动——但嵌套
+            // ScrollView 的竖向偏移会漂移（实测静止偏约 42pt），黑卡被顶出可视区、
+            // 顶部横切。1.3.2.010 改成每页固定页眉：放在页内、ScrollView 外，
+            // 跟着月份翻页、不跟竖滚走。内容和数字不变（grandTotal，不重算、
+            // 不改公式），只是位置从 ScrollView 里改成页眉。
             SmoothMonthPager(monthOffsets: monthOffsets, selectedOffset: selectedOffsetBinding, pagePadding: 0, fillHeight: true, onMidpointPageChange: { offset in
                 titleIndex = baseIndex + offset
             }) { offset in
                 let ym = yearMonth(from: baseIndex + offset)
-                ScrollView {
-                    VStack(spacing: 16) {
-                        headerCard(for: ym)
-                        monthBreakdown(year: ym.year, month: ym.month)
-                        syncTimeFooter
+                // 黑卡改成每页固定页眉（1.3.2.010）：.009 把它放进纵向 ScrollView 顶部，
+                // 嵌套 ScrollView 的竖向偏移一漂移，黑卡就被顶出可视区、顶部横切
+                //（实测静止偏约 42pt，横滑一来回再多约 30pt）；.008 那种固定在分页器
+                // 上方不动的放法老爷否过（黑卡不跟月份走）。现在黑卡放在页内、
+                // ScrollView 外：跟着月份翻页（在页里），但不跟竖滚走（不在 ScrollView
+                // 里），漂移再也切不到它。明细（monthBreakdown + syncTimeFooter）
+                // 仍在 ScrollView 里竖滚。
+                VStack(spacing: 16) {
+                    headerCard(for: ym)
+                    ScrollView {
+                        VStack(spacing: 16) {
+                            monthBreakdown(year: ym.year, month: ym.month)
+                            syncTimeFooter
+                        }
+                        // 底部留白（重做，老爷 2026-11-28 14:36 亲口令）：1.3.2.006 加的 88pt
+                        // 删掉——那是给自定义底栏留的，底栏已改回原生 TabView（iOS 26+ 液态玻璃 +
+                        // 往下滚自动收起），安全区由原生底栏自动处理，不再手动垫大额留白。
+                        // 点编辑框以外的地方就收起（丢弃未保存的改动）。Tap 手势只认轻点，
+                        // 拖动（滚动/横滑）不会触发，不跟左右滑切月、上下滚动冲突。
+                        .onTapGesture {
+                            if editingField != nil { dismissEdit() }
+                        }
                     }
-                    // 底部留白（重做，老爷 2026-11-28 14:36 亲口令）：1.3.2.006 加的 88pt
-                    // 删掉——那是给自定义底栏留的，底栏已改回原生 TabView（iOS 26+ 液态玻璃 +
-                    // 往下滚自动收起），安全区由原生底栏自动处理，不再手动垫大额留白。
-                    // 点编辑框以外的地方就收起（丢弃未保存的改动）。Tap 手势只认轻点，
-                    // 拖动（滚动/横滑）不会触发，不跟左右滑切月、上下滚动冲突。
-                    .onTapGesture {
-                        if editingField != nil { dismissEdit() }
-                    }
+                    // 嵌套 ScrollView 的自动 safe-area 顶边距关掉（1.3.2.010）：
+                    // 纵向 ScrollView 嵌在横向分页器里时，系统会按 safe-area 给内容加顶边距，
+                    // 是竖向偏移漂移的头号嫌疑；显式写 0，不让它自己加。
+                    .contentMargins(.top, 0)
+                    // 每页竖滚位置记下来（1.3.2.010）：落定时按阈值纠回顶部（见 onChange），
+                    // 漂移再也留不到静止帧上。
+                    .scrollPosition(point: scrollPointBinding(for: offset))
+                    // 1.3.0.013：滚动指示条常显（老爷 19:24 说「没有滑动框」）——.visible 没用，
+                    // 画廊实拍证明它根本不画出来，改走自绘滑块 AlwaysVisibleScrollIndicator。
+                    .modifier(AlwaysVisibleScrollIndicator())
                 }
-                // 1.3.0.013：滚动指示条常显（老爷 19:24 说「没有滑动框」）——.visible 没用，
-                // 画廊实拍证明它根本不画出来，改走自绘滑块 AlwaysVisibleScrollIndicator。
-                .modifier(AlwaysVisibleScrollIndicator())
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -290,7 +339,8 @@ struct PayView: View {
         // 工资页之前没写 toolbarBackground，走的是系统默认（就是 .automatic），
         // 这里显式写出来，和两边保持一致、以后改一处就能对上。
         .toolbarBackground(.automatic, for: .navigationBar)
-        // 滑到哪页，Store 就跟到哪月（setPayMonth 同步算好当月工资、写进缓存）；
+        // 滑到哪页，Store 就跟到哪月（setPayMonth 只改月份、只读缓存，
+        // 1.3.2.010：落定那帧不同步算，未命中留着旧的 pay，预热在后台算好再换）；
         // 切月时把敞着的编辑框收起（那是上个月的数，别留在新月上误触）。
         .onChange(of: pageIndex) { newIndex in
             // 落定就跟标题同步（标题平时跟过半回调走，落定时一定等于 pageIndex）。
@@ -298,6 +348,17 @@ struct PayView: View {
             let ym = yearMonth(from: newIndex)
             dismissEdit()
             store.setPayMonth(year: ym.year, month: ym.month)
+            // 1.3.2.010：落定时把这页的竖滚位置纠回顶部——嵌套 ScrollView 的竖向偏移
+            // 会漂移（实测静止约 42pt、横滑一来回再多约 30pt），不纠就留在静止帧上。
+            // 只纠小偏移（< 120pt，漂移的量级）：用户自己滚下去在看下面的不碰，
+            // 他的位置留着。纠正不做动画，瞬间回顶（不然落定后内容还往下出溜一下）。
+            if (payPageScrollPoints[newIndex]?.y ?? 0) < 120 {
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) {
+                    payPageScrollPoints[newIndex] = .zero
+                }
+            }
             // 1.3.2.004：落到哪月就把前后 10 个月的工资提前算好，滑过去直接显示。
             preloadPayAround(newIndex)
         }
@@ -375,12 +436,14 @@ struct PayView: View {
             .sorted { (order.firstIndex(of: $0.name) ?? 99) < (order.firstIndex(of: $1.name) ?? 99) }
     }
 
-    /// 某月的工资明细：工资取 store.payFor（带 payCache 备忘，同一月只算一次），
+    /// 某月的工资明细：工资取 store.payForCached（只读缓存，1.3.2.010）——
+    /// 切月那一刻主线程上不许有同步工资计算，body 只能读缓存；未命中显示占位，
+    /// 预热任务在后台算好、写缓存、把 pay 写回来，页面再重画换真数。
     /// 相邻月预渲染时直接读缓存、不现算、不发网络；输入没到齐算不出时先显示加载，
     /// refreshPay 把输入补齐后重画。只看当前页这一份，不用等整页刷新。
     @ViewBuilder
     private func monthBreakdown(year: Int, month: Int) -> some View {
-        if let pay = store.payFor(year: year, month: month) {
+        if let pay = store.payForCached(year: year, month: month) {
             VStack(spacing: 16) {
                 // 1.2.7.002：12h/6h 方式工资口径待定——金额不算，只显示班次统计。
                 if isPayTBD {
