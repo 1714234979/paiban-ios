@@ -3,30 +3,19 @@ import UIKit
 import StoreKit
 import WidgetKit
 
-/// 设置页（1.1.3：二级菜单）：主界面只留入口行——账号与安全、工资设置、关于
-/// 各开一个二级页面改细项；换班、管理后台、服务器、更新、反馈留在主界面。
-/// 服务器那节只给老爷（张晓文）看，同事看不到。
+/// 设置页（1.3.2.013：按普通用户视图重排）：标准分组列表，分组 1 账号卡片置顶，
+/// 分组 2 排班与工资，分组 3 显示与组件，分组 4 帮助与关于；全页图标统一单色深炭灰。
+/// 管理员的东西收进底部「开发者选项」单行（仅管理员可见），点进子页才是管理后台、
+/// 服务器线路、更新通道；普通用户看不到渠道切换。
 struct SettingsView: View {
     @Environment(AppStore.self) private var store: AppStore
 
     @State private var isCheckingUpdate = false
     @State private var showFeedback = false
-    /// 切渠道确认（1.2.7.002）：目标渠道 + 目标渠道最新版（先拉到再弹框）。
-    @State private var pendingChannel: String?
-    @State private var pendingChannelVersion: String?
-    @State private var showChannelSwitchConfirm = false
-    @State private var isFetchingChannelVersion = false
-    /// 渠道胶囊滑动（1.3.2.012）：和班组胶囊一样，选中底色用 matchedGeometryEffect 在两个选项间滑动。
-    @Namespace private var channelCapsuleNamespace
-    /// 两渠道最新版号（1.3.2.012）：进设置页时后台各拉一次，挂在选项下面；拉不到就不显示，不报错。
-    @State private var channelVersions: [String: String] = [:]
-    /// 减弱动态效果（1.3.2.012）：胶囊不滑动，直接跳。
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    // 图一新增行（1.2.7.001）：班次推送提醒 / 去除广告。
+    // 班次提醒（1.2.7.001）。
     // 1.2.7.002：日历只留月视图，「日历默认展开整月」开关已删。
     @State private var reminderOn = ShiftReminder.isEnabled
-    @State private var removeAds = ShiftReminder.removeAds
     @State private var showReminderDeniedAlert = false
     @State private var isRefreshingHolidays = false
 
@@ -36,156 +25,28 @@ struct SettingsView: View {
         return "\(store.displayUsername) · \(phone)"
     }
 
-    /// 工资设置入口的副标题：基本工资 · 奖金系数。
+    /// 工资设置入口的副标题：基本工资 · 系数。
     private var paySubtitle: String {
         let settings = store.user?.paySettings
         let base = settings?.baseSalary.map { PayCalc.jsNum($0) } ?? "2420"
         let coef = settings?.bonusCoef.map { String(format: "%.1f", $0) } ?? "1.0"
-        return "基本工资 \(base) · 奖金系数 \(coef)"
+        return "基本工资 \(base) · 系数 \(coef)"
     }
 
     var body: some View {
         List {
-            // 账号（图一没有，但必须保留在最上面）。
+            // 分组 1：账号卡片（无组标题，置顶）。
             Section {
                 NavigationLink {
                     AccountSecurityView().toolbar(.hidden, for: .tabBar)
                 } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("账号与安全")
-                        Text(accountSubtitle)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
-
-            // 图一列表（精美、简约：行 + 细分隔线，不堆二级标题）。
-            Section {
-                // 桌面&锁屏小组件。
-                NavigationLink {
-                    WidgetsView().toolbar(.hidden, for: .tabBar)
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("桌面&锁屏小组件")
-                        Text("五个小组件 · 怎么添加 · 数据状态 · 取数实测")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                // 班次设置：三个班次的时段（固定）。
-                NavigationLink {
-                    ShiftSettingsView().toolbar(.hidden, for: .tabBar)
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("班次设置")
-                        Text("日班 08–16 · 中班 16–24 · 早班 00–08")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                // 倒班方式设置（新增）：手动/周期、四班三倒 5 种方式、班组名。
-                NavigationLink {
-                    RotationSettingsView().toolbar(.hidden, for: .tabBar)
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("倒班方式设置")
-                        Text(rotationSubtitle)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                // 日历显示设置（新增）：周一首日 / 法定节假日 / 农历 / 上下月。
-                NavigationLink {
-                    CalendarDisplaySettingsView().toolbar(.hidden, for: .tabBar)
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("日历显示设置")
-                        Text(displaySubtitle)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                // 班次推送提醒（本地通知，默认开）。
-                Toggle("班次推送提醒", isOn: reminderBinding)
-                Text("班次前 30 分钟提醒，未来 7 天。关掉取消全部提醒。")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                // 更新日历的节假日（手动刷新 + 上次更新时间）。
-                HStack {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("更新日历的节假日")
-                        Text(holidaySubtitle)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    Spacer()
-                    Button("立即更新") {
-                        Task { await refreshHolidaysNow() }
-                    }
-                    .font(.subheadline)
-                    .disabled(isRefreshingHolidays)
-                }
-
-                // 去除广告（VIP 功能；广告系统还没来，只存标识，不收费、不跳转）。
-                Toggle("去除广告", isOn: removeAdsBinding)
-                if removeAds {
-                    Text("去除广告是 VIP 功能，等广告文档到了再开。")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
-
-            // 换班（保留）：更换班组 + 重新走一遍引导。
-            Section {
-                NavigationLink {
-                    TeamChangeView().toolbar(.hidden, for: .tabBar)
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("更换班组")
-                        Text("换到别的班组，从生效日零点起按新班组排班")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                NavigationLink {
-                    OnboardingView().toolbar(.hidden, for: .tabBar)
-                } label: {
-                    Text("重新走一遍引导设置")
-                }
-            }
-
-            // 外观（1.2.8.001）：深色模式。跟随系统 / 浅色 / 深色，改完立刻生效，不用重启。
-            Section("外观") {
-                Picker("深色模式", selection: Binding(
-                    get: { store.appearance },
-                    set: { store.appearance = $0 }
-                )) {
-                    ForEach(AppearanceMode.allCases, id: \.self) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                Text("跟随系统按手机的深色模式走；选深色就是一直深色，选浅色就是一直浅色。改完立刻生效。")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            // 工资设置：只有有工资权限的人才显示（1.2.7.001，第 23 条）。
-            // 没权限的人连工资 Tab 都没有，设置页也不出现这一行。
-            if store.payAccess {
-                Section {
-                    NavigationLink {
-                        PaySettingsView().toolbar(.hidden, for: .tabBar)
-                    } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: "person.crop.circle.fill")
+                            .font(.system(size: 36))
+                            .foregroundStyle(.primary)
                         VStack(alignment: .leading, spacing: 2) {
-                            Text("工资设置")
-                            Text(paySubtitle)
+                            Text("账号与安全")
+                            Text(accountSubtitle)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -193,119 +54,182 @@ struct SettingsView: View {
                 }
             }
 
-            // 管理后台切换：只有老爷（张晓文）能看到。
-            // 原生 push 进去（系统自带“‹ 设置”返回 + 隐藏底栏），不再用 fullScreenCover
-            // + 自定义“‹ 返回”按钮（Gemini 整改模块 1b/1c）。
-            if store.isOwner {
-                Section {
+            // 分组 2：排班与工资。
+            Section("排班与工资") {
+                // 倒班与班次（只读的「班次设置」已合并进这页顶部卡片，不再单列一行）。
+                NavigationLink {
+                    RotationSettingsView().toolbar(.hidden, for: .tabBar)
+                } label: {
+                    settingsRow(icon: "calendar.badge.clock", title: "倒班与班次", subtitle: rotationSubtitle)
+                }
+
+                // 更换班组。
+                NavigationLink {
+                    TeamChangeView().toolbar(.hidden, for: .tabBar)
+                } label: {
+                    settingsRow(icon: "person.2", title: "更换班组", subtitle: "调整所属班组与生效日期")
+                }
+
+                // 工资设置：只有有工资权限的人才显示（1.2.7.001，第 23 条）。
+                // 没权限的人连工资 Tab 都没有，设置页也不出现这一行。
+                if store.payAccess {
                     NavigationLink {
-                        AdminBackendView()
-                            .toolbar(.hidden, for: .tabBar)
+                        PaySettingsView().toolbar(.hidden, for: .tabBar)
                     } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                // 深色模式下 Button 标题会走 AccentColor（深色亮蓝），
-                                // 这里显式 primary，和其他菜单项配色一致（模块 4a）。
-                                Text("切换管理员后台")
-                                    .foregroundColor(.primary)
-                                Text("用最高权限打开管理端，可管账号、发 App 更新")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            Spacer()
-                        }
+                        settingsRow(icon: "yensign.circle", title: "工资设置", subtitle: paySubtitle)
                     }
                 }
+
+                // 班次提醒（本地通知，默认开）。
+                Toggle(isOn: reminderBinding) {
+                    HStack(spacing: 12) {
+                        settingsIcon("bell.badge")
+                        Text("班次提醒")
+                    }
+                }
+            } footer: {
+                Text("开启后将在班次开始前 30 分钟推送提醒，自动覆盖未来 7 天。")
             }
 
-            // 服务器线路只给老爷看（调试用），同事不显示。
-            if store.isOwner {
-                Section("服务器") {
-                    HStack {
-                        Text("当前线路")
-                        Spacer()
-                        Text(store.serverKind.displayName)
-                            .foregroundColor(.secondary)
-                    }
-                    Text(store.serverBaseURL ?? "未连接")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Picker("手动切换线路", selection: manualSelection) {
-                        Text("自动选路").tag("")
-                        ForEach(ServerConfig.allCandidates, id: \.baseURL) { candidate in
-                            Text("\(candidate.kind.displayName) · \(candidate.baseURL)").tag(candidate.baseURL)
+            // 分组 3：显示与组件。
+            Section("显示与组件") {
+                // 外观：点开菜单选跟随系统 / 浅色 / 深色；说明文字已删（系统常识不写）。
+                HStack(spacing: 12) {
+                    settingsIcon("circle.lefthalf.filled")
+                    Text("外观")
+                    Spacer()
+                    Picker("", selection: appearanceBinding) {
+                        ForEach(AppearanceMode.allCases, id: \.self) { mode in
+                            Text(mode.title).tag(mode)
                         }
                     }
                     .pickerStyle(.menu)
                 }
+
+                // 日历显示。
+                NavigationLink {
+                    CalendarDisplaySettingsView().toolbar(.hidden, for: .tabBar)
+                } label: {
+                    settingsRow(icon: "calendar", title: "日历显示", subtitle: displaySubtitle)
+                }
+
+                // 桌面与锁屏小组件。
+                NavigationLink {
+                    WidgetsView().toolbar(.hidden, for: .tabBar)
+                } label: {
+                    settingsRow(icon: "square.grid.2x2", title: "桌面与锁屏小组件", subtitle: "5 款组件 · 支持桌面与锁屏")
+                }
+
+                // 节假日数据：右侧轻量「更新」文字按钮，点后转圈。
+                HStack(spacing: 12) {
+                    settingsIcon("calendar.circle")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("节假日数据")
+                        Text(holidaySubtitle)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                    if isRefreshingHolidays {
+                        ProgressView()
+                            .controlSize(.small)
+                    } else {
+                        Button("更新") {
+                            Task { await refreshHolidaysNow() }
+                        }
+                        .font(.subheadline)
+                    }
+                }
             }
 
-            Section {
+            // 分组 4：帮助与关于。
+            Section("帮助与关于") {
+                // 使用帮助（从「关于」二级页提至一级，方便新用户查找）。
+                NavigationLink {
+                    UsageGuideView().toolbar(.hidden, for: .tabBar)
+                } label: {
+                    settingsRow(icon: "questionmark.circle", title: "使用帮助")
+                }
+
+                // 新手引导。
+                NavigationLink {
+                    OnboardingView().toolbar(.hidden, for: .tabBar)
+                } label: {
+                    settingsRow(icon: "sparkles", title: "新手引导", subtitle: "重新配置班次与基础信息")
+                }
+
+                // 意见反馈（日志提示已移入反馈页内，主列表不再写）。
+                Button {
+                    showFeedback = true
+                } label: {
+                    HStack(spacing: 12) {
+                        settingsIcon("exclamationmark.bubble")
+                        Text("意见反馈")
+                        Spacer()
+                    }
+                }
+                .foregroundColor(.primary)
+
+                // 给个好评：标准系统评分弹窗（上架 App 才有效；侧载时无反应、不报错）。
+                Button {
+                    requestReview()
+                } label: {
+                    HStack(spacing: 12) {
+                        settingsIcon("star")
+                        Text("给个好评")
+                        Spacer()
+                    }
+                }
+                .foregroundColor(.primary)
+
+                // 检查更新：右侧浅灰当前版号；有新版时前面多一个小红点。
+                // 正式/内测切换栏普通用户不再显示，收进底部的「开发者选项」。
                 Button {
                     Task { await manualUpdateCheck() }
                 } label: {
-                    HStack {
+                    HStack(spacing: 12) {
+                        settingsIcon("arrow.down.circle")
                         Text("检查更新")
                         Spacer()
                         if isCheckingUpdate {
                             ProgressView()
                         } else {
-                            Text("当前 \(UpdateChecker.currentVersion)")
+                            if store.pendingUpdate != nil {
+                                Circle()
+                                    .fill(.red)
+                                    .frame(width: 8, height: 8)
+                            }
+                            Text("v\(UpdateChecker.currentVersion)")
                                 .foregroundColor(.secondary)
                         }
                     }
                 }
-                // 内测渠道（1.2.8）：只有内测人员看得到这一行。
-                // 1.2.7.002：点另一个渠道先弹确认（当前版本、目标渠道最新版、切了会怎样），
-                // 确认后切渠道并立刻按新渠道查一次；版本不一样就推出来（哪怕数字更低）。
-                if store.user?.isBetaTester == true {
-                    HStack(spacing: 0) {
-                        channelButton(title: "正式版", channel: "stable")
-                        channelButton(title: "内测版", channel: "beta")
-                    }
-                    .background(AppStyle.surface1)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-                    // 1.3.2.012：胶囊滑动只绑在装的渠道这个状态上；减弱动态效果时不滑动。
-                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.22), value: UpdateChecker.installedChannel)
-                    Text("内测版只推给内测人员；切到内测后，下次打开 App 也按内测查。")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-            }
+                .foregroundColor(.primary)
 
-            Section {
-                Button {
-                    showFeedback = true
-                } label: {
-                    HStack {
-                        Text("意见反馈")
-                        Spacer()
-                        Text("会附上最近 24 小时运行日志")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                // 欢迎评分：标准系统评分弹窗（上架 App 才有效；侧载时无反应、不报错）。
-                Button {
-                    requestReview()
-                } label: {
-                    Text("欢迎评分")
-                }
-            }
-
-            Section {
+                // 关于排班空间（版本号已放在「检查更新」行，这里不再重复）。
                 NavigationLink {
                     AboutView().toolbar(.hidden, for: .tabBar)
                 } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("关于我们")
-                        Text("更新日志 · 功能介绍 · 版本 \(UpdateChecker.currentVersion)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                    settingsRow(icon: "info.circle", title: "关于排班空间")
+                }
+            }
+
+            // 开发者选项（仅管理员）：单行入口，点进子页；普通用户看不到这一行。
+            // 里面收着管理员后台、服务器线路、更新通道（正式/内测）。
+            if store.isOwner {
+                Section {
+                    NavigationLink {
+                        DeveloperOptionsView().toolbar(.hidden, for: .tabBar)
+                    } label: {
+                        settingsRow(icon: "wrench.and.screwdriver", title: "开发者选项")
                     }
                 }
             }
+        }
+        // 底部安全留白（1.3.2.013）：列表滑到底时，最后一行「关于排班空间」完整露在
+        // 液态玻璃 TabBar 上方，不被底栏压住。
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Color.clear.frame(height: 20)
         }
         .modifier(AlwaysVisibleScrollIndicator())
         .navigationTitle("设置")
@@ -320,26 +244,6 @@ struct SettingsView: View {
         } message: {
             Text(store.updateNotice ?? "")
         }
-        .alert("切换版本渠道", isPresented: $showChannelSwitchConfirm) {
-            Button("取消", role: .cancel) {
-                pendingChannel = nil
-                pendingChannelVersion = nil
-            }
-            Button(pendingChannel == "beta" ? "切换到内测版" : "切换到正式版") {
-                if let channel = pendingChannel {
-                    // 1.2.7.003 修：Task 标 @MainActor，确认后改 @State 才会在主线程刷新。
-                    Task { @MainActor in
-                        isCheckingUpdate = true
-                        defer { isCheckingUpdate = false }
-                        await store.checkForUpdateAfterChannelSwitch(channel: channel)
-                        pendingChannel = nil
-                        pendingChannelVersion = nil
-                    }
-                }
-            }
-        } message: {
-            Text(channelSwitchMessage)
-        }
         .alert("通知权限被拒", isPresented: $showReminderDeniedAlert) {
             Button("知道了", role: .cancel) {}
             Button("去系统设置") {
@@ -348,7 +252,7 @@ struct SettingsView: View {
                 }
             }
         } message: {
-            Text("班次推送提醒需要通知权限。请去系统设置里打开「排班空间」的通知，再回来开提醒。")
+            Text("班次提醒需要通知权限。请去系统设置里打开「排班空间」的通知，再回来开提醒。")
         }
         .sheet(isPresented: $showFeedback) {
             FeedbackView()
@@ -365,47 +269,71 @@ struct SettingsView: View {
                 let status = await ShiftReminder.authorizationStatus()
                 if status == .denied { showReminderDeniedAlert = true }
             }
-            // 1.3.2.012：两渠道最新版号各拉一次，挂在切换选项下面；拉不到就不显示。
-            async let stableInfo = store.fetchVersionForChannel("stable")
-            async let betaInfo = store.fetchVersionForChannel("beta")
-            var versions: [String: String] = [:]
-            if let info = await stableInfo { versions["stable"] = info.latestVersion }
-            if let info = await betaInfo { versions["beta"] = info.latestVersion }
-            channelVersions = versions
         }
     }
 
-    // MARK: 图一新增行的状态与绑定
+    // MARK: 设置行样式（1.3.2.013）
 
-    /// 倒班方式入口副标题：当前方式名 + 班组。
+    /// 行图标：全页统一单色深炭灰（.primary），18–20pt、常规字重，
+    /// 和日历页顶部黑卡、液态玻璃的克制调性一致。
+    private func settingsIcon(_ name: String) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 19, weight: .regular))
+            .foregroundStyle(.primary)
+            .frame(width: 24, alignment: .center)
+    }
+
+    /// 标准入口行：图标 + 标题 + 可选副标题（单行精炼）。
+    private func settingsRow(icon: String, title: String, subtitle: String? = nil) -> some View {
+        HStack(spacing: 12) {
+            settingsIcon(icon)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                if let subtitle {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+        }
+    }
+
+    /// 外观绑定：跟随系统 / 浅色 / 深色，改完立刻生效。
+    private var appearanceBinding: Binding<AppearanceMode> {
+        Binding(
+            get: { store.appearance },
+            set: { store.appearance = $0 }
+        )
+    }
+
+    /// 倒班与班次入口副标题：当前方式名 + 班组（方式名里的「·」统一成「 · 」）。
     private var rotationSubtitle: String {
         let r = store.rotation
         if r.isManual { return "手动排班 · \(r.teamName(for: r.team))班" }
         let name = RotationModes.mode(id: r.modeId)?.name ?? r.modeId
-        return "\(name) · \(r.teamName(for: r.team))班"
+        let pretty = name.split(separator: "·").map { $0.trimmingCharacters(in: .whitespaces) }.joined(separator: " · ")
+        return "\(pretty) · \(r.teamName(for: r.team))班"
     }
 
-    /// 日历显示入口副标题：开着的选项。
+    /// 日历显示入口副标题：开着的选项（周一首日不列，只列法定节假日 · 农历 · 上下月）。
     private var displaySubtitle: String {
         let d = store.calendarDisplay
         var parts: [String] = []
-        if d.mondayFirst { parts.append("周一首日") }
         if d.showHolidays { parts.append("法定节假日") }
         if d.showLunar { parts.append("农历") }
         if d.showAdjacentMonths { parts.append("上下月") }
         return parts.isEmpty ? "全部关闭" : parts.joined(separator: " · ")
     }
 
-    /// 节假日入口副标题：上次更新时间（ISO 时间戳转本地 yyyy-MM-dd HH:mm，
-    /// 如 2026-11-27T07:36:10.262Z → 2026-11-27 15:36；模块 2a）。
+    /// 节假日入口副标题：只到日期（更新频率是年度级，精确到分秒显得噪杂）。
     private var holidaySubtitle: String {
         if let updatedAt = store.holidaysUpdatedAt, !updatedAt.isEmpty {
-            return "上次更新 \(DateUtil.localDateTime(fromISO: updatedAt))"
+            return "更新于 \(String(DateUtil.localDateTime(fromISO: updatedAt).prefix(10)))"
         }
-        return "每年 11 月自动更新，也可手动刷新"
+        return "每年 11 月自动更新"
     }
 
-    /// 班次推送提醒开关：开 → 请求权限 + 排未来 7 天提醒；权限被拒自动关掉并提示。
+    /// 班次提醒开关：开 → 请求权限 + 排未来 7 天提醒；权限被拒自动关掉并提示。
     private var reminderBinding: Binding<Bool> {
         Binding(
             get: { reminderOn },
@@ -429,17 +357,6 @@ struct SettingsView: View {
     }
 
 
-    /// 去除广告开关（只存标识；广告系统还没来，非 VIP 打开只提示、不收费、不跳转）。
-    private var removeAdsBinding: Binding<Bool> {
-        Binding(
-            get: { removeAds },
-            set: { newValue in
-                removeAds = newValue
-                ShiftReminder.removeAds = newValue
-            }
-        )
-    }
-
     /// 手动刷新节假日（当年 + 下一年）。
     private func refreshHolidaysNow() async {
         isRefreshingHolidays = true
@@ -449,28 +366,11 @@ struct SettingsView: View {
         _ = await store.refreshHolidays(year: year + 1)
     }
 
-    /// 欢迎评分：标准系统评分弹窗。
+    /// 给个好评：标准系统评分弹窗。
     private func requestReview() {
         if let scene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
             SKStoreReviewController.requestReview(in: scene)
         }
-    }
-
-    // MARK: 手动选线路的绑定
-
-    private var manualSelection: Binding<String> {
-        Binding(
-            get: { ServerConfig.manualOverride ?? "" },
-            set: { newValue in
-                Task {
-                    if newValue.isEmpty {
-                        await store.clearServerOverride()
-                    } else {
-                        await store.switchServer(to: newValue)
-                    }
-                }
-            }
-        )
     }
 
     private var updateNoticeBinding: Binding<Bool> {
@@ -484,104 +384,7 @@ struct SettingsView: View {
 
     // MARK: 检查更新
 
-    /// 渠道按钮（1.2.7.002）：当前渠道高亮；点另一个渠道先弹确认。
-    /// 1.2.7.003：拉取时被点的按钮转圈 + 变灰，让人知道已经点上了。
-    /// 1.2.7.007：.plain 改 .borderless——List 行里并排两个 plain 按钮，
-    /// 行手势把点击吞掉，两个都点不动；borderless 才各自接得到点击。
-    /// 1.2.7.009：选中态和 guard 按装的版本定，不按存的更新偏好定。
-    /// 存的偏好只在确认切换时才写，从不跟装的版本同步；一旦脱节，「正式版」
-    /// 会被误标成已选中，点它 guard 直接 return，看着就是点不动——003/007
-    /// 修的点按 mechanics 本来就没坏，真正拦住点击的是这个 guard。
-    /// 装着内测版（四段号）时内测版是已选中、正式版一定点得动；装着正式版时反过来。
-    /// 1.3.2.012（老爷 2026-11-28 亲口令：切换 UI 再优化 + 加切换动画）：
-    /// 选中态改成和班组胶囊一样的深色滑动胶囊（matchedGeometryEffect，装的渠道
-    /// 变了就滑过去）；每个选项下面挂该渠道最新版号（进设置页时后台拉一次），
-    /// 点下去先给轻冲击触感，再弹确认框。选中态仍按装的版本定（009 的规矩不动，
-    /// 胶囊不会指到没装的渠道上）；.borderless 也不能动（007 的教训，List 行里
-    /// 别的 ButtonStyle 接不到点击）。
-    private func channelButton(title: String, channel: String) -> some View {
-        let installedChannel = UpdateChecker.installedChannel
-        let selected = installedChannel == channel
-        let fetching = isFetchingChannelVersion && !selected
-        return Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            guard channel != installedChannel, !isFetchingChannelVersion else { return }
-            Task { await askChannelSwitch(to: channel) }
-        } label: {
-            VStack(spacing: 2) {
-                HStack(spacing: 6) {
-                    if fetching {
-                        ProgressView()
-                            .controlSize(.small)
-                    }
-                    Text(title)
-                        .font(.subheadline)
-                        .bold(selected)
-                }
-                if let version = channelVersions[channel] {
-                    Text(version)
-                        .font(.caption2)
-                        .foregroundColor(selected ? .white.opacity(0.75) : .secondary)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 8)
-            .background(
-                Group {
-                    if selected {
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(AppStyle.navyAdaptive)
-                            .matchedGeometryEffect(id: "channelCapsule", in: channelCapsuleNamespace)
-                    } else {
-                        Color.clear
-                    }
-                }
-            )
-            .foregroundColor(selected ? .white : .primary)
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            // 两行按钮本身已有约 50pt 高，1.3.2.005 的 touchTarget 透明留白不用再加。
-        }
-        .buttonStyle(.borderless)
-        .disabled(isFetchingChannelVersion)
-        .opacity(fetching ? 0.7 : 1.0)
-    }
-
-    /// 点另一个渠道：先弹确认框（立刻有反应），目标渠道最新版后台拉到再填进去。
-    /// @MainActor（1.2.7.003 修）：拉网回来后改 @State（pendingChannel、确认框）
-    /// 必须在主线程。之前这个函数不是 @MainActor，Task 在后台线程续跑，
-    /// @State 改了界面也不刷新，确认框永远弹不出来，看起来就是「点不动」。
-    /// 1.2.7.007：确认框不等拉网——003 的做法是拉到版本号才弹，网慢时点下去
-    /// 半天没反应，看着还是点不动。现在点下立刻弹，版本号到了再补进文案。
-    @MainActor
-    private func askChannelSwitch(to channel: String) async {
-        pendingChannel = channel
-        pendingChannelVersion = nil
-        showChannelSwitchConfirm = true
-        isFetchingChannelVersion = true
-        defer { isFetchingChannelVersion = false }
-        let info = await store.fetchVersionForChannel(channel)
-        pendingChannelVersion = info?.latestVersion
-    }
-
-    /// 确认框文案：当前版本、目标渠道最新版、切了会怎样。
-    /// 1.2.7.007：版本号还在拉时显示「正在获取…」，拉到再补，拉不到才写未知。
-    private var channelSwitchMessage: String {
-        let current = UpdateChecker.currentVersion
-        let currentLabel = UpdateChecker.channelLabel(for: current)
-        let target = pendingChannel ?? "stable"
-        let targetLabel = target == "beta" ? "内测版" : "正式版"
-        let targetVersion: String
-        if let v = pendingChannelVersion {
-            targetVersion = v
-        } else if isFetchingChannelVersion {
-            targetVersion = "正在获取…"
-        } else {
-            targetVersion = "未知（没连上服务器）"
-        }
-        return "当前版本：\(currentLabel) \(current)\n目标渠道最新版：\(targetLabel) \(targetVersion)\n\n切过去后，App 按\(targetLabel)查更新；\(targetLabel)有新版就推给你装，不装也可以继续用现在的版本。"
-    }
-
-    /// 手动查更新（1.2.7.003 修：同 askChannelSwitch，@MainActor，
+    /// 手动查更新（1.2.7.003 修：Task 标 @MainActor，
     /// 否则 isCheckingUpdate 的转圈在后台线程改了也不显示）。
     @MainActor
     private func manualUpdateCheck() async {
@@ -1381,12 +1184,30 @@ struct SpecialDeductionsView: View {
     }
 }
 
-/// 关于（二级页面）：更新日志入口、功能介绍、当前版本与版权。
+/// 关于（二级页面）：顶部 App 图标 + 名称 + 版本居中展示，下方只放更新日志和功能介绍。
 /// 1.1.4：更新日志改成二级菜单——原来四个版本的条目全堆在关于页里，
 /// 现在关于页只留一行入口，点进去才是 ChangelogView。
+/// 1.3.2.013：使用说明已提到主设置页一级（「使用帮助」），这里不再重复；
+/// Bundle ID 行已删，只留图标 + 名称 + 版本。
 struct AboutView: View {
     var body: some View {
         Form {
+            Section {
+                VStack(spacing: 8) {
+                    Image("SplashLogo")
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 72, height: 72)
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
+                    Text("排班空间")
+                        .font(.headline)
+                    Text("版本 \(UpdateChecker.currentVersion)")
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 8)
+            }
             Section("更新日志") {
                 NavigationLink {
                     ChangelogView()
@@ -1400,40 +1221,7 @@ struct AboutView: View {
                 }
             }
             Section("功能介绍") {
-                Text("排班空间是倒班同事的排班与工资小工具：四班 8 天一轮日历（含阴历、节气、法定假日与三薪），调班/请假、工资预估（累计预扣个税），离线缓存先顶着，没网也能看；登录支持账号密码与手机号验证码。")
-            }
-            Section("使用说明") {
-                NavigationLink {
-                    UsageGuideView()
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("使用说明")
-                        Text("排班、调班请假、工资、反馈、更新怎么用")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
-            Section("当前版本") {
-                HStack {
-                    Text("版本")
-                    Spacer()
-                    Text(UpdateChecker.currentVersion)
-                        .monospacedDigit()
-                        .foregroundColor(.secondary)
-                }
-                HStack {
-                    Text("Bundle ID")
-                    Spacer()
-                    Text("com.paiban.app")
-                        .foregroundColor(.secondary)
-                }
-                HStack {
-                    Text("名称")
-                    Spacer()
-                    Text("排班空间")
-                        .foregroundColor(.secondary)
-                }
+                Text("排班空间是一款专为倒班人群打造的排班与薪资助手。支持多种倒班周期、灵活调班请假、法定节假日标注及税后工资预估，并内置离线缓存，无网环境下也能随时查阅排班。")
             }
             Section {
                 Text("© 2026 排班空间")
@@ -1446,31 +1234,53 @@ struct AboutView: View {
     }
 }
 
-/// 详细使用说明（1.2.2，从关于页点进来）：按现有功能写，排班、调班请假、
-/// 工资、反馈、更新、账号与安全六节；入口名字和设置页里的一致。
+/// 使用帮助（1.3.2.013：从长段纯文本墙改成折叠式 FAQ 手风琴）：
+/// 点问题展开答案；个税计算公式拆成缩进清单。入口在主设置页一级（「使用帮助」）。
 struct UsageGuideView: View {
     var body: some View {
         Form {
-            Section("排班怎么看") {
+            DisclosureGroup("如何查看与切换排班") {
                 Text("顶部 A、B、C、D 四个班切换着看，日历按 8 天一轮排班：日班 08:00–16:00，中班 16:00–24:00，早班 00:00–08:00。班次颜色：日班绿、中班红、早班紫、休息淡青。格子里大数字是阳历，小字是阴历、节气或节日；法定节假日标绿「假」，调休上班标红「班」，三薪日多一行半透明「三薪」，当天描绿边。左右滑动切月，点某一天看当天详情。")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
             }
-            Section("调班 / 请假") {
+            DisclosureGroup("如何记录调班与请假") {
                 Text("点某一天进当天详情，再点调班或请假。调班：选对方班，默认两人互换，保存前能看到两边怎么变；可以先不填还班日，过几天再补；删掉调班时替班日和还班日一起恢复。请假：选一天或一段日期，只算有班的日子，休班那天不算。只能改自己班的日历（设置页里那个班），切到别的班只能看。两条连班禁令：中班接次日早班不行，早班加日班不行；能双班的组合只剩早班加中班、日班加中班；一天不能上两个相同的班；休班的人来顶岗只上一个班，不算双班。")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
             }
-            Section("工资页怎么看") {
-                Text("工资页显示的是预估工资，仅供参考，和实际发的有出入属正常。点「可改」的行能按单月改科室绩效、绩效系数、奖金系数、加班天数、水电费，只影响当月。个税按累计预扣法算：累计应纳税所得额 = 累计总收入 − 累计五险一金 − 5000 × 已发薪月份数 − 累计专项附加扣除，当月扣税 = 本月累计税额 − 上月累计税额，税从奖金里扣。学历补贴、缺员补贴和专项附加扣除在「设置 → 工资设置」里填。")
+            DisclosureGroup("预估工资是如何计算的") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("工资页显示的是预估工资，仅供参考，和实际发的有出入属正常。点「可改」的行能按单月改科室绩效、绩效系数、奖金系数、加班天数、水电费，只影响当月。")
+                    Text("个税按累计预扣法算：")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("· 累计应纳税所得额 = 累计总收入 − 累计五险一金 − 5000 × 已发薪月份数 − 累计专项附加扣除")
+                        Text("· 当月扣税 = 本月累计税额 − 上月累计税额")
+                        Text("· 税从奖金里扣")
+                    }
+                    .padding(.leading, 8)
+                    Text("学历补贴、缺员补贴和专项附加扣除在「设置 → 工资设置」里填。")
+                }
+                .font(.subheadline)
+                .foregroundColor(.secondary)
             }
-            Section("反馈问题") {
-                Text("设置页点「反馈问题」，选类型和出问题的页面，写清是哪个月出了问题，可附一张截图，发送时附上最近 24 小时运行日志。发完的反馈在反馈页下方的「我的反馈」里能看到，点开一条看管理员的回复，还能继续回，像聊天一样来回说。")
+            DisclosureGroup("如何反馈问题") {
+                Text("设置页点「意见反馈」，选类型和出问题的页面，写清是哪个点出了问题，可附一张截图，发送时附上最近 24 小时运行日志。发完的反馈在反馈页下方的「我的反馈」里能看到，点开一条看管理员的回复，还能继续回。")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
             }
-            Section("更新") {
+            DisclosureGroup("如何更新 App") {
                 Text("有新版本时打开 App 会弹提示，点「更新」直接下载安装包安装；也可以在设置页点「检查更新」手动查。点「稍后」后当天不再弹。")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
             }
-            Section("账号与安全") {
+            DisclosureGroup("账号与安全说明") {
                 Text("改密码、改昵称、换手机号、切换账号、退出登录都在「设置 → 账号与安全」里。退出登录只清登录状态，离线缓存留着，下次登录还能看。换手机号要收新号的验证码验证，30 天内只能换一次。换班组在设置页「更换班组」里，选新班和生效日期，工资跟着新班组算。")
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
             }
         }
-        .navigationTitle("使用说明")
+        .navigationTitle("使用帮助")
     }
 }
 
@@ -1479,22 +1289,29 @@ struct ChangelogView: View {
     var body: some View {
         Form {
             Section {
+                changelog(version: "1.3.2.013（内测）", items: [
+                    "设置页重新分组：排班与工资、显示与组件、帮助与关于，找入口更快了",
+                    "管理员入口收进「开发者选项」，普通用户设置页更干净；检查更新有新版时多一个小红点",
+                    "小组件页直接展示 5 张预览卡片，数据同步改成轻提示「已刷新」",
+                    "使用说明改成问答式，点问题展开答案；个税算法拆成清单更好读",
+                    "倒班与班次页改成白底卡片 + 细描边选中态，班次时段直接放在页顶",
+                ])
                 changelog(version: "1.3.2.012（内测）", items: [
-                    "排班页黑卡改成左右分栏：左边日期班次倒计时，右边今日已挣放大当主角；休息天高度也不变了",
-                    "排班页顺序改成标题→黑卡→日历→班组选择，和工资页同款顺序，切 Tab 标题和黑卡不再跳；班组切换加了淡出淡入，胶囊滑过去不再变形",
-                    "龙抬头在日期格里改成「龙头」，不再竖排三行顶到班次；排班页底部留了白，统计行不再贴着底栏",
-                    "工资页返回按钮挪到导航栏右上角，叫「本月」，不再挡「科室绩效」的「可改」；「可改」挪到金额左边，金额全部贴右沿对齐",
-                    "设置页内测/正式版切换改成深色滑动胶囊，两个选项下面挂着各自最新版号，点下去有轻震动",
+                    "排班页黑卡重新排版：日期与班次在左，今日已挣放大在右，一眼看清",
+                    "排班页与工资页顺序对齐，切换不再跳动；班组切换更顺滑，胶囊不再变形",
+                    "日期格里的「龙抬头」改成「龙头」，不再竖排三行顶到班次",
+                    "工资页返回按钮移到右上角，叫「本月」，不再挡住「可改」；金额全部右对齐",
+                    "设置页版本切换改成滑动胶囊，两个渠道的最新版号直接显示在选项下",
                 ])
                 changelog(version: "1.3.2.011（内测）", items: [
-                    "黑卡被切的根因修了：分页器改按实际高度排版，「今天」按钮改成悬浮、不再挤压页面；黑卡标签和数字完整显示",
-                    "工资页切月不卡了：只读本地缓存，算数和写盘都挪到后台；进 App 就把前后 10 个月工资先预热好",
-                    "排班页快滑不抽帧了：标题只在小范围里刷新，格子一次算好；慢点箭头还留着数字滚动，快滑时不再糊成一团",
+                    "优化排班与工资页切换流畅度，滑动切换更跟手",
+                    "修复跨月滑动时顶部标题与日期显示异常的问题",
+                    "优化工资明细加载机制，切换月份响应更快",
                 ])
                 changelog(version: "1.3.2.010（内测）", items: [
-                    "工资页黑卡不再被切：改成每页固定页眉，标签和大数字完整显示，跟着月份翻页、不跟竖滚走",
-                    "工资页切月不卡了：工资改到后台算，当前月先算好；切月那一刻主线程上不再同步算工资",
-                    "排班页快滑不抽帧了：邻月格子后台预热、中心先算；标题改成淡入，快滑时数字不再糊成一团",
+                    "工资页黑卡不再被切断，标签与金额完整显示，跟着月份翻页",
+                    "工资页切换月份更快，算数挪到后台，滑到新月不用等",
+                    "排班页快速滑动更顺滑，标题不再糊成一团",
                 ])
                 changelog(version: "1.3.2.009（内测）", items: [
                     "卡顿根治了：状态改成细粒度观察，一个地方变了不再牵着整页重画；月份和工资只算一次记下来，滑过去直接显示",
@@ -2174,37 +1991,24 @@ struct ChangePasswordSheet: View {
     }
 }
 
-/// 小组件页（1.2.7.006 重写）：五个小组件、怎么添加、真实取数状态。
+/// 小组件页（1.2.7.006 重写）：五张带预览图的介绍卡片 + 数据同步。
 /// 密钥彻底拿掉：不再生成、不再显示、不再让用户填。小组件只走设备直连。
-/// 数据状态是实测的：点「立即同步小组件」就当场跑一次设备直连拉数，
-/// 成功失败、当场显示，不再只让老爷去桌面看。
+/// 数据同步是实测的：点「刷新小组件数据」就当场跑一次设备直连拉数，
+/// 成功只弹轻量 Toast「已刷新」，失败才在页面里直说原因，不再只让老爷去桌面看。
 struct WidgetsView: View {
     @Environment(AppStore.self) private var store: AppStore
     @State private var syncing = false
     @State private var syncMessage: String?
-    @State private var syncOK = false
+    /// 轻量 Toast（1.3.2.013）：同步成功只弹一句「已刷新」，1.5 秒自己消失，不再弹大绿框。
+    @State private var showSyncToast = false
 
     /// 本机设备号（App 登录时登记到用户名下，小组件凭它拉数据）。
     private var deviceId: String? { UIDevice.current.identifierForVendor?.uuidString }
 
-    private static let timeFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "M月d日 HH:mm"
-        return f
-    }()
-
     var body: some View {
         Form {
-            Section("五个小组件") {
-                widgetRow(name: "今日排班", size: "小", desc: "今天的班次、倒计时与今日预估工资")
-                widgetRow(name: "本周排班", size: "中", desc: "本周七天班次，当天高亮")
-                widgetRow(name: "本月工资", size: "中", desc: "本月应发、实发工资与实发奖金")
-                widgetRow(name: "本月日历", size: "大", desc: "整月网格与班次色块，当天高亮")
-                widgetRow(name: "今日已挣", size: "锁屏", desc: "锁屏上看今天已挣多少钱、还剩多久下班")
-            }
-
-            // 小组件介绍（1.2.7.008）：「怎么添加」「数据状态」两节按老爷说的删了，
-            // 空出来的位置放介绍图。标题和说明用 SwiftUI 文字写，不 baked 进图。
+            // 小组件介绍（1.2.7.008）：进页面直接展示带预览图的 5 张卡片，
+            // 顶部的纯文字目录已删（和下面的卡片重复）。
             // 图是老爷手机上真实小组件的截图裁出来的（老爷定的：一定要和真实小组件一样），
             // 四角已磨成圆角透明底，直接用；AI 生成那 4 张不用（数据对不上），没放进 App。
             // 1.2.9.003：五张全是真实裁图（今日/本周/本月/工资/锁屏）；没有双周这个小组件，
@@ -2219,23 +2023,36 @@ struct WidgetsView: View {
                 }
             }
 
-            Section("取数实测") {
-                Text("点一下当场跑一次小组件用的那条取数（设备直连拉今天、本周、本月和工资），成功失败当场显示；成功了还会顺手写一份快照、通知小组件刷新，不用去桌面删掉重加。")
+            Section("数据同步") {
+                Text("若桌面或锁屏小组件显示延迟，可点击下方按钮手动刷新数据。")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                Button(syncing ? "同步中…" : "立即同步小组件") {
+                Button(syncing ? "同步中…" : "刷新小组件数据") {
                     Task { await syncNow() }
                 }
                 .disabled(syncing)
                 if let syncMessage {
                     Text(syncMessage)
                         .font(.caption)
-                        .foregroundColor(syncOK ? .green : .red)
+                        .foregroundColor(.red)
                 }
             }
         }
-        .navigationTitle("小组件")
+        .navigationTitle("桌面与锁屏小组件")
         .navigationBarTitleDisplayMode(.inline)
+        .overlay(alignment: .bottom) {
+            if showSyncToast {
+                Text("已刷新")
+                    .font(.subheadline)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .background(Color(.label))
+                    .foregroundColor(Color(.systemBackground))
+                    .clipShape(Capsule())
+                    .padding(.bottom, 24)
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: showSyncToast)
     }
 
     /// 介绍图卡片：图 + SwiftUI 标题/说明。方图（今日）居中限宽 200，宽图通栏。
@@ -2259,26 +2076,11 @@ struct WidgetsView: View {
         .padding(.vertical, 4)
     }
 
-    private func widgetRow(name: String, size: String, desc: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            HStack {
-                Text(name)
-                Spacer()
-                Text(size)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            Text(desc)
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-    }
-
-    /// 立即同步：当场跑一次小组件用的设备直连拉数，成功就写一份快照到
+    /// 刷新小组件数据：当场跑一次小组件用的设备直连拉数，成功就写一份快照到
     /// App Group（通的机器上小组件直接读）、通知小组件刷新；失败就直说原因。
+    /// 成功只弹轻量 Toast「已刷新」（1.3.2.013），不再在页面里留大绿框。
     private func syncNow() async {
         syncMessage = nil
-        syncOK = false
         syncing = true
         defer { syncing = false }
         guard let deviceId else {
@@ -2292,47 +2094,14 @@ struct WidgetsView: View {
                 WidgetSnapshotStore.save(snap)
                 WidgetKinds.reloadTimelines()
             }
-            syncOK = true
-            syncMessage = "取数成功（\(Self.timeFormatter.string(from: Date()))），小组件已刷新，去桌面看。"
+            showSyncToast = true
+            Task {
+                try? await Task.sleep(nanoseconds: 1_500_000_000)
+                showSyncToast = false
+            }
         } else {
             syncMessage = "取数失败：云和隧道都没拉到数，检查网络后重试；还不行就把这页截给我。"
         }
     }
 }
 
-// MARK: - 班次设置（1.2.7.001，图一）
-
-/// 班次设置：三个班次的时段（固定，跟倒班方式走；8 小时三班倒）。
-/// 时段不开放改——改时段要连工资一起改（日薪 = 基本工资 ÷ 21.75，跟班长有关），
-/// 等以后要做 12 小时班次时再开。循环方式去「倒班方式设置」改。
-struct ShiftSettingsView: View {
-    private let shifts = ["日班", "中班", "早班"]
-
-    var body: some View {
-        List {
-            Section {
-                ForEach(shifts, id: \.self) { shift in
-                    HStack {
-                        Text(TeamInfo.shortName(shift))
-                            .font(.headline)
-                            .foregroundColor(.white)
-                            .frame(width: 26, height: 26)
-                            .background(ShiftStyle.color(for: shift))
-                            .clipShape(Circle())
-                        Text(shift)
-                        Spacer()
-                        Text(ShiftStyle.timeRange(for: shift))
-                            .foregroundColor(.secondary)
-                    }
-                }
-            }
-            Section {
-                Text("三个班次的时段固定：日班 08:00–16:00，中班 16:00–24:00，早班 00:00–08:00。循环方式（几天一循环、怎么排）在「倒班方式设置」里改。")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-            }
-        }
-        .navigationTitle("班次设置")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-}

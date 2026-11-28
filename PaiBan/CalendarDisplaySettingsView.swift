@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 日历显示设置（1.2.7.001，第 23 条，图三样式）：4 个开关 + 下面实时预览当月小日历。
+/// 日历显示（1.2.7.001，第 23 条，图三样式）：4 个开关 + 下面实时预览当月小日历。
 /// 改了立刻生效（保存到本地 + 同步到服务端 profile，换设备也能同步）。
 /// 「适配第2班次展示」不做——没有第2班次。
 struct CalendarDisplaySettingsView: View {
@@ -20,7 +20,7 @@ struct CalendarDisplaySettingsView: View {
                 Toggle("显示法定节假日", isOn: binding(\.showHolidays))
                 Toggle("显示农历", isOn: binding(\.showLunar))
                 Toggle("当月显示上下月", isOn: binding(\.showAdjacentMonths))
-                Text("改了立即生效。显示法定节假日的日历标注来自服务器节假日数据（每年 11 月更新）；三薪是工资计算概念，不在日历上混着标。")
+                Text("法定节假日数据每年 11 月定期更新；三薪天数仅用于工资核算，不在日历中额外标注。")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -31,7 +31,7 @@ struct CalendarDisplaySettingsView: View {
                     .listRowInsets(EdgeInsets(top: 8, leading: 8, bottom: 8, trailing: 8))
             }
         }
-        .navigationTitle("日历显示设置")
+        .navigationTitle("日历显示")
         .navigationBarTitleDisplayMode(.inline)
         .task {
             settings = store.calendarDisplay

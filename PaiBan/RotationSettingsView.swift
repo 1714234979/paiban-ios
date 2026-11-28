@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// 倒班方式设置（1.2.7.001，第 23 条）：先选排班方式（手动/周期），
+/// 倒班与班次（1.2.7.001，第 23 条）：先选排班方式（手动/周期），
 /// 周期再进分类（四班三倒 5 种方式，每种带循环示意）；只有选中了倒班方式，
 /// 才显示选择班次（选哪个班 + 基准日）；班组名可改。
 /// 样式：精美、简约；循环示意图二风格但紧凑（横排卡片 + 箭头 +「第 N+1 天回到第 1 天」）。
@@ -31,9 +31,27 @@ struct RotationSettingsView: View {
     var body: some View {
         Form {
             Section {
-                Text("先选一种排班方式，再选班次。切方式后日历按新方式算，现有调班/请假记录只重算基础轮次、不删记录。12 小时/6 小时班制的工资口径待定，工资页只显示班次统计、金额暂不算；三班二倒周均 56 小时，超 44 小时法定上限，需综合工时 + 加班费。")
+                Text("切换排班方式仅重新计算基础班次，已有的调班与请假记录会完整保留。")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
+            }
+
+            // 班次时段（只读的「班次设置」已合并到这页顶部）：三个班次的时段固定。
+            Section("班次时段") {
+                ForEach(["日班", "中班", "早班"], id: \.self) { shift in
+                    HStack {
+                        Text(TeamInfo.shortName(shift))
+                            .font(.headline)
+                            .foregroundColor(.white)
+                            .frame(width: 26, height: 26)
+                            .background(ShiftStyle.color(for: shift))
+                            .clipShape(Circle())
+                        Text(shift)
+                        Spacer()
+                        Text(ShiftStyle.timeRange(for: shift))
+                            .foregroundColor(.secondary)
+                    }
+                }
             }
 
             // 排班方式：手动 / 周期两张大卡片（图五样式，收紧）。
@@ -41,11 +59,11 @@ struct RotationSettingsView: View {
                 HStack(spacing: 12) {
                     methodCard(
                         title: "手动排班", subtitle: "班次无周期规律\n灵活性强但需逐日点击",
-                        color: .green, selected: isManual
+                        selected: isManual
                     ) { modeId = RotationModes.manualId }
                     methodCard(
                         title: "周期排班", subtitle: "班次周期固定\n一次生成多月日历",
-                        color: .blue, selected: !isManual
+                        selected: !isManual
                     ) {
                         // 切回周期：默认方式 A（新用户推荐）；已有方式就用已有的。
                         if isManual { modeId = RotationModes.defaultModeId }
@@ -57,7 +75,7 @@ struct RotationSettingsView: View {
 
             if isManual {
                 Section {
-                    Text("手动排班：班次没有周期规律。去手动排班页逐日点班次；没设的当天算休息。调班就是改某天的班。")
+                    Text("适合无固定周期的排班场景，支持按日自由编辑班次，未设置日期默认记为休息。")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                     NavigationLink {
@@ -80,18 +98,26 @@ struct RotationSettingsView: View {
                             Button {
                                 selectMode(mode)
                             } label: {
-                                HStack {
-                                    VStack(alignment: .leading, spacing: 2) {
-                                        Text(mode.name)
-                                            .foregroundColor(.primary)
-                                        Text("\(mode.cycleDays)天一循环 · 休\(mode.restDays)天 · 周均\(PayCalc.jsNum(mode.weeklyHours))小时")
+                                VStack(alignment: .leading, spacing: 4) {
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(mode.name)
+                                                .foregroundColor(.primary)
+                                            Text("\(mode.cycleDays)天一循环 · 休\(mode.restDays)天 · 周均\(PayCalc.jsNum(mode.weeklyHours))小时")
+                                                .font(.caption)
+                                                .foregroundColor(.secondary)
+                                        }
+                                        Spacer()
+                                        if modeId == mode.id {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundColor(.primary)
+                                        }
+                                    }
+                                    // 12h / 6h 班制：只在点选时才在选项下方显示轻提示。
+                                    if modeId == mode.id && mode.isPayTBD {
+                                        Text("该班制当前仅支持班次统计，工资核算适配中。")
                                             .font(.caption)
                                             .foregroundColor(.secondary)
-                                    }
-                                    Spacer()
-                                    if modeId == mode.id {
-                                        Image(systemName: "checkmark.circle.fill")
-                                            .foregroundColor(.green)
                                     }
                                 }
                             }
@@ -160,7 +186,7 @@ struct RotationSettingsView: View {
                         .multilineTextAlignment(.trailing)
                     }
                 }
-                Text("班组名改了，日历、调班、工资页、共享班表里显示的班组名跟着变；已有的调班/请假记录按班组 ID 关联，不因改名丢。")
+                Text("修改后将在日历、工资及共享班表中同步生效，不影响已有的调班与请假记录。")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -193,7 +219,7 @@ struct RotationSettingsView: View {
                 }
             }
         }
-        .navigationTitle("倒班方式设置")
+        .navigationTitle("倒班与班次")
         .navigationBarTitleDisplayMode(.inline)
         .task { syncFromStore() }
         .alert("切换倒班方式", isPresented: $showSwitchConfirm) {
@@ -271,25 +297,25 @@ struct RotationSettingsView: View {
         }
     }
 
-    private func methodCard(title: String, subtitle: String, color: Color, selected: Bool, action: @escaping () -> Void) -> some View {
+    /// 方式卡片（1.3.2.013）：白底卡片 + 深炭黑细描边选中态，统一全站极简风格。
+    private func methodCard(title: String, subtitle: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(title)
                     .font(.headline)
-                    .foregroundColor(.white)
+                    .foregroundColor(.primary)
                 Text(subtitle)
                     .font(.caption)
-                    .foregroundColor(AppStyle.whiteText(opacity: 0.9))
+                    .foregroundColor(.secondary)
             }
             .frame(maxWidth: .infinity, minHeight: 84, alignment: .leading)
             .padding(12)
-            .background(color.gradient)
+            .background(Color(.systemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 14))
             .overlay(
                 RoundedRectangle(cornerRadius: 14)
-                    .fill(Color.white.opacity(selected ? 0.12 : 0))
+                    .stroke(selected ? Color.primary : Color(.systemGray4), lineWidth: selected ? 1.5 : 1)
             )
-            .shadow(color: selected ? Color.black.opacity(0.25) : .clear, radius: 6, y: 2)
         }
         .buttonStyle(.plain)
     }

@@ -46,7 +46,7 @@ struct FeedbackView: View {
                 VStack(alignment: .leading, spacing: 16) {
                 Text("遇到什么问题？")
                     .font(.title2).bold()
-                Text("选一下类型和出问题的页面，再写清楚是哪个月出了问题。发送时会附上最近 24 小时的运行日志（只含 App 自己的运行记录，不含密码）。")
+                Text("请选择问题类型与所在页面，并简要描述具体情况。提交时将自动附带近 24 小时运行日志（不含任何账号密码及隐私数据），以便快速定位。")
                     .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.secondary)
 

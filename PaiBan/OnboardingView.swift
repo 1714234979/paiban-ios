@@ -92,7 +92,7 @@ struct OnboardingView: View {
         VStack(alignment: .leading, spacing: 16) {
             Text("你的班次怎么排？")
                 .appFont(size: AppFont.titleLarge, weight: 700)
-            Text("先选一种排班方式，之后在设置 → 倒班方式设置里随时能改。")
+            Text("先选一种排班方式，之后在设置 → 倒班与班次里随时能改。")
                 .foregroundColor(.secondary)
             Button {
                 method = "manual"
