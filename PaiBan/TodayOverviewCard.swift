@@ -2,9 +2,10 @@ import SwiftUI
 import UIKit
 
 /// 顶部「今日排班」卡片（1.3.2.016，Gemini 升级版规格 + 老爷令重构；
-/// 1.3.3.003：老爷 2026-11-29 01:18 亲口纠正，顶卡标签「预估今日工资」只去「预估」两字、改成「今日工资」，下方「预估 ¥XXX」那行与大数字不动）：
+/// 1.3.3.003：老爷 2026-11-29 01:18 亲口纠正，顶卡标签「预估今日工资」只去「预估」两字、改成「今日工资」，下方「预估 ¥XXX」那行与大数字不动；
+/// 1.3.3.004：老爷 2026-11-29 01:32 发截图亲口令，班次名与时间上下排——班次名放上边放大加粗，时间放下边原字号，休息/请假没时间时同字号透明占位保卡高）：
 /// 上下两区紧凑结构——上行「日期 + 我的班组徽标 | 按需显示的今天按钮」，
-/// 下行「左：班次与状态（实时倒计时） | 右：今日工资 + 眼睛 + 大号金额 + 预估小字」。
+/// 下行「左：班次名（大）+ 时间 + 状态（实时倒计时） | 右：今日工资 + 眼睛 + 大号金额 + 预估小字」。
 /// 高度固定：休息日 / 无工资权限 / 今日数据未到时，金额列用 opacity 0 占位
 /// （看不见但占高度），卡片不因行数变化而一会儿大一会儿小。
 /// 倒计时沿用 TodayLiveState（PayCalc.todayLiveState），每秒走；
@@ -16,7 +17,8 @@ struct TodayOverviewCard: View {
     let dateText: String           // "2026年11月28日 周六"
     let myTeam: String             // "B"
     let isViewingOtherTeam: Bool   // 当前是否在看其他班组
-    let shiftLine: String          // "日班 08:00–16:00" / "休息" / "请假（年假）"
+    let shiftName: String          // "中班" / "早班 + 中班" / "休息" / "请假（年假）" / "—"
+    let shiftTime: String?         // "16:00–24:00"，休息/请假/无数据时为 nil（卡片内透明占位保高度）
     let day: DaySchedule?          // 今天的日程（nil = 今日数据未到）
     let earlyRate: Double
     let midRate: Double
@@ -114,10 +116,16 @@ struct TodayOverviewCard: View {
             let state = liveState(now: now)
             HStack(alignment: .bottom, spacing: 12) {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(shiftLine)
+                    // 1.3.3.004：班次名与时间上下排——名在上放大加粗，时间在下原字号；
+                    // 没时间（休息/请假/无数据）时同字号透明占位，卡高纹丝不动。
+                    Text(shiftName)
+                        .font(.system(size: 18, weight: .bold))
+                        .foregroundStyle(.primary)
+                    Text(shiftTime ?? "08:00–16:00")
                         .font(.system(size: 14, weight: .medium))
                         .monospacedDigit()
                         .foregroundStyle(.primary.opacity(0.84))
+                        .opacity(shiftTime == nil ? 0 : 1)
                     HStack(spacing: 6) {
                         statusDot(state: state)
                         Text(statusText(state: state, now: now))

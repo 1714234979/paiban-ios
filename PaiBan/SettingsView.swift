@@ -1565,6 +1565,9 @@ struct ChangelogView: View {
             }
             if UpdateChecker.installedChannel == "beta" {
                 Section("内测版") {
+                    changelog(version: "1.3.3.004", items: [
+                        "排班页顶卡班次名移到时间上方并放大",
+                    ])
                     changelog(version: "1.3.3.003", items: [
                         "排班页顶卡「预估今日工资」改成「今日工资」，只去掉「预估」两个字",
                         "顶卡金额与下方「预估 ¥XXX」那行不变",

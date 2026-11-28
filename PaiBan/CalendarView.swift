@@ -391,7 +391,8 @@ struct CalendarView: View {
             dateText: todayDateLine,
             myTeam: store.myTeam,
             isViewingOtherTeam: store.viewTeam != store.myTeam,
-            shiftLine: todayShiftLine,
+            shiftName: todayShiftName,
+            shiftTime: todayShiftTime,
             day: store.todaySchedule,
             earlyRate: inputs.earlyRate,
             midRate: inputs.midRate,
@@ -428,8 +429,10 @@ struct CalendarView: View {
         return "\(DateUtil.yearMonthTitle(year: ym.year, month: ym.month))\(day)日 \(DateUtil.weekdayCN(of: today))"
     }
 
-    /// 今天什么班，如“中班 16:00–24:00”；双班写“早班 + 中班 …”；休息写“休息”；请假写“请假（年假）”。
-    private var todayShiftLine: String {
+    /// 今天什么班：名与时间分开给顶卡（1.3.3.004 上下排）。名如“中班”、
+    /// 双班“早班 + 中班”、休息“休息”、请假“请假（年假）”；时间如“16:00–24:00”，
+    /// 休息/请假/无数据时为 nil（卡片内透明占位）。
+    private var todayShiftName: String {
         guard let day = store.todaySchedule else { return "—" }
         if day.onLeave == true {
             let t = day.leaveType ?? ""
@@ -438,9 +441,15 @@ struct CalendarView: View {
         if day.isRest { return "休息" }
         let parts = ShiftStyle.parts(of: day.shift)
         if parts.count > 1 {
-            return parts.joined(separator: " + ") + " " + day.displayTime
+            return parts.joined(separator: " + ")
         }
-        return "\(day.shift) \(day.displayTime)"
+        return day.shift
+    }
+
+    private var todayShiftTime: String? {
+        guard let day = store.todaySchedule else { return nil }
+        if day.onLeave == true || day.isRest { return nil }
+        return day.displayTime
     }
 
     /// 月份标题栏（重做，老爷 2026-11-28 14:30 亲口令）：共用的 MonthHeaderView——
