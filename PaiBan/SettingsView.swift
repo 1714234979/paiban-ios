@@ -1565,6 +1565,10 @@ struct ChangelogView: View {
             }
             if UpdateChecker.installedChannel == "beta" {
                 Section("内测版") {
+                    changelog(version: "1.3.3.002", items: [
+                        "排班页顶卡「预估今日工资」那块删掉了，顶卡只剩日期、班次和倒计时",
+                        "注册页多余提示删掉了",
+                    ])
                     changelog(version: "1.3.3.001", items: [
                         "账号与安全页头像改成居中布局，头像居中放顶部，下面带打码手机号，头像旁的名字删掉",
                     ])

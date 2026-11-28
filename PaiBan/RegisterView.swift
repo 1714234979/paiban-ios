@@ -5,7 +5,7 @@ import SwiftUI
 /// 昵称是显示名，可空，空着就用手机号当显示名；验证码发到注册的手机号，
 /// 服务端核验通过才建账号（1.2.6）。
 /// 样式和登录页同一套：下划线输入框 + 藏青全圆角胶囊按钮 + 协议勾选行；
-/// 大标题不再单独占一行（navigationTitle inline），副标题只剩一行说明。
+/// 大标题不再单独占一行（navigationTitle inline），副标题已按砍提示规矩删掉。
 struct RegisterView: View {
     @Environment(AppStore.self) private var store: AppStore
     @Environment(\.dismiss) private var dismiss
@@ -36,10 +36,6 @@ struct RegisterView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
-                    Text("完成注册后，按引导配置班组与薪资即可使用")
-                        .appFont(size: AppFont.bodySmall)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
                     VStack(spacing: 8) {
                         underlineField(focused: focusedField == .nickname) {
                             TextField("昵称", text: $nickname)
@@ -51,9 +47,6 @@ struct RegisterView: View {
                                 }
                         }
                         HStack {
-                            Text("用于班表展示，建议填写常用姓名")
-                                .appFont(size: AppFont.caption)
-                                .foregroundColor(.secondary)
                             Spacer()
                             Text("\(nickname.count)/10")
                                 .appFont(size: AppFont.caption)
@@ -157,10 +150,6 @@ struct RegisterView: View {
                     .buttonStyle(.plain)
                     .disabled(isBusy || !canRegister)
                     AgreementConsentRow(agreed: $agreedToTerms)
-                    Text("你的排班、请假与工资数据仅本人可见，系统将严格保护个人隐私。")
-                        .appFont(size: AppFont.caption)
-                        .foregroundColor(.secondary)
-                        .multilineTextAlignment(.center)
                 }
                 .padding(.horizontal, 32)
                 .padding(.top, 32)
