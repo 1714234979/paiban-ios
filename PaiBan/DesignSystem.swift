@@ -362,24 +362,3 @@ struct SkeletonBar: View {
     }
 }
 
-/// 金额一键隐藏开关（1.3.2.013）：黑卡右上角的眼睛，点一下排班黑卡与工资页的
-/// 全部金额脱敏为 ¥****，再点恢复；状态存在 Store.hideAmounts（UserDefaults），
-/// 下次进 App 还在。极轻量：白字 0.85 透明度、无底块，只一个小眼睛。
-struct HideAmountsEyeButton: View {
-    @Environment(AppStore.self) private var store: AppStore
-
-    var body: some View {
-        Button {
-            UIImpactFeedbackGenerator(style: .light).impactOccurred()
-            store.hideAmounts.toggle()
-        } label: {
-            Image(systemName: store.hideAmounts ? "eye.slash" : "eye")
-                .font(.system(size: 15))
-                .foregroundColor(AppStyle.whiteText(opacity: 0.85))
-                .padding(6)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(store.hideAmounts ? "显示金额" : "隐藏金额")
-    }
-}
