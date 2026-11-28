@@ -29,7 +29,9 @@ struct ShareScheduleView: View {
                     .keyboardType(.phonePad)
                     .textInputAutocapitalization(.never)
                     .disableAutocorrection(true)
+                    .fieldBackground()
                 TextField("备注（可选）", text: $note)
+                    .fieldBackground()
                 Button {
                     Task { await share() }
                 } label: {

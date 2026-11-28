@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit // 1.3.2.017：保存成功轻震动用 UIImpactFeedbackGenerator（iOS 16 可用，不用 iOS 17 的 sensoryFeedback）
 
 /// 预估工资页：月份步进（1.3.2.016 冷启动回默认月：默认上个月，工资压一个月发），只按月看（全年视图已删）。
 /// 数字在手机本地算（服务端只给排班与工资配置原始数据），切月秒出。
@@ -120,7 +121,12 @@ struct PayView: View {
     /// 进度条只露一条中性灰条、不露占比。
     private func headerCard(for ym: (year: Int, month: Int)) -> some View {
         let pay = store.cachedPay(year: ym.year, month: ym.month)
-        return VStack(alignment: .leading, spacing: 12) {
+        // 1.3.2.017（老爷 2026-11-28 20:40 亲口令，顶卡白框优化）：「当月」按钮从单独
+        // 一行挪进标题行（眼睛左边），只占横向空间、不占纵向空间；整行占位删掉。
+        // 卡片高度只由标题 + 总数 + 构成条 + 三列小字决定；上下内边距 16→12、
+        // 行距 12→10。高度固定仍保（TBD 时构成条与三列小字用 opacity 0 的同结构占位），
+        // 但不再用整行透明占位撑高。
+        return VStack(alignment: .leading, spacing: 10) {
             HStack {
                 // 1.3.2.016：看当月仍叫「本月实发合计」；看别的月叫「{M}月实发合计」
                 //（默认月是上个月，标题写明是几月，免得以为看的是本月）。
@@ -128,6 +134,11 @@ struct PayView: View {
                     .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.secondary)
                 Spacer()
+                // 「当月」按钮：不在默认月（上个月）时才画在标题行里；默认月时直接不画——
+                // 标题行高度由标题 + 眼睛定，按钮显隐不改变行高，不用占位。
+                if PayView.monthIndex(year: ym.year, month: ym.month) != defaultMonth {
+                    backToTodayButton
+                }
                 // 金额一键隐藏（1.3.2.013）：右上角眼睛，点一下本页全部金额脱敏为 ¥****。
                 HideAmountsEyeButton()
             }
@@ -168,18 +179,10 @@ struct PayView: View {
                 }
                 .opacity(0)
             }
-            // 回到今天（1.3.2.016，老爷令 + 固定高度）：行常驻占位，默认月
-            // （上个月）时按钮 opacity 0 + disabled（看得见才可点）；点按回到
-            // 默认月，不是回当月。
-            HStack {
-                Spacer()
-                backToTodayButton
-                    .opacity(PayView.monthIndex(year: ym.year, month: ym.month) != defaultMonth ? 1 : 0)
-                    .disabled(PayView.monthIndex(year: ym.year, month: ym.month) == defaultMonth)
-            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
         .background(AppStyle.surface1)
         .cornerRadius(16)
         .padding(.horizontal, 16)
@@ -200,16 +203,19 @@ struct PayView: View {
         .frame(maxWidth: .infinity)
     }
 
-    /// 回到今天按钮（1.3.2.014，老爷令）：顶卡右下角的小胶囊——不在默认月
-    ///（上个月）时才出现，点按回到默认月（走 goToCurrentMonth）。排班/工资两页
-    /// 一样。样式跟顶卡角标同款（surface2 底 + 主字），轻，不抢顶卡的数字。
-    /// 热区扩到 48pt。
+    /// 「当月」按钮（1.3.2.014 老爷令，1.3.2.017 文案由「回到今天」改成「当月」、
+    /// 并从顶卡底部单独一行挪进标题行）：顶卡标题行里的小胶囊——不在默认月
+    ///（上个月）时才出现，点按回到默认月（走 goToCurrentMonth）。图标
+    /// arrow.counterclockwise，跟排班页「今天」按钮同款；文案改短、更紧凑。
+    /// 落点不变：还是默认月（上个月），不是当月。样式跟顶卡角标同款（surface2 底
+    /// + 主字），轻，不抢顶卡的数字。热区只上下各扩 2pt——标题行本身只有约 28pt 高，
+    /// 扩多了会把标题行撑大（之前在底部单独一行时是 9pt，那时行高由按钮定，没关系）。
     private var backToTodayButton: some View {
         Button(action: goToCurrentMonth) {
             HStack(spacing: 4) {
                 Image(systemName: "arrow.counterclockwise")
                     .font(.system(size: 11, weight: .semibold))
-                Text("回到今天")
+                Text("当月")
                     .appFont(size: AppFont.caption, weight: 600)
             }
             .foregroundColor(AppStyle.onSurface)
@@ -217,10 +223,10 @@ struct PayView: View {
             .padding(.vertical, 5)
             .background(AppStyle.surface2)
             .clipShape(Capsule())
-            .touchTarget(vertical: 9, horizontal: 4)
+            .touchTarget(vertical: 2, horizontal: 4)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("回到今天")
+        .accessibilityLabel("回到当月")
     }
 
 /// 本月实发构成条（1.3.2.014，Gemini 排版）：实发工资（绿）+ 实发奖金（蓝）+
@@ -257,46 +263,41 @@ private struct PayCompositionBar: View {
     static func monthIndex(year: Int, month: Int) -> Int { year * 12 + (month - 1) }
     private func yearMonth(from index: Int) -> (year: Int, month: Int) { (index / 12, index % 12 + 1) }
 
-    /// 某个月的整页内容（1.3.2.010）：黑卡固定页眉 + 明细竖滚。
+    /// 某个月的整页内容（1.3.2.010，1.3.2.017 改）：顶卡放进纵向 ScrollView 里，
+    /// 跟工资明细一起上下滑（滑上去滑出视野、滑回来就回来），不再冻结在顶端。
+    /// 之前顶卡固定在分页器上方（.010 的修法，防嵌套 ScrollView 竖向偏移漂移把卡
+    /// 顶出可视区）；漂移的根因（safe-area 顶边距）已由下面的 .contentMargins(.top, 0)
+    /// 解决，顶卡可以安全地回到 ScrollView 里。月份标题栏仍固定在分页器上方不动，
+    /// 只有白顶卡跟着内容滚；切 Tab 回位、「当月」按钮、构成条、眼睛隐藏都不动。
     /// 单独抽成函数——整页塞在分页器闭包里会让 body 的类型检查超时（编包报错），
     /// 拆出来才能编过（.008 日期格拆 6 块是同一个毛病）。
-    /// 黑卡放在页内、ScrollView 外：跟着月份翻页（在页里），但不跟竖滚走
-    ///（不在 ScrollView 里），嵌套 ScrollView 的竖向偏移漂移再也切不到它。
-    /// 明细（monthBreakdown + syncTimeFooter）仍在 ScrollView 里竖滚。
     /// 落定纠偏那层不要了（编包三连挂的教训）：竖滚位置纠偏要用 ScrollPosition /
     /// .scrollPosition(point:)，全是 iOS 18 才有的 API，部署目标 17.0 编不过；
     /// iOS 17 的 .scrollPosition(id:) 只认视图 id、读不到偏移量，纠不了。
-    /// 黑卡已在 ScrollView 外、切不到它；明细若真机上还漂，再用
-    /// GeometryReader + ScrollViewReader 那套老办法修。
     private func payMonthPage(offset: Int) -> some View {
         let ym = yearMonth(from: baseIndex + offset)
-        return VStack(spacing: 16) {
-            headerCard(for: ym)
-            ScrollView {
-                VStack(spacing: 16) {
-                    monthBreakdown(year: ym.year, month: ym.month)
-                    syncTimeFooter
-                }
-                // 底部留白（1.3.2.012）：右下角悬浮「今天」按钮已挪到导航栏，
-                // 这里不用再给它留 76pt；留 24pt 让明细底部在底栏上方有呼吸余量。
-                .padding(.bottom, 24)
-                // 底部留白（重做，老爷 2026-11-28 14:36 亲口令）：1.3.2.006 加的 88pt
-                // 删掉——那是给自定义底栏留的，底栏已改回原生 TabView（iOS 26+ 液态玻璃 +
-                // 往下滚自动收起），安全区由原生底栏自动处理，不再手动垫大额留白。
-                // 点编辑框以外的地方就收起（丢弃未保存的改动）。Tap 手势只认轻点，
-                // 拖动（滚动/横滑）不会触发，不跟左右滑切月、上下滚动冲突。
-                .onTapGesture {
-                    if editingField != nil { dismissEdit() }
-                }
+        return ScrollView {
+            VStack(spacing: 16) {
+                headerCard(for: ym)
+                monthBreakdown(year: ym.year, month: ym.month)
+                syncTimeFooter
             }
-            // 嵌套 ScrollView 的自动 safe-area 顶边距关掉（1.3.2.010）：
-            // 纵向 ScrollView 嵌在横向分页器里时，系统会按 safe-area 给内容加顶边距，
-            // 是竖向偏移漂移的头号嫌疑；显式写 0，不让它自己加。
-            .contentMargins(.top, 0)
-            // 1.3.0.013：滚动指示条常显（老爷 19:24 说「没有滑动框」）——.visible 没用，
-            // 画廊实拍证明它根本不画出来，改走自绘滑块 AlwaysVisibleScrollIndicator。
-            .modifier(AlwaysVisibleScrollIndicator())
+            // 底部留白（1.3.2.012）：右下角悬浮「今天」按钮已挪到导航栏，
+            // 这里不用再给它留 76pt；留 24pt 让明细底部在底栏上方有呼吸余量。
+            .padding(.bottom, 24)
+            // 点编辑框以外的地方就收起（丢弃未保存的改动）。Tap 手势只认轻点，
+            // 拖动（滚动/横滑）不会触发，不跟左右滑切月、上下滚动冲突。
+            .onTapGesture {
+                if editingField != nil { dismissEdit() }
+            }
         }
+        // 嵌套 ScrollView 的自动 safe-area 顶边距关掉（1.3.2.010）：
+        // 纵向 ScrollView 嵌在横向分页器里时，系统会按 safe-area 给内容加顶边距，
+        // 是竖向偏移漂移的头号嫌疑；显式写 0，不让它自己加。
+        .contentMargins(.top, 0)
+        // 1.3.0.013：滚动指示条常显（老爷 19:24 说「没有滑动框」）——.visible 没用，
+        // 画廊实拍证明它根本不画出来，改走自绘滑块 AlwaysVisibleScrollIndicator。
+        .modifier(AlwaysVisibleScrollIndicator())
     }
 
     /// 骨架延迟 150ms（1.3.2.006）：加载开始后 150ms 再现骨架，数据快回来就不闪；
@@ -380,6 +381,11 @@ private struct PayCompositionBar: View {
                 onTitleTap: { showMonthJump = true }
             )
             .padding(.top, 8)
+            // 1.3.2.017（老爷 2026-11-28 20:45 亲口令）：月份标题栏左右箭头与排班页对齐——
+            // 排班页标题栏外层 VStack 带 16pt 横向边距、工资页没有，箭头差了 16pt；
+            // 这里补 16pt（标题栏自身还有 16pt 内边距，两页箭头离屏边都是 32pt）。
+            // 对称加边，标题仍绝对居中；分页器 pagePadding 仍是 0，明细卡片不动。
+            .padding(.horizontal, 16)
             .sheet(isPresented: $showMonthJump) {
                 MonthJumpSheet(currentIndex: pageIndex, range: pageRange) { goToMonth($0) }
             }
@@ -888,6 +894,8 @@ private struct PayCompositionBar: View {
         let key = String(format: "%04d-%02d", store.payYearMonth.year, store.payYearMonth.month)
         await store.updatePayMonthField(monthKey: key, field: field, value: value)
         editSaving = false
+        // 1.3.2.017：保存成功轻震一下确认（编辑框收起 + 数已更新，再加触感才 unmistakable）。
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
         dismissEdit()
     }
 

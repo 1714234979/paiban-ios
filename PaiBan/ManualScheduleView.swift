@@ -1,9 +1,11 @@
 import SwiftUI
+import UIKit // 1.3.2.017：保存成功轻震动用 UIImpactFeedbackGenerator（iOS 16 可用，不用 iOS 17 的 sensoryFeedback）
 
-/// 手动排班页（1.2.7.002）：月历 + 底部班次按钮，点某天再点班次就是给那天排班。
-/// 样式：精美、简约。周日开头（日一二三四五六）；每天一格：阳历大数字、右上角农历小字、
-/// 下面一个班次色块（休息=青色、白班=绿、夜班=紫、早班=橙、中班=粉）；
-/// 选中的那天描绿边；今天那格底色淡黄；底部是班次按钮 + 右边橙色「完成」。
+/// 手动排班页（1.2.7.002，1.3.2.017 按参考图 3–6 重做版式）：月历 + 底部班次按钮，
+/// 点某天再点班次就是给那天排班。样式：浅灰画布 + 纯白圆角卡 + 藏青强调，
+/// 不用参考图里的大绿大橙按钮。周日开头（日一二三四五六）；每天一格：阳历大数字、
+/// 右上角农历小字、下面一个班次色块（休息=青色、白班=绿、夜班=紫、早班=橙、中班=粉）；
+/// 选中的那天藏青底 + 藏青边；今天那格描绿边；底部是分段选择器风格的班次胶囊 + 藏青「完成」。
 struct ManualScheduleView: View {
     @Environment(AppStore.self) private var store: AppStore
     @Environment(\.dismiss) private var dismiss
@@ -99,48 +101,61 @@ struct ManualScheduleView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // 顶部：手动排班 + 月份左右切。
+            // 顶部：月份左右切（1.3.2.017：删掉与导航标题重复的「手动排班」文字；
+            // 箭头改成与月份标题栏同款 36pt 白底圆框）。
             HStack {
                 Button { shiftMonth(-1) } label: {
-                    Image(systemName: "chevron.left").font(.headline)
+                    Image(systemName: "chevron.left")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(width: 36, height: 36)
+                        .background(AppStyle.surface1, in: Circle())
+                        .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
                 }
+                .buttonStyle(PressableButtonStyle())
                 Spacer()
-                Text("手动排班")
-                    .font(.headline)
                 Text(DateUtil.yearMonthTitle(year: year, month: month))
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
+                    .font(.system(size: 18, weight: .bold))
+                    .monospacedDigit()
                 Spacer()
                 Button { shiftMonth(1) } label: {
-                    Image(systemName: "chevron.right").font(.headline)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 16, weight: .semibold))
+                        .frame(width: 36, height: 36)
+                        .background(AppStyle.surface1, in: Circle())
+                        .shadow(color: .black.opacity(0.05), radius: 4, y: 2)
                 }
+                .buttonStyle(PressableButtonStyle())
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
 
-            // 周几头（周日开头）。
-            HStack(spacing: 0) {
-                ForEach(["日", "一", "二", "三", "四", "五", "六"], id: \.self) { w in
-                    Text(w)
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity)
+            // 月历白卡（1.3.2.017）：周几头 + 格子收进一张纯白圆角卡，卡片与间距收紧。
+            VStack(spacing: 4) {
+                // 周几头（周日开头）。
+                HStack(spacing: 0) {
+                    ForEach(["日", "一", "二", "三", "四", "五", "六"], id: \.self) { w in
+                        Text(w)
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity)
+                    }
                 }
-            }
-            .padding(.horizontal, 8)
-            .padding(.bottom, 4)
+                .padding(.bottom, 4)
 
-            // 月历格子。
-            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 4) {
-                ForEach(0..<cellCount, id: \.self) { idx in
-                    if let date = dateForCell(idx) {
-                        dayCell(date)
-                    } else {
-                        Color.clear.frame(height: 64)
+                // 月历格子。
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 4), count: 7), spacing: 4) {
+                    ForEach(0..<cellCount, id: \.self) { idx in
+                        if let date = dateForCell(idx) {
+                            dayCell(date)
+                        } else {
+                            Color.clear.frame(height: 64)
+                        }
                     }
                 }
             }
-            .padding(.horizontal, 8)
+            .padding(12)
+            .background(AppStyle.surface1, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .padding(.horizontal, 16)
 
             Spacer()
 
@@ -151,24 +166,10 @@ struct ManualScheduleView: View {
                     .padding(.horizontal, 16)
             }
 
-            // 底部完成按钮（1.3.2.007，老爷 13:45 亲口令：砍掉提示文字——
-            // 下面的班次按钮本身就是排班的入口，不用一行字再教一遍）。
-            HStack {
-                Spacer()
-                Button("完成") { dismiss() }
-                    .font(.headline)
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 20)
-                    .padding(.vertical, 8)
-                    .background(Color(red: 0.95, green: 0.55, blue: 0.15))
-                    .clipShape(Capsule())
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-
-            // 班次按钮：白班、夜班、早班、休息、中班、无、+（加自定义班次）。
+            // 底部班次选择条（1.3.2.017）：分段选择器风格的白底胶囊 + 色点；
+            // 「完成」改藏青胶囊（原来的大橙按钮不要了）。
             ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 10) {
+                HStack(spacing: 8) {
                     shiftButton(title: "白班", shift: "日班")
                     shiftButton(title: "夜班", shift: "早班")
                     // 早班（E 码，06–14）是独立的班次，橙色，与 8h 早班（紫，N 码）区分。
@@ -176,18 +177,39 @@ struct ManualScheduleView: View {
                     shiftButton(title: "休息", shift: "休息")
                     shiftButton(title: "中班", shift: "中班")
                     Button("无") { assignNone() }
-                        .buttonStyle(ShiftButtonStyle(color: .gray))
+                        .buttonStyle(ShiftChipStyle())
                     ForEach(customShiftButtons, id: \.code) { item in
-                        Button(item.name) { assignCustom(code: item.code) }
-                            .buttonStyle(ShiftButtonStyle(color: Color(hex: item.color)))
+                        Button { assignCustom(code: item.code) } label: {
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(Color(hex: item.color))
+                                    .frame(width: 8, height: 8)
+                                Text(item.name)
+                            }
+                        }
+                        .buttonStyle(ShiftChipStyle())
                     }
                     Button("+") { showAddCustom = true }
-                        .buttonStyle(ShiftButtonStyle(color: .gray))
+                        .buttonStyle(ShiftChipStyle())
                 }
                 .padding(.horizontal, 16)
             }
-            .padding(.bottom, 16)
+            .padding(.vertical, 4)
+
+            HStack {
+                Spacer()
+                Button("完成") { dismiss() }
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 8)
+                    .background(AppStyle.navyAdaptive)
+                    .clipShape(Capsule())
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
         }
+        .background(AppStyle.pageBackground)
         .navigationTitle("手动排班")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $showAddCustom) {
@@ -224,8 +246,13 @@ struct ManualScheduleView: View {
             }
             .padding(.vertical, 6)
             .padding(.horizontal, 2)
-            .background(selected ? Color.green.opacity(0.15) : (today ? Color.yellow.opacity(0.18) : Color.clear))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            // 1.3.2.017：选中改藏青底 + 藏青边（原来绿底）；今天描绿边（原来淡黄底，
+            // 跟主日历今天格一致）；两者叠加时选中优先。
+            .background(selected ? AppStyle.navyAdaptive.opacity(0.08) : Color.clear, in: RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(selected ? AppStyle.navyAdaptive : (today ? Color.green : Color.clear), lineWidth: 1.5)
+            )
         }
         .buttonStyle(.plain)
         .frame(height: 64)
@@ -235,9 +262,18 @@ struct ManualScheduleView: View {
 
     /// 按钮显示名 + 对应班次名；code 指定时用该码（如早班用 E 码，不与早班 N 码混）；
     /// color 指定时用该色（早班 E 码用橙色，不走 ShiftStyle 的早班紫）。
+    /// 胶囊里带一个色点（1.3.2.017，分段选择器风格）。
     private func shiftButton(title: String, shift: String, code: String? = nil, color: Color? = nil) -> some View {
-        Button(title) { assignShift(shift: shift, code: code) }
-            .buttonStyle(ShiftButtonStyle(color: color ?? ShiftStyle.color(for: shift)))
+        let c = color ?? ShiftStyle.color(for: shift)
+        return Button { assignShift(shift: shift, code: code) } label: {
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(c)
+                    .frame(width: 8, height: 8)
+                Text(title)
+            }
+        }
+        .buttonStyle(ShiftChipStyle())
     }
 
     private var customShiftButtons: [(code: String, name: String, color: String)] {
@@ -301,6 +337,7 @@ struct ManualScheduleView: View {
             Form {
                 Section("自定义班次") {
                     TextField("班次名（如：替班）", text: $customName)
+                        .fieldBackground()
                     HStack {
                         Text("颜色")
                         Spacer()
@@ -335,6 +372,9 @@ struct ManualScheduleView: View {
                                 guard !name.isEmpty else { return }
                                 _ = try await store.addCustomShift(name: name, colorHex: customColorHex)
                                 customName = ""
+                                // 1.3.2.017：保存成功轻震一下 + 关弹窗（之前只关弹窗没震动；
+                                // 失败时 errorText 现在也在弹窗里显示出来，不再静默）。
+                                UIImpactFeedbackGenerator(style: .light).impactOccurred()
                                 showAddCustom = false
                             } catch {
                                 errorText = (error as? APIError)?.message ?? error.localizedDescription
@@ -342,6 +382,12 @@ struct ManualScheduleView: View {
                         }
                     }
                     .disabled(customName.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+                if let errorText {
+                    Section {
+                        Text(errorText)
+                            .foregroundColor(.red)
+                    }
                 }
             }
             .navigationTitle("加自定义班次")
@@ -355,18 +401,20 @@ struct ManualScheduleView: View {
     }
 }
 
-/// 班次按钮样式：圆角胶囊，白字。
-private struct ShiftButtonStyle: ButtonStyle {
-    var color: Color
+/// 班次选择胶囊（1.3.2.017）：白底胶囊 + 细描边 + 主字（分段选择器风格），
+/// 不再是实色底白字（原来那套太抢，跟参考图的大色块一样不要了）。
+private struct ShiftChipStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.subheadline)
             .bold()
-            .foregroundColor(.white)
-            .padding(.horizontal, 16)
+            .foregroundColor(.primary)
+            .padding(.horizontal, 14)
             .padding(.vertical, 8)
-            .background(color)
+            .background(AppStyle.surface1)
             .clipShape(Capsule())
+            .overlay(Capsule().stroke(AppStyle.outline, lineWidth: 1))
+            .shadow(color: .black.opacity(0.04), radius: 3, y: 1)
             .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }

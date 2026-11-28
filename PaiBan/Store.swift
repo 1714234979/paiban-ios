@@ -78,6 +78,8 @@ final class AppStore {
             }
             // 第 30 条：工资权限刚开通（false→true）时，弹工资引导。
             checkPayGuide()
+            // 1.3.2.017（第 8 项）：工资权限刚开通（false→true）时，弹获批弹窗。
+            checkPayAccessGranted()
             // 第 47 条：公积金没填时，弹一次窗让用户填。
             checkHousingFundPrompt()
         }
@@ -1485,6 +1487,28 @@ final class AppStore {
     /// 公积金弹窗（第 47 条）不受影响，照常走 checkHousingFundPrompt。
     private func checkPayGuide() {
         // 空状态做法为准，不再自动弹引导。
+    }
+
+    /// 工资权限获批弹窗开关（1.3.2.017，老爷 2026-11-28 20:37 亲口令）：
+    /// 管理员在后台给了工资权限，App 下次同步到时弹一次窗（MainTabView 的 alert）：
+    /// 「您已获得工资计算权限，是否填写」，「去填写」进工资设置页，「以后再说」关掉。
+    /// 一次授权只弹一次（本地 lastPayAccess 记下已弹过该次授权；payAccess 再由
+    /// true 变 false 又变 true 时才再弹）。检测点在 user 刷新处（didSet），
+    /// 不每进一次页面都弹；首次登录没记过的不弹（可能是注册时就有的权限）。
+    var needsPayAccessGrantedAlert = false
+    /// 「去填写」的落点（1.3.2.017）：MainTabView 的 alert 里置 true，
+    /// SettingsView 的 navigationDestination 推工资设置页；返回时自动清掉。
+    var navigateToPaySettings = false
+
+    private func checkPayAccessGranted() {
+        guard let u = user, u.onboardingDone == true else { return }
+        let key = lastPayAccessKey
+        let hadAccess = UserDefaults.standard.object(forKey: key) as? Bool
+        let now = u.payAccess ?? true
+        UserDefaults.standard.set(now, forKey: key)
+        if hadAccess == false && now {
+            needsPayAccessGrantedAlert = true
+        }
     }
 
     /// 公积金弹窗（第 47 条，1.3.0.001）：公积金没填时，更新后首次打开 App 弹一次窗让用户填。

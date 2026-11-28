@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit // 1.3.2.017：保存成功轻震动用 UIImpactFeedbackGenerator（iOS 16 可用，不用 iOS 17 的 sensoryFeedback）
 
 /// 更换班组（不是单日调班）：选新班组 + 生效日，从生效日零点起排班按新班组算，工资也跟着变。
 /// 历史可多条、可删（至少保留一条）。走 POST / DELETE /api/v1/me/team-history。
@@ -142,6 +143,8 @@ struct TeamChangeView: View {
                 team: newTeam,
                 effectiveFrom: DateUtil.string(from: effectiveFrom)
             )
+            // 1.3.2.017：保存成功轻震一下确认（再加绿字提示，双重确认）。
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
             doneMessage = "已保存：从 \(DateUtil.string(from: effectiveFrom)) 起按 \(newTeam)班排班"
             await store.refreshMonth()
             await store.refreshPayInputs()

@@ -323,6 +323,16 @@ extension View {
             .padding(.horizontal, horizontal)
             .contentShape(Rectangle())
     }
+    /// 看得见的输入框底（1.3.2.017，全站统一）：圆角矩形底色 + 内边距。
+    /// 给 Form/List 行里的裸 TextField / SecureField 用——光有占位文字不够，
+    /// 空占位时框根本看不见（公积金就是这么丢的）。
+    /// 下划线样式（登录/注册/忘记密码）与已有底色的输入框（DayDetail/
+    /// Feedback/工资页行内编辑）不用改。
+    func fieldBackground() -> some View {
+        padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .background(AppStyle.surface2, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
 }
 
 /// 实心小按钮按压反馈（1.3.2.007，iOS.docx §3.3 + 规范 §4.2）：

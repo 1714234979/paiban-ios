@@ -28,13 +28,15 @@ struct TodayOverviewCard: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
-        VStack(spacing: 13) {
+        VStack(spacing: 10) {
             headerRow
             Divider().opacity(0.45)
             bottomRow
         }
         .padding(.horizontal, 16)
-        .padding(.vertical, 14)
+        // 1.3.2.017：上下内边距 14→12，行距 13→10——「今天」胶囊本来就在标题行里，
+        // 不增加卡高；两张卡一样紧凑。
+        .padding(.vertical, 12)
         .background(AppStyle.surface1, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .shadow(color: .black.opacity(0.035), radius: 10, y: 3)
         .animation(.snappy(duration: 0.22), value: showBackToToday)
@@ -51,7 +53,8 @@ struct TodayOverviewCard: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.85)
                 .layoutPriority(1)
-            // 徽标：看别班时可点回本班（轻震动 + 箭头）；看自己班时是静态标签，不可点。
+            // 徽标（1.3.2.017，老爷 2026-11-28 20:47 亲口令）：文案统一成「回到本班」——
+            // 看别班时可点回本班（强调色 + 回转箭头 + 轻震动）；看自己班时是静态标签（次要色、不可点）。
             Button {
                 if isViewingOtherTeam {
                     UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -59,7 +62,7 @@ struct TodayOverviewCard: View {
                 }
             } label: {
                 HStack(spacing: 3) {
-                    Text("\(myTeam)班 · 我的今日")
+                    Text("回到本班")
                         .font(.system(size: 11, weight: .medium))
                     if isViewingOtherTeam {
                         Image(systemName: "arrow.uturn.left")

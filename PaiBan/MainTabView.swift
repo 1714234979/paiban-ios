@@ -98,6 +98,18 @@ struct MainTabView: View {
                     store.selectedTab = 0
                 }
             }
+            // 工资权限获批弹窗（1.3.2.017）：管理员给了工资权限（false→true），
+            // 下次同步到时弹一次；「去填写」切设置 Tab 并推工资设置页，
+            // 「以后再说」关掉；一次授权只弹一次（见 Store.checkPayAccessGranted）。
+            .alert("您已获得工资计算权限，是否填写", isPresented: Bindable(store).needsPayAccessGrantedAlert) {
+                Button("去填写") {
+                    store.selectedTab = 2
+                    store.navigateToPaySettings = true
+                }
+                Button("以后再说", role: .cancel) { }
+            } message: {
+                Text("管理员已为您开通工资计算权限，现在去填写工资设置吗？")
+            }
     }
 }
 

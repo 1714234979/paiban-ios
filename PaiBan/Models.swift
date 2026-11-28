@@ -1117,6 +1117,25 @@ enum PhoneUtil {
     }
 }
 
+/// 密码规则（1.3.2.017，老爷令改强，微信式老规则）：8–16 位，须同时包含字母和数字。
+/// 服务端同一条规则（isValidPassword，2026-11-28 已部署）：注册/重置/改密码/
+/// 管理员代建代改六处全按这条校验。冒号、符号都允许，不再提冒号限制。
+/// 已设密码不强制改——登录只比对哈希不校验规则，只在下次改密码时按新规来。
+/// 客户端先校验（注册/忘记密码/修改密码三处），不合规就地提示，别等服务端报错。
+enum PasswordUtil {
+    /// 规则提醒（密码框下方小字）：「密码为 8-16 位，须同时包含字母和数字」。
+    static let ruleHint = "密码为 8-16 位，须同时包含字母和数字"
+    /// 占位文案（密码框内）：「8-16 位，字母+数字」。
+    static let placeholder = "8-16 位，字母+数字"
+    /// 校验：8–16 位，且至少一个字母（A–Z/a–z）、至少一个数字（0–9）。
+    static func isValid(_ s: String) -> Bool {
+        guard s.count >= 8, s.count <= 16 else { return false }
+        let hasLetter = s.contains { $0.isLetter && $0.isASCII }
+        let hasDigit = s.contains { $0.isNumber && $0.isASCII }
+        return hasLetter && hasDigit
+    }
+}
+
 struct PublicUser: Codable, Equatable {
     var id: String?
     var username: String?

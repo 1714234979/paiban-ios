@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit // 1.3.2.017：保存成功轻震动用 UIImpactFeedbackGenerator（iOS 16 可用，不用 iOS 17 的 sensoryFeedback）
 
 /// 新用户引导（注册后、onboardingDone=false 时只显示一次），1.2.7.001：
 /// 只问排班（排班方式 + 倒班方式/班组/基准日），工资相关的选择全部隐藏
@@ -88,12 +89,12 @@ struct OnboardingView: View {
     }
 
     /// 第 1 步：排班方式（图五样式，两张大卡片）。
+    /// 1.3.2.017：点卡片只选中（高亮），不跳页；选中后在同页展开对应内容——
+    /// 手动显示「打开手动排班」入口，周期显示方式列表；点「下一步」才进第 2 步。
     private var stepMethod: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("你的班次怎么排？")
                 .appFont(size: AppFont.titleLarge, weight: 700)
-            Text("先选一种排班方式，之后在设置 → 倒班与班次里随时能改。")
-                .foregroundColor(.secondary)
             Button {
                 method = "manual"
             } label: {
@@ -110,6 +111,18 @@ struct OnboardingView: View {
                     RoundedRectangle(cornerRadius: 14)
                         .fill(Color.white.opacity(method == "manual" ? 0.12 : 0))
                 )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color.white.opacity(method == "manual" ? 0.9 : 0), lineWidth: 2)
+                )
+                .overlay(alignment: .topTrailing) {
+                    if method == "manual" {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 22))
+                            .foregroundColor(.white)
+                            .padding(10)
+                    }
+                }
                 .shadow(color: method == "manual" ? Color.black.opacity(0.25) : .clear, radius: 6, y: 2)
             }
             .buttonStyle(.plain)
@@ -129,9 +142,102 @@ struct OnboardingView: View {
                     RoundedRectangle(cornerRadius: 14)
                         .fill(Color.white.opacity(method == "periodic" ? 0.12 : 0))
                 )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color.white.opacity(method == "periodic" ? 0.9 : 0), lineWidth: 2)
+                )
+                .overlay(alignment: .topTrailing) {
+                    if method == "periodic" {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 22))
+                            .foregroundColor(.white)
+                            .padding(10)
+                    }
+                }
                 .shadow(color: method == "periodic" ? Color.black.opacity(0.25) : .clear, radius: 6, y: 2)
             }
             .buttonStyle(.plain)
+            // 选中后在同页展开对应内容（照设置页的逻辑）：手动给「打开手动排班」入口，
+            // 周期给方式列表；不跳页。
+            if isManual {
+                NavigationLink {
+                    ManualScheduleView()
+                } label: {
+                    HStack {
+                        Text("打开手动排班")
+                            .appFont(size: AppFont.headline, weight: 600)
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(16)
+                    .background(AppStyle.surface1)
+                    .clipShape(RoundedRectangle(cornerRadius: 14))
+                }
+                .buttonStyle(.plain)
+            } else {
+                modeListContent
+            }
+        }
+    }
+
+    /// 倒班方式列表（1.3.2.017）：第 1 步选中「周期排班」时在同页展开；
+    /// 第 2 步不再列，只留班组 + 基准日 + 循环示意。内容与设置页同一套（分类 + 即将推出）。
+    private var modeListContent: some View {
+        Group {
+            // 1.2.7.002：全部方式按分类列出（四班三倒 5 种 + 新 15 种）；六班三倒序列未核实，继续留「即将推出」。
+            // 第 32 条：行信息与设置页对齐（小时/班、周均小时、备注），不然 12 天/4 天的
+            // 只看名字和循环天数不好分辨——引导里四班三倒 5 种本来就全列着，缺的是这些。
+            ForEach(RotationModes.categories, id: \.title) { cat in
+                Text(cat.title)
+                    .appFont(size: AppFont.bodySmall).bold()
+                    .padding(.top, 4)
+                ForEach(cat.ids.compactMap { RotationModes.mode(id: $0) }) { mode in
+                    Button {
+                        modeId = mode.id
+                        // 班组跟着方式走：新方式没有当前班就回到第一个班。
+                        if let ids = RotationModes.mode(id: mode.id)?.teamIds, !ids.contains(team) {
+                            team = ids.first ?? "A"
+                        }
+                    } label: {
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(mode.name)
+                                    .foregroundColor(.primary)
+                                Text("\(mode.cycleDays)天一循环 · 休\(mode.restDays)天 · 周均\(PayCalc.jsNum(mode.weeklyHours))小时")
+                                    .appFont(size: AppFont.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            if modeId == mode.id {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.green)
+                            }
+                        }
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(modeId == mode.id ? Color.blue.opacity(0.08) : Color(.secondarySystemBackground))
+                    .cornerRadius(10)
+                }
+            }
+            ForEach(RotationModes.comingSoon, id: \.category) { item in
+                HStack {
+                    Text(item.category)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Text("即将推出")
+                        .appFont(size: AppFont.caption)
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color(.systemGray5))
+                        .cornerRadius(6)
+                }
+                .padding(10)
+                .background(Color(.secondarySystemBackground))
+                .cornerRadius(10)
+            }
         }
     }
 
@@ -141,67 +247,11 @@ struct OnboardingView: View {
             if isManual {
                 Text("你在哪个班？")
                     .appFont(size: AppFont.titleLarge, weight: 700)
-                Text("手动排班没有周期规律。选好班组后，去排班页点某一天设当天班次。")
-                    .foregroundColor(.secondary)
             } else {
-                Text("选倒班方式和班组")
+                // 1.3.2.017：方式列表已移到第 1 步（选完才进这步），这里只留
+                // 班组 + 基准日 + 循环示意。
+                Text("选班组和基准日")
                     .appFont(size: AppFont.titleLarge, weight: 700)
-                Text("方式 A 是最标准的 8 天循环。班组数跟着方式走（五班三倒 5 个班，三班二倒 3 个班）。")
-                    .foregroundColor(.secondary)
-                // 1.2.7.002：全部方式按分类列出（四班三倒 5 种 + 新 15 种）；六班三倒序列未核实，继续留「即将推出」。
-                // 第 32 条：行信息与设置页对齐（小时/班、周均小时、备注），不然 12 天/4 天的
-                // 只看名字和循环天数不好分辨——引导里四班三倒 5 种本来就全列着，缺的是这些。
-                ForEach(RotationModes.categories, id: \.title) { cat in
-                    Text(cat.title)
-                        .appFont(size: AppFont.bodySmall).bold()
-                        .padding(.top, 4)
-                    ForEach(cat.ids.compactMap { RotationModes.mode(id: $0) }) { mode in
-                        Button {
-                            modeId = mode.id
-                            // 班组跟着方式走：新方式没有当前班就回到第一个班。
-                            if let ids = RotationModes.mode(id: mode.id)?.teamIds, !ids.contains(team) {
-                                team = ids.first ?? "A"
-                            }
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(mode.name)
-                                        .foregroundColor(.primary)
-                                    Text("\(mode.cycleDays)天一循环 · 休\(mode.restDays)天 · 周均\(PayCalc.jsNum(mode.weeklyHours))小时")
-                                        .appFont(size: AppFont.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                                Spacer()
-                                if modeId == mode.id {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundColor(.green)
-                                }
-                            }
-                        }
-                        .padding(10)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(modeId == mode.id ? Color.blue.opacity(0.08) : Color(.secondarySystemBackground))
-                        .cornerRadius(10)
-                    }
-                }
-                ForEach(RotationModes.comingSoon, id: \.category) { item in
-                    HStack {
-                        Text(item.category)
-                            .foregroundColor(.secondary)
-                        Spacer()
-                        Text("即将推出")
-                            .appFont(size: AppFont.caption)
-                            .foregroundColor(.secondary)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color(.systemGray5))
-                            .cornerRadius(6)
-                    }
-                    .padding(10)
-                    .background(Color(.secondarySystemBackground))
-                    .cornerRadius(10)
-                }
-
                 // 第 32 条：选中方式的循环示意（和设置页同一套 CyclePreviewView），
                 // 选完一眼就能看到这方式每天上什么班，不用凭名字猜。
                 if let mode = RotationModes.mode(id: modeId) {
@@ -403,6 +453,7 @@ struct PayGuideView: View {
                     .keyboardType(.decimalPad)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 120)
+                    .fieldBackground()
             }
             HStack {
                 Text("奖金系数")
@@ -411,10 +462,8 @@ struct PayGuideView: View {
                     .keyboardType(.decimalPad)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 120)
+                    .fieldBackground()
             }
-            Text("不知道填多少就问管理员，或先按默认的 2420 / 1.0，之后在设置 → 工资设置里改。")
-                .appFont(size: AppFont.caption)
-                .foregroundColor(.secondary)
         }
     }
 
@@ -433,6 +482,7 @@ struct PayGuideView: View {
                     .keyboardType(.decimalPad)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 120)
+                    .fieldBackground()
             }
             if let base = derivedBase {
                 HStack {
@@ -505,10 +555,8 @@ struct PayGuideView: View {
                     .keyboardType(.numberPad)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 120)
+                    .fieldBackground()
             }
-            Text("填完点「完成」，工资页就按这些数算。以后在设置 → 工资设置里随时能改。")
-                .appFont(size: AppFont.caption)
-                .foregroundColor(.secondary)
         }
     }
 
@@ -578,6 +626,7 @@ struct PayGuideView: View {
 /// 「以后再说」只关掉这次弹窗，不记完成——下次进软件还会再弹，直到填了为止。
 struct HousingFundPromptView: View {
     @Environment(AppStore.self) private var store: AppStore
+    @Environment(\.dismiss) private var dismiss
 
     @State private var housingFundText = ""
     @State private var errorText: String?
@@ -586,16 +635,18 @@ struct HousingFundPromptView: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: AppStyle.sectionSpacing) {
-                Text("公积金按工资条上的实际月扣金额填。以前按缴费基数×6.8% 反推，算出来的和工资条对不上，所以现在直接填；不填按 0 算（不扣公积金）。")
+                // 1.3.2.017：长段说明收成一句话，要点（照工资条填、不填按 0 算）留在这里。
+                Text("按工资条上的实际月扣金额填，不填按 0 算。")
                     .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.secondary)
                 HStack {
                     Text("公积金")
                     Spacer()
-                    TextField("", text: $housingFundText)
+                    TextField("输入金额", text: $housingFundText)
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)
                         .frame(width: 140)
+                        .fieldBackground()
                 }
                 .font(.body)
                 if let errorText {
@@ -646,7 +697,13 @@ struct HousingFundPromptView: View {
         do {
             try await store.saveProfile(paySettings: ["housingFund": value])
             await store.refreshPay()
+            // 1.3.2.017（bug：点了保存没反应）：以前只把 needsHousingFundPrompt 置 false，
+            // 靠 ContentView 的 sheet 绑定关页面——没有显式 dismiss、没有震动、没有提示，
+            // 绑定一旦没传过去页面就原地不动。成功后三件套：轻震一下 + 置 false + 显式 dismiss，
+            // 页面必定关掉。
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
             store.needsHousingFundPrompt = false
+            dismiss()
         } catch {
             errorText = (error as? APIError)?.message ?? error.localizedDescription
         }

@@ -4,9 +4,11 @@ import SwiftUI
 /// 两种方式都能进——账号密码登录 / 手机号验证码登录；没有一键登录（阿里云一键登录
 /// 免费次数只有 100 次，不够用，1.2.6 不做、不留入口）。
 /// 输入框是下划线样式（只有底部细线，不要方框直角），登录按钮是全圆角胶囊；
-/// 两种方式在底部「其他登录方式」用圆形图标切换。验证码登录：输手机号 → 点获取
-/// 验证码（60 秒倒计时）→ 输 6 位码 → 登录；新手机号会自动建账号（用户名是
+/// 两种方式用输入框上方的双 Tab（分段选择器）切换，版面不跳动。
+/// 验证码登录：输手机号 → 点获取验证码（60 秒倒计时）→ 输 6 位码 → 登录；新手机号会自动建账号（用户名是
 /// 「手机+后 4 位」），昵称在设置页改。错误中文原样展示。
+/// 1.3.2.017：主按钮下方加协议勾选行（默认未勾选），未勾选点登录拦住并提示；
+/// 品牌副标题「8天一轮倒班」已删；登录页验证码提示已删（砍提示规矩）。
 struct LoginView: View {
     @Environment(AppStore.self) private var store: AppStore
 
@@ -32,12 +34,15 @@ struct LoginView: View {
     @State private var isBusy = false
     @State private var showRegister = false
     @State private var showForgotPassword = false
+    /// 协议勾选（1.3.2.017）：默认未勾选；未勾选点登录拦住并提示。
+    @State private var agreedToTerms = false
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 24) {
                     header
+                    modePicker
                     formCard
                     if let errorText {
                         Text(errorText)
@@ -47,6 +52,7 @@ struct LoginView: View {
                             .padding(.horizontal)
                     }
                     loginButton
+                    AgreementConsentRow(agreed: $agreedToTerms)
                     if loginMode == .password {
                         HStack {
                             registerLink
@@ -58,7 +64,6 @@ struct LoginView: View {
                         }
                     }
                     Spacer(minLength: 24)
-                    otherMethods
                     versionLine
                 }
                 .padding(.horizontal, 32)
@@ -80,6 +85,17 @@ struct LoginView: View {
         }
     }
 
+    /// 登录方式双 Tab（1.3.2.017）：输入框上方分段选择器，替代底部两个大圆按钮；
+    /// 切方式时版面不跳动、错误提示清掉。
+    private var modePicker: some View {
+        Picker("登录方式", selection: $loginMode) {
+            Text(LoginMode.password.rawValue).tag(LoginMode.password)
+            Text(LoginMode.sms.rawValue).tag(LoginMode.sms)
+        }
+        .pickerStyle(.segmented)
+        .onChange(of: loginMode) { _ in errorText = nil }
+    }
+
     private var header: some View {
         VStack(spacing: 8) {
             ZStack {
@@ -93,9 +109,6 @@ struct LoginView: View {
             Text("排班空间")
                 .font(.title)
                 .bold()
-            Text("8天一轮倒班")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
         }
     }
 
@@ -185,14 +198,10 @@ struct LoginView: View {
                     .disabled(smsSending || smsCountdown > 0 || !isValidPhone(phone))
                 }
             }
-            Text("新手机号登录会自动建账号；已有账号先在设置页绑手机号，绑完就能用验证码登录。")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .padding(.top, 8)
         }
     }
 
-    /// 全圆角胶囊登录按钮（1.2.6）。
+    /// 全圆角胶囊登录按钮（1.2.6）。未填内容时置灰禁用（1.3.2.017，和注册页统一）。
     private var loginButton: some View {
         Button {
             Task { await doLogin() }
@@ -206,7 +215,7 @@ struct LoginView: View {
             }
             .frame(maxWidth: .infinity)
             .frame(height: AppStyle.buttonHeight)
-            .background(AppStyle.navyAdaptive)
+            .background(canLogin ? AppStyle.navyAdaptive : Color(.systemGray3))
             .foregroundColor(.white)
             .cornerRadius(AppStyle.buttonHeight / 2)
         }
@@ -229,51 +238,6 @@ struct LoginView: View {
         .font(.subheadline)
     }
 
-    /// 底部「其他登录方式」：圆形图标切换两种登录方式（1.2.6；只有密码和验证码两种）。
-    private var otherMethods: some View {
-        VStack(spacing: 16) {
-            HStack(spacing: 12) {
-                Rectangle()
-                    .fill(Color(.separator))
-                    .frame(height: 1)
-                Text("其他登录方式")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Rectangle()
-                    .fill(Color(.separator))
-                    .frame(height: 1)
-            }
-            HStack(spacing: 56) {
-                methodButton(mode: .password, icon: "lock.fill", label: "密码登录")
-                methodButton(mode: .sms, icon: "message.fill", label: "验证码登录")
-            }
-        }
-    }
-
-    private func methodButton(mode: LoginMode, icon: String, label: String) -> some View {
-        let isActive = loginMode == mode
-        return Button {
-            loginMode = mode
-            errorText = nil
-        } label: {
-            VStack(spacing: 6) {
-                ZStack {
-                    Circle()
-                        .fill(isActive ? AppStyle.navyAdaptive : AppStyle.surface2)
-                        .frame(width: 56, height: 56)
-                        .shadow(color: isActive ? Color.black.opacity(0.15) : .clear, radius: 4, y: 2)
-                    Image(systemName: icon)
-                        .font(.system(size: 22))
-                        .foregroundColor(isActive ? .white : .secondary)
-                }
-                Text(label)
-                    .font(.caption)
-                    .foregroundColor(isActive ? .primary : .secondary)
-            }
-        }
-        .buttonStyle(.plain)
-    }
-
     /// 底部当前版本号：从 bundle 读，升版自动跟着变。
     private var versionLine: some View {
         Text("当前版本 \(appVersion)")
@@ -288,6 +252,11 @@ struct LoginView: View {
 
     private func doLogin() async {
         errorText = nil
+        // 1.3.2.017：未勾选协议先拦住并提示（别静默失败）。
+        guard agreedToTerms else {
+            errorText = "请先阅读并同意《用户使用协议》和《隐私协议》"
+            return
+        }
         isBusy = true
         defer { isBusy = false }
         do {
@@ -379,10 +348,6 @@ struct ForgotPasswordView: View {
 
     private var formBody: some View {
         VStack(spacing: 24) {
-            Text("用绑定手机号收个验证码，验过就能设新密码。")
-                .font(.subheadline)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
             VStack(spacing: 8) {
                 underlineField(focused: focusedField == .phone) {
                     TextField("请输入手机号", text: $phone)
@@ -413,10 +378,10 @@ struct ForgotPasswordView: View {
                     HStack(spacing: 8) {
                         Group {
                             if showPassword {
-                                TextField("请输入新密码（至少 6 位）", text: $newPassword)
+                                TextField(PasswordUtil.placeholder, text: $newPassword)
                                     .focused($focusedField, equals: .newPassword)
                             } else {
-                                SecureField("请输入新密码（至少 6 位）", text: $newPassword)
+                                SecureField(PasswordUtil.placeholder, text: $newPassword)
                                     .focused($focusedField, equals: .newPassword)
                             }
                         }
@@ -447,6 +412,12 @@ struct ForgotPasswordView: View {
                         }
                     }
                 }
+                // 1.3.2.017：密码规则提醒（小字、次要色）；冒号限制已去掉，不再提冒号。
+                Text(PasswordUtil.ruleHint)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 12)
             }
             if let errorText {
                 Text(errorText)
@@ -518,7 +489,7 @@ struct ForgotPasswordView: View {
 
     private var canReset: Bool {
         PhoneUtil.isValid(phone) && smsCode.count == 6
-            && newPassword.count >= 6 && !newPassword.contains(":")
+            && PasswordUtil.isValid(newPassword)
             && confirmPassword == newPassword
     }
 
@@ -547,8 +518,8 @@ struct ForgotPasswordView: View {
             errorText = "两次输入的新密码不一致"
             return
         }
-        guard !newPassword.contains(":") else {
-            errorText = "新密码不能含冒号"
+        guard PasswordUtil.isValid(newPassword) else {
+            errorText = PasswordUtil.ruleHint
             return
         }
         isBusy = true

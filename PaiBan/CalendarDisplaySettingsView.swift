@@ -20,9 +20,6 @@ struct CalendarDisplaySettingsView: View {
                 Toggle("显示法定节假日", isOn: binding(\.showHolidays))
                 Toggle("显示农历", isOn: binding(\.showLunar))
                 Toggle("当月显示上下月", isOn: binding(\.showAdjacentMonths))
-                Text("法定节假日数据每年 11 月定期更新；三薪天数仅用于工资核算，不在日历中额外标注。")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
             }
 
             // 实时预览（图三样式）：当月小日历，按当前开关显示。

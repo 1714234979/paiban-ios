@@ -256,7 +256,15 @@ struct CalendarView: View {
                 Button {
                     showShareSchedule = true
                 } label: {
+                    // 1.3.2.017（老爷 2026-11-28 20:45 亲口令）：分享图标在玻璃圆框里偏了——
+                    // 系统玻璃圆框按 label 尺寸画，裸 Image 的 label 是字形紧包框，圆框与
+                    // 字形不同心；给 label 定死 36×36 方框，圆框必与按钮同心。
+                    // square.and.arrow.up 的视觉重心偏下（箭头细、方框重在下半），
+                    // 再上移 1pt 回到光学中心。
                     Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 17, weight: .semibold))
+                        .frame(width: 36, height: 36)
+                        .offset(y: -1)
                 }
                 .accessibilityLabel("共享班表")
             }

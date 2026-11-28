@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit // 1.3.2.017：保存成功轻震动用 UIImpactFeedbackGenerator（iOS 16 可用，不用 iOS 17 的 sensoryFeedback）
 
 /// 倒班与班次（1.2.7.001，第 23 条）：先选排班方式（手动/周期），
 /// 周期再进分类（四班三倒 5 种方式，每种带循环示意）；只有选中了倒班方式，
@@ -12,6 +13,8 @@ struct RotationSettingsView: View {
     @State private var baseDate: Date
     @State private var teamNames: [String]
     @State private var selectedModeId: String?
+    /// 倒班方式分组默认展开哪一类（1.3.2.017）：只展开当前选中方式所在的分类，其余收起。
+    @State private var expandedCategory: String?
     @State private var isBusy = false
     @State private var errorText: String?
     @State private var doneMessage: String?
@@ -30,12 +33,6 @@ struct RotationSettingsView: View {
 
     var body: some View {
         Form {
-            Section {
-                Text("切换排班方式仅重新计算基础班次，已有的调班与请假记录会完整保留。")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-            }
-
             // 班次时段（只读的「班次设置」已合并到这页顶部）：三个班次的时段固定。
             Section("班次时段") {
                 ForEach(["日班", "中班", "早班"], id: \.self) { shift in
@@ -75,9 +72,6 @@ struct RotationSettingsView: View {
 
             if isManual {
                 Section {
-                    Text("适合无固定周期的排班场景，支持按日自由编辑班次，未设置日期默认记为休息。")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
                     NavigationLink {
                         ManualScheduleView()
                     } label: {
@@ -91,9 +85,16 @@ struct RotationSettingsView: View {
                     }
                 }
             } else {
-                // 周期：按分类列出全部方式（1.2.7.002：20 种）。
+                // 周期（1.3.2.017）：按分类可折叠分组（DisclosureGroup），默认只展开
+                // 当前选中方式所在的分类，其余收起；选中态与「即将推出」分区不动。
                 ForEach(RotationModes.categories, id: \.title) { cat in
-                    Section(cat.title) {
+                    DisclosureGroup(isExpanded: Binding(
+                        get: { expandedCategory == cat.title },
+                        set: { isOpen in
+                            if isOpen { expandedCategory = cat.title }
+                            else if expandedCategory == cat.title { expandedCategory = nil }
+                        }
+                    )) {
                         ForEach(RotationModes.allModes.filter { cat.ids.contains($0.id) }) { mode in
                             Button {
                                 selectMode(mode)
@@ -122,6 +123,8 @@ struct RotationSettingsView: View {
                                 }
                             }
                         }
+                    } label: {
+                        Text(cat.title)
                     }
                 }
 
@@ -184,11 +187,9 @@ struct RotationSettingsView: View {
                             set: { setTeamName($0, for: teamId) }
                         ))
                         .multilineTextAlignment(.trailing)
+                        .fieldBackground()
                     }
                 }
-                Text("修改后将在日历、工资及共享班表中同步生效，不影响已有的调班与请假记录。")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
             }
 
             Section {
@@ -264,6 +265,8 @@ struct RotationSettingsView: View {
         baseDate = DateUtil.date(from: r.baseDate) ?? Date()
         teamNames = r.teamNames
         selectedModeId = r.isManual ? nil : r.modeId
+        // 默认只展开当前选中方式所在的分类（1.3.2.017）。
+        expandedCategory = RotationModes.categories.first { $0.ids.contains(r.modeId) }?.title
     }
 
     private func save() async {
@@ -291,6 +294,8 @@ struct RotationSettingsView: View {
                 _ = try await store.api.addTeamHistory(team: team, effectiveFrom: r.baseDate)
             }
             try await store.saveRotation(r)
+            // 1.3.2.017：保存成功轻震一下确认（再加绿字提示，双重确认）。
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
             doneMessage = isManual ? "已保存：手动排班，去排班页逐日设班次。" : "已保存：\(selectedMode?.name ?? "") · \(r.teamName(for: team))班，基准日 \(r.baseDate)。"
         } catch {
             errorText = (error as? APIError)?.message ?? error.localizedDescription
