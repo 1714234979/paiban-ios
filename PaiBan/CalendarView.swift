@@ -1059,10 +1059,10 @@ struct MonthPageView: View {
                         isToday: day.date == todayStr,
                         isSelected: isSelected(day.date),
                         isTriplePay: item.isTriplePay,
-                        isFlashing: flashDate == day.date,
                         precomputedHolidayMark: .some(item.holidayMark),
                         precomputedLunarText: item.lunarText,
-                        precomputedLunarRed: item.isLunarRed
+                        precomputedLunarRed: item.isLunarRed,
+                        isFlashing: flashDate == day.date
                     )
                     .frame(maxWidth: .infinity)
                 }
