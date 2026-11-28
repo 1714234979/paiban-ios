@@ -1237,7 +1237,11 @@ struct DayCell: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(isToday ? Color.green : (isSelected ? AppStyle.navyAdaptive : Color.clear), lineWidth: isToday ? 2 : 1.5)
+                // 1.3.2.018（老爷 2026-11-28 21:33 亲口定）：描边做均匀——原来今天绿框 2pt、
+                // 选中藏青框 1.5pt 粗细不一，且 .stroke 是居中描边、外侧一半容易被格子裁掉，
+                // 看着一边粗一边细。改成统一 1.5pt + .strokeBorder（描边全收进框内、
+                // 不出界、不被裁），形状仍是圆角矩形、不换。
+                .strokeBorder(isToday ? Color.green : (isSelected ? AppStyle.navyAdaptive : Color.clear), lineWidth: 1.5)
         )
         // 选中框切换（1.3.2.007，iOS.docx §3.3）：克制的高阻尼弹簧，禁止过冲。
         .animation(.spring(response: 0.28, dampingFraction: 0.86), value: isSelected)

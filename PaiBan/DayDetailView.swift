@@ -121,8 +121,10 @@ struct DayDetailView: View {
     // MARK: 请假流程状态
 
     @State private var showLeaveForm = false
-    @State private var showLeaveRangeForm = false
-    @State private var leaveType = "年假"
+    /// 请假方式：单日 / 多日（1.3.2.018：请一段假收进请假卡内，不再是独立入口）。
+    @State private var leaveMode = "单日"
+    /// 旧记录里的「年假」读出来时归一到「年休假」（与 leaveTypes 合并去重配套）。
+    @State private var leaveType = "年休假"
     @State private var leaveNote = ""
     @State private var rangeStart = Date()
     @State private var rangeEnd = Date()
@@ -146,22 +148,23 @@ struct DayDetailView: View {
     @State private var errorText: String?
     @State private var doneMessage: String?
 
+    /// 连班禁令弹窗（1.3.2.018：黄色大框收进操作栏右上角「? 规则」按钮，点开弹窗看）。
+    @State private var showBanRules = false
+
     /// sheet 高度自适应内容（1.1.4）：原来 sheet 默认近乎全屏，内容只有上半截、
     /// 下面留大片空白。没开表单时用 .medium（半屏刚好装下标题+详情+提示+按钮），
     /// 点开调班/请假/记加班任一表单时切到 .large；表单关了再缩回 .medium。
     @State private var sheetDetent: PresentationDetent = .medium
     private var formOpen: Bool {
-        showSwapFlow || showFillPayback || showLeaveForm || showLeaveRangeForm || showOvertimeForm || showEditShiftForm
+        showSwapFlow || showFillPayback || showLeaveForm || showOvertimeForm || showEditShiftForm
     }
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
-                    titleCard
-                    detailRows
+                    headerCard
                     otherTeamsCard
-                    banHint
                     if !canEdit {
                         readOnlyNote
                     }
@@ -194,13 +197,14 @@ struct DayDetailView: View {
                         if showSwapFlow { swapFlow }
                         if showFillPayback { fillPaybackFlow }
                         if showLeaveForm { leaveForm }
-                        if showLeaveRangeForm { leaveRangeForm }
                         if showOvertimeForm { overtimeForm }
                         if showEditShiftForm { editShiftForm }
                     }
                 }
                 .padding(AppStyle.pagePadding)
             }
+            // 1.3.2.018：Sheet 背景统一浅灰 #F4F6F9（与主页面画布同款），内部卡片纯白。
+            .background(sheetBackground)
             .navigationTitle("当天详情")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -220,40 +224,43 @@ struct DayDetailView: View {
 
     // MARK: 内容
 
-    private var titleCard: some View {
-        HStack(spacing: 14) {
-            VStack(alignment: .leading, spacing: 4) {
-                Text(DateUtil.fullFormatter.string(from: DateUtil.date(from: shownDay.date) ?? Date()) + " " + shownDay.weekdayText)
-                    .appFont(size: AppFont.headline, weight: 600)
-                Text("\(shownDay.team ?? store.myTeam)班 · 基础班次 \(shownDay.baseShift ?? "—")")
-                    .appFont(size: AppFont.bodySmall)
-                    .foregroundColor(.secondary)
-            }
-            Spacer()
-            Text(shownDay.shift)
-                .appFont(size: AppFont.headline, weight: 600)
-                .foregroundColor(.white)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 6)
-                .background(ShiftStyle.color(for: ShiftStyle.parts(of: shownDay.shift).first ?? shownDay.shift))
-                .cornerRadius(8)
-        }
-        .padding(AppStyle.cardPadding)
-        .background(AppStyle.surface2)
-        .cornerRadius(AppStyle.cardRadius)
+    /// Sheet 背景（1.3.2.018）：浅灰 #F4F6F9，与主页面画布统一；内部模块用纯白圆角卡片。
+    private var sheetBackground: Color {
+        AppStyle.adaptive(light: UIColor(red: 0.957, green: 0.965, blue: 0.976, alpha: 1),
+                          dark: UIColor(red: 0.043, green: 0.043, blue: 0.059, alpha: 1))
     }
 
-    private var detailRows: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            row("实际班次", shownDay.shift)
-            row("时间", shownDay.displayTime)
-            if shownDay.isDouble == true {
-                row("双班", ShiftStyle.parts(of: shownDay.shift).joined(separator: " + ") + "（共 \(shownDay.totalHours ?? 16) 小时）")
-            }
-            // 1.2.7：预估工资（只看自己班时显示；看别的班不显示——那是别人的工资口径）。
-            // 1.2.9.001：第 29 条补充规矩——没工资权限不显示这行（钱跟着 payAccess 走）。
-            if (shownDay.team ?? store.myTeam) == store.myTeam && store.payAccess {
-                row("预估工资", estimateText(for: shownDay))
+    /// 紧凑头部卡（1.3.2.018：原来 titleCard + detailRows 两张卡合并）：
+    /// 左侧「日期 + 班组 · 班次 时间」，右侧「预估工资 + 金额」；有调班时追加一行小字
+    /// 「原班次：xx」。去掉重复：班次名不再写三遍，预估不再写两遍（值里不带「预估」前缀）。
+    /// 节假日 / 请假 / 加班只在存在时各占一行；调班的对方班组与还班日细节在下面的
+    /// swapStatusCard 里，不在这里重复。
+    private var headerCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 14) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(DateUtil.fullFormatter.string(from: DateUtil.date(from: shownDay.date) ?? Date()) + " " + shownDay.weekdayText)
+                        .appFont(size: AppFont.headline, weight: 600)
+                    Text(teamShiftLine)
+                        .appFont(size: AppFont.bodySmall)
+                        .foregroundColor(.secondary)
+                    if let original = originalShiftText {
+                        Text("原班次：\(original)")
+                            .appFont(size: AppFont.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                Spacer()
+                if let amount = estimateAmountText {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text("预估工资")
+                            .appFont(size: AppFont.caption)
+                            .foregroundColor(.secondary)
+                        Text(amount)
+                            .appFont(size: AppFont.headline, weight: 600)
+                            .monospacedDigit()
+                    }
+                }
             }
             if let holiday = shownDay.holiday, !holiday.isEmpty {
                 row("节假日", holiday)
@@ -264,27 +271,37 @@ struct DayDetailView: View {
             if let ot = store.overtime(for: shownDay.date) {
                 row("加班", "\(ot.start)–\(ot.end)（\(ot.durationText)）" + (ot.note.map { " · \($0)" } ?? ""))
             }
-            if shownDay.overridden == true {
-                if shownDay.onLeave == true {
-                    row("顶岗", (shownDay.partner.map { "\($0)班上 \(shownDay.partnerShift ?? "")" } ?? "未安排"))
-                } else {
-                    row("已调班", (shownDay.note ?? "调班"))
-                    if let partner = shownDay.partner, !partner.isEmpty {
-                        row("对方班组", "\(partner)班" + (shownDay.partnerShift.map { "（\($0)）" } ?? ""))
-                    }
-                    if let cover = shownDay.coverDate {
-                        row("替班日", cover + "（这是还班日）")
-                    } else if let payback = shownDay.paybackDate {
-                        row("还班日", payback)
-                    } else if shownDay.partner != nil {
-                        row("还班日", "还没定（待还班）")
-                    }
-                }
-            }
         }
         .padding(AppStyle.cardPadding)
-        .background(AppStyle.surface2)
+        .background(AppStyle.surface1)
         .cornerRadius(AppStyle.cardRadius)
+    }
+
+    /// 左侧第二行：班组 · 班次 时间。休息只写「休息」，不重复写时间。
+    private var teamShiftLine: String {
+        let team = shownDay.team ?? store.myTeam
+        if shownDay.isRest { return "\(team)班 · 休息" }
+        return "\(team)班 · \(shownDay.shift) \(shownDay.displayTime)"
+    }
+
+    /// 有调班时的小字「原班次：xx」：只在已调班且原班次与现在不同时显示。
+    private var originalShiftText: String? {
+        guard shownDay.overridden == true,
+              let base = shownDay.baseShift, !base.isEmpty,
+              base != shownDay.shift else { return nil }
+        return base
+    }
+
+    /// 右侧预估工资金额（只看自己班 + 有工资权限才显示；休息/请假不显示金额，
+    /// 状态已在左侧班次行与请假行里写明）。1.3.2.018：值里不再带「预估」前缀。
+    private var estimateAmountText: String? {
+        guard (shownDay.team ?? store.myTeam) == store.myTeam && store.payAccess else { return nil }
+        if shownDay.onLeave == true { return nil }
+        let inputs = store.estimateInputs(for: shownDay.date)
+        let est = PayCalc.todayEstimate(shift: shownDay.shift, earlyRate: inputs.earlyRate, midRate: inputs.midRate, inputs: inputs.inputs)
+        if est.isRest { return nil }
+        let suffix = est.isTriple ? "（三薪）" : (est.isOvertime ? "（加班）" : "")
+        return MoneyUtil.money(est.total) + suffix
     }
 
     private func row(_ label: String, _ value: String) -> some View {
@@ -299,41 +316,23 @@ struct DayDetailView: View {
         .appFont(size: AppFont.bodySmall)
     }
 
-    /// 1.2.9.003：当天预估工资（与 PayCalc.todayEstimate 同口径，第 40 条）：
-    /// 每个班 = 基本工资 ÷ 当月实际班数 + 班次补贴（早 70/中 30/日 0）
-    ///          + (工龄津贴 + 高温补贴 + 学历补贴) ÷ 当月实际班数 − 五险一金 ÷ 当月实际班数
-    ///          − 当月个税 ÷ 当月实际班数 + （正常班次才有的）奖金分摊 + 当日类型加成；
-    /// 三薪日每班再加 3 倍日工资（不拿分摊），加班班次每个再加 2 倍日工资（不拿分摊）；
-    /// 双班两个班都算；休息 0 元；请假不算钱。
-    /// 基本工资按当天所在月的生效表解析（不是今天的口径——看 12 月的日子就用 12 月的数）；
-    /// 奖金分摊与加班班次也按当天所在月算。
-    private func estimateText(for day: DaySchedule) -> String {
-        if day.onLeave == true { return "请假" }
-        let inputs = store.estimateInputs(for: day.date)
-        let est = PayCalc.todayEstimate(shift: day.shift, earlyRate: inputs.earlyRate, midRate: inputs.midRate, inputs: inputs.inputs)
-        // 第 33 条：休息日逢法定节假日也标「（三薪）」（只标，不算钱；工资口径不动）。
-        if est.isRest { return PayCalc.isStatutoryDay(day.date) ? "今日休息（三薪）" : "今日休息" }
-        let suffix = est.isTriple ? "（三薪）" : (est.isOvertime ? "（加班）" : "")
-        return "预估 " + MoneyUtil.money(est.total) + suffix
-    }
-
     /// 其他班次：选中这天，其他三个班组按 8 天一轮基础排班算出的班次（横向一排小 chip）。
     /// 只按基础轮换算，不含调班/请假——App 里没有其他用户的调班记录。
-    /// 正在看的班组不列在这里，它的班次已在上面「实际班次」里显示。
-    /// 班次色沿用 DayCell 那套（日绿/中红/早紫、休息浅青底深青字）。
+    /// 正在看的班组不列在这里，它的班次已在上面头部卡里显示。
+    /// 1.3.2.018：色块降饱和——浅底深字（班次色只做浅底 tint + 深色字，不再用整块饱和色），
+    /// 休息用浅灰（与主日历页的灰色「休」统一，不再用浅青）。
     private var otherTeamsCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        HStack(spacing: 8) {
             Text("其他班次")
-                .appFont(size: AppFont.bodySmall)
+                .appFont(size: AppFont.caption)
                 .foregroundColor(.secondary)
-            HStack(spacing: 8) {
-                ForEach(otherTeams, id: \.team) { item in
-                    otherTeamChip(team: item.team, shift: item.shift)
-                }
+            ForEach(otherTeams, id: \.team) { item in
+                otherTeamChip(team: item.team, shift: item.shift)
             }
         }
-        .padding(AppStyle.cardPadding)
-        .background(AppStyle.surface2)
+        .padding(.horizontal, AppStyle.cardPadding)
+        .padding(.vertical, 10)
+        .background(AppStyle.surface1)
         .cornerRadius(AppStyle.cardRadius)
     }
 
@@ -351,8 +350,9 @@ struct DayDetailView: View {
             }
     }
 
-    /// 一个班组的 chip：班组名 + 班次。班次色是底色、白字；
-    /// 休息用浅青底 + 深青字（跟 DayCell 的休息 pill 同一套），显示「休」。
+    /// 一个班组的 chip：班组名 + 班次。1.3.2.018：降饱和——浅底深字：
+    /// 上班用班次色的浅底 tint + 班次色深字，不再整块饱和色白字；
+    /// 休息用浅灰底 + 次要色字（与主日历页的灰色「休」统一），显示「休」。
     private func otherTeamChip(team: String, shift: String) -> some View {
         HStack(spacing: 4) {
             Text("\(team)班")
@@ -362,10 +362,10 @@ struct DayDetailView: View {
         .appFont(size: AppFont.bodySmall)
         .lineLimit(1)
         .minimumScaleFactor(0.85)
-        .foregroundColor(shift == "休息" ? ShiftStyle.color(for: "休息") : .white)
+        .foregroundColor(shift == "休息" ? .secondary : ShiftStyle.color(for: shift))
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
-        .background(shift == "休息" ? ShiftStyle.background(for: "休息") : ShiftStyle.color(for: shift))
+        .background(shift == "休息" ? AppStyle.surface2 : ShiftStyle.background(for: shift))
         .cornerRadius(8)
     }
 
@@ -398,17 +398,6 @@ struct DayDetailView: View {
         }
     }
 
-    private var banHint: some View {
-        Text(banHintText)
-            .appFont(size: AppFont.bodySmall)
-            .lineSpacing(4)
-            .foregroundColor(AppStyle.banHintText)
-            .padding(AppStyle.cardPadding)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(AppStyle.banHintBackground)
-            .cornerRadius(AppStyle.cardRadius)
-    }
-
     /// 只读提示：看别的班的日历时显示，改数据的入口全部不出现。
     /// 1.3.2.016（Gemini 升级版规格的 Toast 改成本地化做法）：看别班时调班/请假
     /// 入口根本不出现，没有能挂 Toast 的编辑入口；这条只读提示就是引导本身，
@@ -435,7 +424,7 @@ struct DayDetailView: View {
         }
         .padding(AppStyle.cardPadding)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(AppStyle.surface2)
+        .background(AppStyle.surface1)
         .cornerRadius(AppStyle.cardRadius)
     }
 
@@ -466,7 +455,7 @@ struct DayDetailView: View {
             }
         }
         .padding(AppStyle.cardPadding)
-        .background(AppStyle.surface2)
+        .background(AppStyle.surface1)
         .cornerRadius(AppStyle.cardRadius)
     }
 
@@ -514,8 +503,10 @@ struct DayDetailView: View {
     }
 
     /// 改排班表单：5 个班次选项（默认当天现在的班次）+ 确认修改。
-    /// 守规矩：选的和现在一样不让改；等服务端回话再报成功，失败显示服务端原话；
-    /// 成功后刷新当月日历和工资页，详情里「实际班次」跟着变成改后的班。
+    /// 守规矩：选的和现在一样不让改（按钮直接置灰）；等服务端回话再报成功，失败显示服务端原话；
+    /// 成功后刷新当月日历和工资页，详情里头部卡的班次跟着变成改后的班。
+    /// 1.3.2.018：撤销提示只在当天已有改班/调班记录时才显示（没调过班的日子根本没有
+    /// 「删除这次调班」入口，提示是幽灵文案）；确认修改用通栏主按钮。
     private var editShiftForm: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("改排班")
@@ -526,24 +517,17 @@ struct DayDetailView: View {
             ForEach(editShiftOptions, id: \.self) { shift in
                 editShiftOptionRow(shift)
             }
-            Text("没有「休息」：想恢复原来的班，用下面的「删除这次调班」。")
-                .appFont(size: AppFont.caption)
-                .foregroundColor(.secondary)
-            Button {
-                Task { await submitEditShift() }
-            } label: {
-                if editShiftSaving {
-                    ProgressView()
-                } else {
-                    Text("确认修改")
-                }
+            if shownDay.overridden == true {
+                Text("没有「休息」：想恢复原来的班，用下面的「删除这次调班」。")
+                    .appFont(size: AppFont.caption)
+                    .foregroundColor(.secondary)
             }
-            .buttonStyle(.borderedProminent)
-            .frame(maxWidth: .infinity)
-            .disabled(editShiftSaving)
+            submitButton("确认修改", loading: editShiftSaving, disabled: editShiftSelection == shownDay.shift) {
+                Task { await submitEditShift() }
+            }
         }
         .padding(AppStyle.cardPadding)
-        .background(AppStyle.surface2)
+        .background(AppStyle.surface1)
         .cornerRadius(AppStyle.cardRadius)
     }
 
@@ -567,7 +551,7 @@ struct DayDetailView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
-            .background(editShiftSelection == shift ? Color.accentColor.opacity(0.12) : AppStyle.surface1)
+            .background(editShiftSelection == shift ? Color.accentColor.opacity(0.12) : AppStyle.surface2)
             .cornerRadius(10)
         }
         .buttonStyle(.plain)
@@ -593,16 +577,49 @@ struct DayDetailView: View {
 
     // MARK: 操作入口
 
-    /// 操作并排两列（调班 / 请假 / 请一段假 / 记加班 / 改排班），一次只开一个表单；
+    /// 当前激活的操作（1.3.2.018）：哪个表单开着，操作栏就高亮哪个按钮，唯一高亮；
+    /// 没开表单时都不高亮。原来调班常驻深色、高亮卡死不动的 bug 就在这里。
+    private var activeAction: String? {
+        if showSwapFlow { return "调班" }
+        if showLeaveForm { return "请假" }
+        if showOvertimeForm { return "记加班" }
+        if showEditShiftForm { return "改排班" }
+        return nil
+    }
+
+    /// 旧记录里的「年假」归一到「年休假」（leaveTypes 已合并去重，picker 里不再有「年假」，
+    /// 直接用旧值会让分段选择器没有选中项）。
+    private func normalizedLeaveType(_ stored: String?) -> String {
+        guard let stored, !stored.isEmpty else { return "年休假" }
+        return stored == "年假" ? "年休假" : stored
+    }
+
+    /// 四个核心操作单行 4 列分段条（1.3.2.018：请一段假已收进请假卡内做单日/多日切换，
+    /// 外层只剩调班 / 请假 / 记加班 / 改排班），一次只开一个表单；当前激活的唯一高亮；
     /// 已有调班/请假时，取消类操作单独放一行红色文字按钮。
-    /// 1.1.4：原来是 LazyVGrid + .bordered/.borderedProminent，pill 只包文字、
-    /// 按内容定宽（「请一段假」4 个字比「调班」宽），左右两列不对齐、看着歪。
-    /// 现在四个按钮共用 actionButton：同一高度 48pt、同一圆角 12、撑满各自半格，
-    /// 调班是深色主按钮、其余三个是浅灰，大小位置全对齐。
+    /// 连班禁令收进右上角小「? 规则」按钮，点开弹窗看，不再占一整张黄卡。
     private var actionButtons: some View {
         VStack(spacing: 12) {
-            LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible(), spacing: 12)], spacing: 12) {
-                actionButton("调班", prominent: true) {
+            HStack {
+                Spacer()
+                Button {
+                    showBanRules = true
+                } label: {
+                    HStack(spacing: 3) {
+                        Image(systemName: "questionmark.circle")
+                        Text("规则")
+                    }
+                    .appFont(size: AppFont.caption)
+                    .foregroundColor(.secondary)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(AppStyle.surface1)
+                    .cornerRadius(10)
+                }
+                .buttonStyle(.plain)
+            }
+            HStack(spacing: 8) {
+                actionButton("调班", prominent: activeAction == "调班") {
                     resetFlowStates()
                     if shownDay.overridden == true && shownDay.onLeave != true {
                         // 已有调班：下面直接显示状态与删除/补填入口，不用再开表单。
@@ -610,20 +627,17 @@ struct DayDetailView: View {
                         showSwapFlow.toggle()
                     }
                 }
-                actionButton("请假") {
-                    leaveType = shownDay.leaveType ?? "年假"
+                actionButton("请假", prominent: activeAction == "请假") {
+                    leaveType = normalizedLeaveType(shownDay.leaveType)
                     leaveNote = shownDay.leaveNote ?? ""
                     leaveCoverPartner = nil
-                    resetFlowStates()
-                    showLeaveForm.toggle()
-                }
-                actionButton("请一段假") {
+                    leaveMode = "单日"
                     rangeStart = DateUtil.date(from: shownDay.date) ?? Date()
                     rangeEnd = rangeStart
                     resetFlowStates()
-                    showLeaveRangeForm.toggle()
+                    showLeaveForm.toggle()
                 }
-                actionButton("记加班") {
+                actionButton("记加班", prominent: activeAction == "记加班") {
                     if let ot = store.overtime(for: shownDay.date) {
                         overtimeStart = timeDate(ot.start) ?? overtimeStart
                         overtimeEnd = timeDate(ot.end) ?? overtimeEnd
@@ -636,11 +650,12 @@ struct DayDetailView: View {
                 // 「设当天班次」，走的是本机逐日设定；再叠一个服务端覆盖会打架
                 // （改完 picker 再设会被覆盖记录盖住，看着像没改）。
                 if !store.rotation.isManual {
-                    actionButton("改排班") {
+                    actionButton("改排班", prominent: activeAction == "改排班") {
                         openEditShiftForm()
                     }
                 }
             }
+            .animation(.easeInOut(duration: 0.2), value: activeAction)
             // 已有调班/请假/加班时的取消入口（只读日历上不出现）。
             if shownDay.overridden == true || shownDay.onLeave == true || store.overtime(for: shownDay.date) != nil {
                 HStack(spacing: 20) {
@@ -672,27 +687,56 @@ struct DayDetailView: View {
                 swapStatusCard
             }
         }
+        .alert("连班禁令", isPresented: $showBanRules) {
+            Button("知道了", role: .cancel) {}
+        } message: {
+            Text(banHintText)
+        }
     }
 
-    /// 四个操作按钮共用：等宽等高（48 高、圆角 12、撑满半格），调班是主按钮、
-    /// 其余三个是次按钮。直接用设计规范里的 AppPrimaryButton/AppSecondaryButton，
-    /// 不再各写一套样式。1.1.4 之前是 LazyVGrid + .bordered/.borderedProminent，
-    /// pill 只包文字、按内容定宽，左右两列不对齐、看着歪。
+    /// 四个操作按钮共用：等宽等高（48 高、圆角 12、撑满各自一格）。
+    /// 1.3.2.018：同一个 Button、底色随 prominent 条件变（激活藏青底白字、其余浅灰底深字），
+    /// 不再是主/次两种不同视图，这样高亮切换时颜色能平滑过渡、不会跳变。
     private func actionButton(_ title: String, prominent: Bool = false, action: @escaping () -> Void) -> some View {
-        Group {
-            if prominent {
-                AppPrimaryButton(title: title, action: action)
-            } else {
-                AppSecondaryButton(title: title, action: action)
-            }
+        Button(action: action) {
+            Text(title)
+                .font(.headline)
+                .frame(maxWidth: .infinity)
+                .frame(height: AppStyle.buttonHeight)
+                .background(prominent ? AppStyle.navyAdaptive : Color(.secondarySystemBackground))
+                .foregroundColor(prominent ? .white : .primary)
+                .cornerRadius(AppStyle.buttonRadius)
         }
+        .buttonStyle(.plain)
+    }
+
+    /// 提交按钮（1.3.2.018）：通栏主按钮——撑满卡片内边距、46pt 高、圆角 12、藏青底白字；
+    /// loading 时显示白色转圈，disabled 时底色变灰、不可点。
+    private func submitButton(_ title: String, loading: Bool = false, disabled: Bool = false, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Group {
+                if loading {
+                    ProgressView()
+                        .tint(.white)
+                } else {
+                    Text(title)
+                        .font(.headline)
+                }
+            }
+            .frame(maxWidth: .infinity)
+            .frame(height: 46)
+            .background(disabled || loading ? Color(.systemGray4) : AppStyle.navyAdaptive)
+            .foregroundColor(.white)
+            .cornerRadius(12)
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled || loading)
     }
 
     private func resetFlowStates() {
         showSwapFlow = false
         showFillPayback = false
         showLeaveForm = false
-        showLeaveRangeForm = false
         showOvertimeForm = false
         showEditShiftForm = false
         errorText = nil
@@ -764,7 +808,7 @@ struct DayDetailView: View {
             }
         }
         .padding(AppStyle.cardPadding)
-        .background(AppStyle.surface2)
+        .background(AppStyle.surface1)
         .cornerRadius(AppStyle.cardRadius)
     }
 
@@ -779,7 +823,7 @@ struct DayDetailView: View {
             Button("取消") { showDeleteSwap = false }
         }
         .padding(10)
-        .background(AppStyle.surface2)
+        .background(AppStyle.surface1)
         .cornerRadius(10)
     }
 
@@ -794,7 +838,7 @@ struct DayDetailView: View {
             Button("取消") { showDeleteLeave = false }
         }
         .padding(10)
-        .background(AppStyle.surface2)
+        .background(AppStyle.surface1)
         .cornerRadius(10)
     }
 
@@ -932,7 +976,7 @@ struct DayDetailView: View {
     /// 只写我自己的记录，不动对方账号（老爷 2026-11-26 08:59 定）。
     private var swapFlow: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("调班（和别的班换）")
+            Text("调班")
                 .appFont(size: AppFont.headline, weight: 600)
             if shownDay.onLeave == true {
                 Text("这天已请假，要调班先取消请假。")
@@ -945,7 +989,7 @@ struct DayDetailView: View {
             } else {
                 Text("我这天上 \(shownDay.shift)（\(ShiftStyle.timeRange(for: shownDay.shift))），调班后我这天休息。选一个班替我上这天的班：")
                     .appFont(size: AppFont.bodySmall)
-                Text("第 1 步 · 哪个班替我上这天")
+                Text("第一步：选择替班班组")
                     .appFont(size: AppFont.bodySmall, weight: 700)
                 if teamsRange == nil && teamsLoading {
                     ProgressView("正在读其他班组排班…")
@@ -998,26 +1042,15 @@ struct DayDetailView: View {
                     swapPreview(partner: partner, partnerShift: pShift)
                     TextField("备注（可选）", text: $swapNote)
                         .textFieldStyle(.plain)
-                        .padding(10)
-                        .background(AppStyle.surface1)
-                        .cornerRadius(8)
-                    Button {
+                        .fieldBackground()
+                    submitButton("确认调班", loading: swapSaving, disabled: !swapLater && swapPayback == nil) {
                         Task { await submitSwap() }
-                    } label: {
-                        if swapSaving {
-                            ProgressView()
-                        } else {
-                            Text("确认调班")
-                        }
                     }
-                    .buttonStyle(.borderedProminent)
-                    .frame(maxWidth: .infinity)
-                    .disabled(swapSaving || (!swapLater && swapPayback == nil))
                 }
             }
         }
         .padding(AppStyle.cardPadding)
-        .background(AppStyle.surface2)
+        .background(AppStyle.surface1)
         .cornerRadius(AppStyle.cardRadius)
         .task { await loadTeamsRange() }
     }
@@ -1029,11 +1062,11 @@ struct DayDetailView: View {
                     Text("\(team)班")
                         .appFont(size: AppFont.headline, weight: 600)
                     Spacer()
-                    Text(ev.eligible ? "可以" : "不行")
+                    Text(ev.eligible ? "可选" : "冲突")
                         .appFont(size: AppFont.bodySmall, weight: 700)
                         .foregroundColor(ev.eligible ? .green : .secondary)
                 }
-                Text("这天本来：\(ev.ownShift.isEmpty ? "—" : ev.ownShift)\(ev.ownShift.isEmpty || ev.ownShift == "休息" ? "" : " \(ShiftStyle.timeRange(for: ev.ownShift))")")
+                Text("原排班：\(ev.ownShift.isEmpty ? "—" : ev.ownShift)\(ev.ownShift.isEmpty || ev.ownShift == "休息" ? "" : " \(ShiftStyle.timeRange(for: ev.ownShift))")")
                     .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.secondary)
                 if ev.eligible, let result = ev.result {
@@ -1052,7 +1085,7 @@ struct DayDetailView: View {
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(12)
-            .background(selected ? Color.accentColor.opacity(0.12) : AppStyle.surface1)
+            .background(selected ? Color.accentColor.opacity(0.12) : AppStyle.surface2)
             .cornerRadius(10)
             .opacity(ev.eligible ? 1 : 0.6)
         }
@@ -1166,23 +1199,20 @@ struct DayDetailView: View {
                     .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.secondary)
             }
-            Button {
+            submitButton("确认补填", disabled: fillPayback == nil || fillPaybackShift == nil) {
                 Task { await submitFillPayback() }
-            } label: {
-                Text("确认补填")
             }
-            .buttonStyle(.borderedProminent)
-            .frame(maxWidth: .infinity)
-            .disabled(fillPayback == nil || fillPaybackShift == nil)
         }
         .padding(AppStyle.cardPadding)
-        .background(AppStyle.surface2)
+        .background(AppStyle.surface1)
         .cornerRadius(AppStyle.cardRadius)
         .task { await loadTeamsRange() }
     }
 
     // MARK: 请假
 
+    /// 请假（1.3.2.018：请一段假收进这里做「单日 / 多日」切换，不再是独立入口；
+    /// 多日分支标题「连续请假」，副标题「自动跳过休息日，单次最多 62 天」）。
     private var leaveForm: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("请假")
@@ -1198,7 +1228,7 @@ struct DayDetailView: View {
                     Text("还没安排顶岗。")
                         .appFont(size: AppFont.bodySmall)
                         .foregroundColor(.secondary)
-                    Button("安排顶岗") {
+                    Button("选择顶岗同事") {
                         leaveCoverPartner = nil
                         Task { await loadTeamsRange() }
                     }
@@ -1212,9 +1242,9 @@ struct DayDetailView: View {
                         if let partner = leaveCoverPartner, let result = leaveCoverCandidates.first(where: { $0.team == partner })?.ev.result {
                             Text("\(partner)班顶岗：他这天上 \(result)（\(ShiftStyle.timeRange(for: result))）；我这天请假休息。")
                                 .appFont(size: AppFont.bodySmall)
-                            Button("确认安排顶岗") { Task { await submitLeaveCover() } }
-                                .buttonStyle(.borderedProminent)
-                                .frame(maxWidth: .infinity)
+                            submitButton("确认安排顶岗") {
+                                Task { await submitLeaveCover() }
+                            }
                         }
                     } else if teamsLoading {
                         ProgressView("正在读其他班组排班…")
@@ -1228,49 +1258,72 @@ struct DayDetailView: View {
                 .pickerStyle(.segmented)
                 TextField("备注（可选）", text: $leaveNote)
                     .textFieldStyle(.plain)
-                    .padding(10)
-                    .background(AppStyle.surface1)
-                    .cornerRadius(8)
-                Button("保存修改") { Task { await submitLeave() } }
-                    .buttonStyle(.borderedProminent)
-                    .frame(maxWidth: .infinity)
+                    .fieldBackground()
+                submitButton("保存修改") {
+                    Task { await submitLeave() }
+                }
             } else {
-                Picker("请假类型", selection: $leaveType) {
-                    ForEach(ShiftStyle.leaveTypes, id: \.self) { type in
-                        Text(type).tag(type)
-                    }
+                Picker("请假方式", selection: $leaveMode) {
+                    Text("单日").tag("单日")
+                    Text("多日").tag("多日")
                 }
                 .pickerStyle(.segmented)
-                TextField("备注（可选）", text: $leaveNote)
-                    .textFieldStyle(.plain)
-                    .padding(10)
-                    .background(AppStyle.surface1)
-                    .cornerRadius(8)
-                if shownDay.shift != "休息" {
-                    Text("安排顶岗（可选）：选一个人替我上这天的班。")
-                        .appFont(size: AppFont.bodySmall, weight: 700)
-                    Button("选顶岗的人") {
-                        leaveCoverPartner = nil
-                        Task { await loadTeamsRange() }
-                    }
-                    .buttonStyle(.bordered)
-                    if teamsRange != nil {
-                        ForEach(leaveCoverCandidates, id: \.team) { c in
-                            candidateCard(team: c.team, ev: c.ev, selected: leaveCoverPartner == c.team, resultLabel: "顶岗后他这天") {
-                                leaveCoverPartner = c.team
-                            }
+                if leaveMode == "多日" {
+                    Text("连续请假")
+                        .appFont(size: AppFont.headline, weight: 600)
+                    Text("自动跳过休息日，单次最多 62 天")
+                        .appFont(size: AppFont.bodySmall)
+                        .foregroundColor(.secondary)
+                    DatePicker("从", selection: $rangeStart, displayedComponents: .date)
+                    DatePicker("到", selection: $rangeEnd, displayedComponents: .date)
+                    Picker("类型", selection: $leaveType) {
+                        ForEach(ShiftStyle.leaveTypes, id: \.self) { type in
+                            Text(type).tag(type)
                         }
-                    } else if teamsLoading {
-                        ProgressView("正在读其他班组排班…")
+                    }
+                    .pickerStyle(.segmented)
+                    TextField("备注（可选）", text: $leaveNote)
+                        .textFieldStyle(.plain)
+                        .fieldBackground()
+                    submitButton("确认请假") {
+                        Task { await submitLeaveRange() }
+                    }
+                } else {
+                    Picker("请假类型", selection: $leaveType) {
+                        ForEach(ShiftStyle.leaveTypes, id: \.self) { type in
+                            Text(type).tag(type)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    TextField("备注（可选）", text: $leaveNote)
+                        .textFieldStyle(.plain)
+                        .fieldBackground()
+                    if shownDay.shift != "休息" {
+                        Text("安排顶岗（选填）")
+                            .appFont(size: AppFont.bodySmall, weight: 700)
+                        Button("选择顶岗同事") {
+                            leaveCoverPartner = nil
+                            Task { await loadTeamsRange() }
+                        }
+                        .buttonStyle(.bordered)
+                        if teamsRange != nil {
+                            ForEach(leaveCoverCandidates, id: \.team) { c in
+                                candidateCard(team: c.team, ev: c.ev, selected: leaveCoverPartner == c.team, resultLabel: "顶岗后他这天") {
+                                    leaveCoverPartner = c.team
+                                }
+                            }
+                        } else if teamsLoading {
+                            ProgressView("正在读其他班组排班…")
+                        }
+                    }
+                    submitButton("确认请假") {
+                        Task { await submitLeaveWithCover() }
                     }
                 }
-                Button("确认请假") { Task { await submitLeaveWithCover() } }
-                    .buttonStyle(.borderedProminent)
-                    .frame(maxWidth: .infinity)
             }
         }
         .padding(AppStyle.cardPadding)
-        .background(AppStyle.surface2)
+        .background(AppStyle.surface1)
         .cornerRadius(AppStyle.cardRadius)
     }
 
@@ -1293,32 +1346,6 @@ struct DayDetailView: View {
     /// 调班第 1 步的候选：哪个班替我上这天（我这天休息，对方那天变成组合班）。
     private var swapPartnerCandidates: [(team: String, ev: CoverEval)] {
         coverCandidates(addedShift: shownDay.shift)
-    }
-
-    private var leaveRangeForm: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("请一段假（只算有班的日子，休班跳过，最多 62 天）")
-                .appFont(size: AppFont.headline, weight: 600)
-            DatePicker("从", selection: $rangeStart, displayedComponents: .date)
-            DatePicker("到", selection: $rangeEnd, displayedComponents: .date)
-            Picker("类型", selection: $leaveType) {
-                ForEach(ShiftStyle.leaveTypes, id: \.self) { type in
-                    Text(type).tag(type)
-                }
-            }
-            .pickerStyle(.segmented)
-            TextField("备注（可选）", text: $leaveNote)
-                .textFieldStyle(.plain)
-                .padding(10)
-                .background(AppStyle.surface1)
-                .cornerRadius(8)
-            Button("确认请假") { Task { await submitLeaveRange() } }
-                .buttonStyle(.borderedProminent)
-                .frame(maxWidth: .infinity)
-        }
-        .padding(AppStyle.cardPadding)
-        .background(AppStyle.surface2)
-        .cornerRadius(AppStyle.cardRadius)
     }
 
     // MARK: 加班
@@ -1345,20 +1372,18 @@ struct DayDetailView: View {
                     .appFont(size: AppFont.headline, weight: 600)
                     .foregroundColor(.blue)
             }
-            Text("结束比开始早算跨夜（比如 22:00 到 02:00 是 4 小时）。")
+            Text("结束时间早于开始时间时，自动按跨天计算（如 22:00–次日 02:00 计 4 小时）")
                 .appFont(size: AppFont.caption)
                 .foregroundColor(.secondary)
             TextField("备注（可选）", text: $overtimeNote)
                 .textFieldStyle(.plain)
-                .padding(10)
-                .background(AppStyle.surface1)
-                .cornerRadius(8)
-            Button("确认加班") { Task { await submitOvertime() } }
-                .buttonStyle(.borderedProminent)
-                .frame(maxWidth: .infinity)
+                .fieldBackground()
+            submitButton("确认加班") {
+                Task { await submitOvertime() }
+            }
         }
         .padding(AppStyle.cardPadding)
-        .background(AppStyle.surface2)
+        .background(AppStyle.surface1)
         .cornerRadius(AppStyle.cardRadius)
     }
 
@@ -1509,7 +1534,7 @@ struct DayDetailView: View {
         // 1.3.2.005（方案 §6 车间噪音环境）：请假（一段）保存成功，轻震一下确认。
         UIImpactFeedbackGenerator(style: .light).impactOccurred()
         doneMessage = "请假已保存"
-        showLeaveRangeForm = false
+        showLeaveForm = false
     }
 
     private func cancelLeave() async {

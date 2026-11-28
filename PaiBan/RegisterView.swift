@@ -23,6 +23,11 @@ struct RegisterView: View {
     @State private var agreedToTerms = false
     @State private var errorText: String?
     @State private var isBusy = false
+    /// 注销冷静期（1.3.2.018）：该手机号 30 天内注销过账号，服务端返回 cancelledAccount
+    /// 标志时弹出选择——找回旧账号数据，还是注册新账号（旧数据立即删除）。
+    @State private var showCancelledChoice = false
+    @State private var showDeleteOldConfirm = false
+    @State private var cancelledDeleteAt: String?
     @FocusState private var focusedField: RegField?
     /// 输入框聚焦态（统一规范 v2：聚焦变暗 + 阴影，不用亮色描边）。
     private enum RegField { case nickname, username, smsCode, password, confirmPassword }
@@ -41,12 +46,21 @@ struct RegisterView: View {
                                 .textInputAutocapitalization(.never)
                                 .autocorrectionDisabled()
                                 .focused($focusedField, equals: .nickname)
+                                .onChange(of: nickname) { _, new in
+                                    if new.count > 10 { nickname = String(new.prefix(10)) }
+                                }
                         }
-                        Text("用于班表展示，建议填写常用姓名")
-                            .appFont(size: AppFont.caption)
-                            .foregroundColor(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.horizontal, 12)
+                        HStack {
+                            Text("用于班表展示，建议填写常用姓名")
+                                .appFont(size: AppFont.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text("\(nickname.count)/10")
+                                .appFont(size: AppFont.caption)
+                                .foregroundColor(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
                         underlineField(focused: focusedField == .username) {
                             TextField("手机号（11 位大陆手机号）", text: $username)
                                 .keyboardType(.numberPad)
@@ -160,6 +174,26 @@ struct RegisterView: View {
                     Button("取消") { dismiss() }
                 }
             }
+            // 注销冷静期选择（1.3.2.018）：该手机号 30 天内注销过账号。
+            .alert("这个手机号注销过账号", isPresented: $showCancelledChoice) {
+                Button("找回旧账号数据") {
+                    Task { await doRestoreCancelled() }
+                }
+                Button("注册新账号", role: .destructive) {
+                    showDeleteOldConfirm = true
+                }
+                Button("取消", role: .cancel) { }
+            } message: {
+                Text("这个手机号在 30 天内注销过账号\(cancelledDeleteAt.map { "，旧账号数据将在 \($0) 删除" } ?? "")。选「找回旧账号数据」恢复原来的排班与工资；选「注册新账号」则旧账号数据立即删除、无法恢复。")
+            }
+            .alert("确认注册新账号吗？", isPresented: $showDeleteOldConfirm) {
+                Button("取消", role: .cancel) { }
+                Button("确认注册新账号", role: .destructive) {
+                    Task { await doRegisterNewAfterCancel() }
+                }
+            } message: {
+                Text("注册新账号后，旧账号的排班、请假与工资数据会立即删除，且无法恢复。")
+            }
         }
     }
 
@@ -216,6 +250,46 @@ struct RegisterView: View {
             try await store.register(username: name, password: password,
                                      displayName: nick.isEmpty ? nil : nick,
                                      code: smsCode.trimmingCharacters(in: .whitespaces))
+            dismiss()
+        } catch {
+            // 注销冷静期：该手机号 30 天内注销过账号，弹出「找回旧账号 / 注册新账号」选择，
+            // 而不是只显示一句错误。
+            if let apiErr = error as? APIError, let deleteAt = apiErr.cancelledDeleteAt {
+                cancelledDeleteAt = deleteAt
+                showCancelledChoice = true
+            } else {
+                errorText = (error as? APIError)?.message ?? error.localizedDescription
+            }
+        }
+    }
+
+    /// 找回旧账号数据（1.3.2.018）：调恢复接口，成功后直接登录并进引导。
+    private func doRestoreCancelled() async {
+        errorText = nil
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await store.restoreCancelledAccount(username: username.trimmingCharacters(in: .whitespaces),
+                                                   password: password)
+            dismiss()
+        } catch {
+            errorText = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
+
+    /// 注册新账号并确认删除旧数据（1.3.2.018）：用户在二次确认里点过「确认」才走到这里，
+    /// 旧账号数据立即删除、无法恢复。
+    private func doRegisterNewAfterCancel() async {
+        errorText = nil
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            let nick = nickname.trimmingCharacters(in: .whitespaces)
+            try await store.register(username: username.trimmingCharacters(in: .whitespaces),
+                                     password: password,
+                                     displayName: nick.isEmpty ? nil : nick,
+                                     code: smsCode.trimmingCharacters(in: .whitespaces),
+                                     confirmDeleteCancelled: true)
             dismiss()
         } catch {
             errorText = (error as? APIError)?.message ?? error.localizedDescription

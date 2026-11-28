@@ -230,12 +230,15 @@ struct SettingsView: View {
 
             // 法律文件（1.3.2.017，参考微博设置页底部）：一行三个可点链接，点开看全文；
             // 《第三方合作清单》是收集清单里的那节，单独成页。
+            // 1.3.2.018：.017 的 HStack + Divider 写法只有「第三方合作清单」点得开——
+            // Divider 会挤占按钮的布局/点按区域。改成固定 1pt 矩形分隔线 + 每格
+            // contentShape(Rectangle()) + .buttonStyle(.plain)，三个格子各自可点。
             Section {
                 HStack(spacing: 0) {
                     legalLink(.privacyPolicy)
-                    Divider()
+                    legalSeparator
                     legalLink(.collectionList)
-                    Divider()
+                    legalSeparator
                     legalLink(.thirdPartyList)
                 }
                 .frame(maxWidth: .infinity)
@@ -329,12 +332,22 @@ struct SettingsView: View {
         }
     }
 
-    /// 法律文件链接（1.3.2.017）：设置页底部一行三个，点开对应全文页。
+    /// 法律文件链接（1.3.2.017，1.3.2.018 修点按）：设置页底部一行三个，点开对应全文页。
+    /// 每格整块可点（contentShape + 最小高度 32pt + .plain 样式，不让 List 行高亮干扰）。
     private func legalLink(_ doc: LegalDocument) -> some View {
         Button(doc.title) { legalDoc = doc }
             .font(.subheadline)
             .foregroundColor(.secondary)
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, minHeight: 32)
+            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+    }
+
+    /// 法律链接之间的固定分隔线（1.3.2.018）：不用 Divider（会挤占按钮布局/点按区）。
+    private var legalSeparator: some View {
+        Rectangle()
+            .fill(Color.secondary.opacity(0.3))
+            .frame(width: 1, height: 16)
     }
 
     /// 外观绑定：跟随系统 / 浅色 / 深色，改完立刻生效。
@@ -436,8 +449,8 @@ struct SettingsView: View {
 // MARK: - 设置二级页面（1.1.3）
 
 /// 账号与安全（二级页面）：昵称、登录账号、班组、手机号（绑定/更换）、
-/// 修改昵称、修改密码、切换账号、退出登录。退出登录放最下面，切换账号在它上面；
-/// 退出只清登录状态，离线缓存保留。
+/// 账号与安全（1.3.2.018 按微信/支付宝改）：信息行本身可点进编辑（昵称/密码/手机号行），
+/// 退出登录与注销账号并到底部一组；退出只清登录状态，离线缓存保留。
 struct AccountSecurityView: View {
     @Environment(AppStore.self) private var store: AppStore
 
@@ -446,16 +459,29 @@ struct AccountSecurityView: View {
     @State private var showChangeName = false
     @State private var showChangePassword = false
     @State private var showLogoutConfirm = false
-    @State private var showSwitchConfirm = false
+    /// 注销账号两步确认（1.3.2.018）：先弹提醒（30 天后删数据、30 天内可找回），
+    /// 确认后再弹一次最终确认；两次都确认才调服务端注销接口。
+    @State private var showCancelNotice = false
+    @State private var showCancelConfirm = false
+    @State private var cancelError: String?
+    @State private var cancelling = false
 
     var body: some View {
         Form {
+            // 1.3.2.018（参考微信/支付宝）：信息行本身可点进编辑——点昵称行改昵称、
+            // 点密码行改密码、点手机号行绑号/换号，不再单设一个「修改」区（少点一下）。
             Section("账号") {
-                HStack {
-                    Text("昵称")
-                    Spacer()
-                    Text(store.displayUsername)
-                        .foregroundColor(.secondary)
+                Button {
+                    showChangeName = true
+                } label: {
+                    HStack {
+                        Text("昵称")
+                        Spacer()
+                        Text(store.displayUsername)
+                            .foregroundColor(.secondary)
+                        Image(systemName: "chevron.right")
+                            .foregroundColor(.secondary)
+                    }
                 }
                 // 登录用的账号名（username）：显示名可以改，这个不动；和显示名不一样才单独列一行。
                 // 脱敏与手机号行保持一致：登录账号若是手机号也只显示中间四位星号。
@@ -490,41 +516,21 @@ struct AccountSecurityView: View {
                             .foregroundColor(.secondary)
                     }
                 }
-            }
-
-            Section("修改") {
-                Button {
-                    showChangeName = true
-                } label: {
-                    HStack {
-                        Text("修改昵称")
-                        Spacer()
-                        Image(systemName: "chevron.right")
-                            .foregroundColor(.secondary)
-                    }
-                }
                 Button {
                     showChangePassword = true
                 } label: {
                     HStack {
-                        Text("修改密码")
+                        Text("密码")
                         Spacer()
+                        Text("去修改")
+                            .foregroundColor(.secondary)
                         Image(systemName: "chevron.right")
                             .foregroundColor(.secondary)
                     }
                 }
             }
 
-            // 切换账号（1.2.6）：退出当前登录、回登录页换个账号登；离线缓存保留。
-            Section {
-                Button {
-                    showSwitchConfirm = true
-                } label: {
-                    Text("切换账号")
-                        .frame(maxWidth: .infinity, alignment: .center)
-                }
-            }
-
+            // 退出登录与注销账号并到底部一组（参考微信/支付宝：危险操作放最下面）。
             Section {
                 Button(role: .destructive) {
                     showLogoutConfirm = true
@@ -532,17 +538,39 @@ struct AccountSecurityView: View {
                     Text("退出登录")
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
+                // 注销账号（1.3.2.018）：点开先弹提醒（30 天后删全部数据，30 天内重新注册可找回），
+                // 确认后调服务端注销接口，成功后清本地登录态、回登录页。
+                Button(role: .destructive) {
+                    showCancelNotice = true
+                } label: {
+                    Text("注销账号")
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+                .disabled(cancelling)
+            }
+            if let cancelError {
+                Text(cancelError)
+                    .appFont(size: AppFont.bodySmall)
+                    .foregroundColor(.red)
             }
         }
         .navigationTitle("账号与安全")
         .navigationBarTitleDisplayMode(.inline)
-        .alert("切换账号", isPresented: $showSwitchConfirm) {
+        .alert("注销账号", isPresented: $showCancelNotice) {
             Button("取消", role: .cancel) { }
-            Button("切换", role: .destructive) {
-                Task { await store.logout() }
+            Button("继续注销", role: .destructive) {
+                showCancelConfirm = true
             }
         } message: {
-            Text("确定要切换账号吗？将退出当前登录，返回登录页。")
+            Text("注销后，你的排班、请假与工资数据将在 30 天后全部删除。30 天内用同一手机号重新注册，可以找回旧账号数据；超过 30 天就找不回来了。")
+        }
+        .alert("确认注销吗？", isPresented: $showCancelConfirm) {
+            Button("取消", role: .cancel) { }
+            Button("确认注销", role: .destructive) {
+                Task { await doCancelAccount() }
+            }
+        } message: {
+            Text("注销后立即退出登录。30 天后全部数据删除，且无法恢复。")
         }
         .alert("退出登录", isPresented: $showLogoutConfirm) {
             Button("取消", role: .cancel) { }
@@ -565,6 +593,19 @@ struct AccountSecurityView: View {
             ChangePasswordSheet()
         }
     }
+
+    /// 注销账号：调服务端注销接口，成功后 Store 清登录态、回登录页；
+    /// 失败（如服务端还没接这个接口）留在本页显示中文错误，不退出。
+    private func doCancelAccount() async {
+        cancelError = nil
+        cancelling = true
+        defer { cancelling = false }
+        do {
+            _ = try await store.cancelAccount()
+        } catch {
+            cancelError = (error as? APIError)?.message ?? error.localizedDescription
+        }
+    }
 }
 
 /// 工资设置（二级页面）：基本工资、奖金系数、养老月扣（反推缴费基数）、
@@ -579,16 +620,19 @@ struct PaySettingsView: View {
     @State private var housingFundText = ""
     @State private var position = "员工"
     @State private var education = "其他"
-    @State private var shortageAmountText = "0"
+    // 1.3.2.018（老爷 2026-11-28 21:23/21:25 亲口令）：数值默认改空白，让用户自己输；
+    // 缺员补贴期限改 1 年（开始当天、结束一年后，不再是 3 个月）；
+    // 首次工资默认改非首次（不是，之前拿过）。
+    @State private var shortageAmountText = ""
     @State private var shortageStartDate = Date()
-    @State private var shortageEndDate = Calendar.current.date(byAdding: .month, value: 3, to: Date()) ?? Date()
+    @State private var shortageEndDate = Calendar.current.date(byAdding: .month, value: 12, to: Date()) ?? Date()
     @State private var utilitiesText = ""
     @State private var deptPerfText = ""
-    @State private var hireYear = 2018
-    @State private var hireMonth = 10
-    /// 今年是不是第一次拿工资（2026-11-27 修订版，第 4.4 条）：默认 true。
-    @State private var firstEmploymentInYear = true
-    @State private var annualLeaveText = "5"
+    @State private var hireYear = Calendar.current.component(.year, from: Date())
+    @State private var hireMonth = Calendar.current.component(.month, from: Date())
+    /// 今年是不是第一次拿工资（2026-11-27 修订版，第 4.4 条）：默认 false（非首次）。
+    @State private var firstEmploymentInYear = false
+    @State private var annualLeaveText = ""
     @State private var isSavingPay = false
     @State private var saveMessage: String?
 
@@ -607,7 +651,7 @@ struct PaySettingsView: View {
                 HStack {
                     Text("基本工资")
                     Spacer()
-                    TextField("2420", text: $baseSalaryText)
+                    TextField("输入金额", text: $baseSalaryText)
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)
                         .frame(width: 120)
@@ -616,7 +660,7 @@ struct PaySettingsView: View {
                 HStack {
                     Text("奖金系数")
                     Spacer()
-                    TextField("1.0", text: $bonusCoefText)
+                    TextField("输入系数", text: $bonusCoefText)
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)
                         .frame(width: 120)
@@ -625,7 +669,7 @@ struct PaySettingsView: View {
                 HStack {
                     Text("养老月扣")
                     Spacer()
-                    TextField("475.04", text: $pensionText)
+                    TextField("输入金额", text: $pensionText)
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)
                         .frame(width: 120)
@@ -717,7 +761,7 @@ struct PaySettingsView: View {
                             .foregroundColor(.secondary)
                     }
                     Spacer()
-                    TextField("5", text: $annualLeaveText)
+                    TextField("输入天数", text: $annualLeaveText)
                         .keyboardType(.numberPad)
                         .multilineTextAlignment(.trailing)
                         .frame(width: 120)
@@ -731,7 +775,7 @@ struct PaySettingsView: View {
                             .foregroundColor(.secondary)
                     }
                     Spacer()
-                    TextField("60", text: $utilitiesText)
+                    TextField("输入金额", text: $utilitiesText)
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)
                         .frame(width: 120)
@@ -745,7 +789,7 @@ struct PaySettingsView: View {
                             .foregroundColor(.secondary)
                     }
                     Spacer()
-                    TextField("4000", text: $deptPerfText)
+                    TextField("输入金额", text: $deptPerfText)
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)
                         .frame(width: 120)
@@ -759,14 +803,30 @@ struct PaySettingsView: View {
                             .foregroundColor(.secondary)
                     }
                     Spacer()
-                    TextField("0", text: $shortageAmountText)
+                    TextField("输入金额", text: $shortageAmountText)
                         .keyboardType(.decimalPad)
                         .multilineTextAlignment(.trailing)
                         .frame(width: 120)
                         .fieldBackground()
                 }
-                DatePicker("开始日期", selection: $shortageStartDate, displayedComponents: .date)
-                DatePicker("结束日期", selection: $shortageEndDate, displayedComponents: .date)
+                // 缺员补贴期限（1.3.2.018，老爷 2026-11-28 21:25 亲口定）：开始/结束两个日期
+                // UI 改成一样宽——日期字数不同（11月两位数、2月一位数）会让默认的紧凑
+                // DatePicker 一宽一窄；这里把日期按钮定宽 150pt，两边一样宽。
+                // 期限默认 1 年（开始当天、结束一年后）。
+                HStack {
+                    Text("开始日期")
+                    Spacer()
+                    DatePicker("", selection: $shortageStartDate, displayedComponents: .date)
+                        .labelsHidden()
+                        .frame(width: 150)
+                }
+                HStack {
+                    Text("结束日期")
+                    Spacer()
+                    DatePicker("", selection: $shortageEndDate, displayedComponents: .date)
+                        .labelsHidden()
+                        .frame(width: 150)
+                }
                 // 专项附加扣除（第 52 条，2026-11-27）：多选 + 数量/档位，存 paySettings.specialDeductions。
                 NavigationLink {
                     SpecialDeductionsView()
@@ -812,26 +872,28 @@ struct PaySettingsView: View {
 
     private func fillPayFields() {
         let settings = store.user?.paySettings
-        baseSalaryText = settings?.baseSalary.map { moneyText($0) } ?? "2420"
-        bonusCoefText = settings?.bonusCoef.map { String(format: "%.1f", $0) } ?? "1.0"
-        // 养老月扣框里显示的是“基数 × 8%”：老爷默认基数 5938 → 475.04；
-        // 同事没填过就按全局默认基数 5938 算。
-        let base = settings?.contributionBase ?? 5938
-        pensionText = moneyText(PayCalc.round2(base * 0.08))
+        // 1.3.2.018（老爷 2026-11-28 21:23/21:25 亲口令）：数值默认改空白，没填过
+        // 就留空、让用户自己输，不再预填 2420 / 1.0 / 475.04 / 0 / 4000 / 5 这些数；
+        // 入职时间默认当天（当年当月，往前翻着改）；首次工资默认非首次。
+        baseSalaryText = settings?.baseSalary.map { moneyText($0) } ?? ""
+        bonusCoefText = settings?.bonusCoef.map { String(format: "%.1f", $0) } ?? ""
+        // 养老月扣框里显示的是“基数 × 8%”；没填过缴费基数就留空，不按全局默认基数 5938 预填。
+        pensionText = settings?.contributionBase.map { moneyText(PayCalc.round2($0 * 0.08)) } ?? ""
         // 公积金（1.3.0.001，第 47 条）：没填过就留空，不预填算出来的数。
         housingFundText = settings?.housingFund.map { moneyText($0) } ?? ""
         position = settings?.position ?? "员工"
         education = settings?.education ?? "其他"
-        shortageAmountText = settings?.shortageSubsidy?.amount.map { moneyText($0) } ?? "0"
+        shortageAmountText = settings?.shortageSubsidy?.amount.map { moneyText($0) } ?? ""
         if let s = settings?.shortageSubsidy?.startDate, let d = DateUtil.date(from: s) { shortageStartDate = d }
         if let e = settings?.shortageSubsidy?.endDate, let d = DateUtil.date(from: e) { shortageEndDate = d }
-        utilitiesText = settings?.utilities.map { moneyText($0) } ?? "0"
-        deptPerfText = settings?.deptPerf.map { moneyText($0) } ?? "4000"
-        // 入职时间默认 2018-10（和全局默认一致）；剩余年休假默认 5 天。
-        hireYear = settings?.hireYear ?? 2018
-        hireMonth = settings?.hireMonth ?? 10
-        firstEmploymentInYear = settings?.firstEmploymentInYear ?? true
-        annualLeaveText = settings?.annualLeaveRemaining.map { String($0) } ?? "5"
+        utilitiesText = settings?.utilities.map { moneyText($0) } ?? ""
+        deptPerfText = settings?.deptPerf.map { moneyText($0) } ?? ""
+        // 入职时间默认当天（当年当月）；剩余年休假默认空白；首次工资默认非首次。
+        let now = Date()
+        hireYear = settings?.hireYear ?? Calendar.current.component(.year, from: now)
+        hireMonth = settings?.hireMonth ?? Calendar.current.component(.month, from: now)
+        firstEmploymentInYear = settings?.firstEmploymentInYear ?? false
+        annualLeaveText = settings?.annualLeaveRemaining.map { String($0) } ?? ""
     }
 
     private func moneyText(_ value: Double) -> String {
@@ -1330,7 +1392,7 @@ struct UsageGuideView: View {
                     .foregroundColor(.secondary)
             }
             DisclosureGroup("账号与安全说明") {
-                Text("改密码、改昵称、换手机号、切换账号、退出登录都在「设置 → 账号与安全」里。退出登录只清登录状态，离线缓存留着，下次登录还能看。换手机号要收新号的验证码验证，30 天内只能换一次。换班组在设置页「更换班组」里，选新班和生效日期，工资跟着新班组算。")
+                Text("改密码、改昵称、换手机号、注销账号、退出登录都在「设置 → 账号与安全」里。退出登录只清登录状态，离线缓存留着，下次登录还能看。注销账号后 30 天删除全部数据，30 天内用同一手机号重新注册可以找回。换手机号要收新号的验证码验证，30 天内只能换一次。换班组在设置页「更换班组」里，选新班和生效日期，工资跟着新班组算。")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             }
@@ -1443,6 +1505,19 @@ struct ChangelogView: View {
                 ])
             }
             Section("内测版") {
+                changelog(version: "1.3.2.018", items: [
+                    "排班页顶卡「预估 ¥XXX」小字加回来了；金额标签改成「预估今日工资」",
+                    "工资页顶卡标题行重排：小眼睛紧挨「本月实发合计」，「当月」按钮挪到最右边，标题和金额之间更紧凑",
+                    "设置页底部三条协议链接都点得开了，各进各的全文页",
+                    "日历选中格的框描边改均匀了，粗细一致、完整可见，形状还是圆角矩形",
+                    "当天详情页大改：操作栏改成调班/请假/记加班/改排班单行四列，当前开的那个唯一高亮；请假和请一段假并成一个卡片，里面单日/多日切换；顶部两张卡并成一张紧凑头部卡；连班禁令收进右上角「? 规则」按钮；其他班次压成一行轻量色标，休息改回浅灰；色块降饱和；提交按钮都改成通栏主按钮",
+                    "「年假」和「年休假」合并了，只留「年休假」",
+                    "全站输入框改成底线样式，不要灰底了",
+                    "昵称最多 10 个字，改昵称和注册页都限 10 字，带 x/10 计数",
+                    "工资设置默认值改空白、日期默认当天；缺员补贴期限改成 1 年，开始/结束日期一样宽；首次工资默认改成非首次",
+                    "「切换账号」删了；账号与安全页加了「注销账号」，注销后 30 天删数据，30 天内重新注册可以找回旧账号",
+                    "账号与安全页按微信/支付宝改：昵称、密码、手机号行直接点进去改，不再单设「修改」区；退出登录和注销账号并到底部一组",
+                ])
                 changelog(version: "1.3.2.017", items: [
                     "登录/注册页统一成一个样式：底划线输入框、胶囊主按钮、密码框带眼睛；登录方式改成输入框上方的双 Tab，版面不再跳",
                     "登录/注册加了协议勾选：没勾选点登录会被拦住；《用户使用协议》《隐私政策》《个人信息收集清单》都能在 App 里直接看全文",
@@ -1887,8 +1962,16 @@ struct ChangeNameSheet: View {
         NavigationStack {
             Form {
                 Section {
-                    TextField("昵称（最多 32 个字）", text: $name)
-                        .fieldBackground()
+                    HStack(spacing: 8) {
+                        TextField("昵称（最多 10 个字）", text: $name)
+                            .fieldBackground()
+                            .onChange(of: name) { _, new in
+                                if new.count > 10 { name = String(new.prefix(10)) }
+                            }
+                        Text("\(name.count)/10")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 } footer: {
                     Text("改的是昵称，登录用的账号名不变；留空保存会清回账号名。")
                 }
@@ -1906,7 +1989,7 @@ struct ChangeNameSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("保存") { Task { await save() } }
-                        .disabled(saving || name.count > 32)
+                        .disabled(saving || name.count > 10)
                 }
             }
             .onAppear {

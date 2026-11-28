@@ -323,15 +323,18 @@ extension View {
             .padding(.horizontal, horizontal)
             .contentShape(Rectangle())
     }
-    /// 看得见的输入框底（1.3.2.017，全站统一）：圆角矩形底色 + 内边距。
-    /// 给 Form/List 行里的裸 TextField / SecureField 用——光有占位文字不够，
-    /// 空占位时框根本看不见（公积金就是这么丢的）。
-    /// 下划线样式（登录/注册/忘记密码）与已有底色的输入框（DayDetail/
-    /// Feedback/工资页行内编辑）不用改。
+    /// 输入框底线（1.3.2.018，老爷 2026-11-28 21:21 亲口令：灰底圆角框颜色加深太丑，
+    /// 改成输入框下方只有一条横线——参考他发的微博改名字页样式：无填充、底下一条细线）。
+    /// 给 Form/List 行里的裸 TextField / SecureField 用。全站 27 处共用这一个实现，
+    /// 改这里就全改了（改密码、改昵称、公积金及所有 .fieldBackground() 输入框）。
+    /// 1.3.2.017 的灰底圆角框（surface2）已删，不再用。
     func fieldBackground() -> some View {
         padding(.vertical, 6)
-            .padding(.horizontal, 10)
-            .background(AppStyle.surface2, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .background(alignment: .bottom) {
+                Rectangle()
+                    .fill(AppStyle.outline)
+                    .frame(height: 1)
+            }
     }
 }
 

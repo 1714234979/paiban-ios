@@ -126,21 +126,26 @@ struct PayView: View {
         // 卡片高度只由标题 + 总数 + 构成条 + 三列小字决定；上下内边距 16→12、
         // 行距 12→10。高度固定仍保（TBD 时构成条与三列小字用 opacity 0 的同结构占位），
         // 但不再用整行透明占位撑高。
-        return VStack(alignment: .leading, spacing: 10) {
-            HStack {
+        // 1.3.2.018（老爷 2026-11-28 21:11 亲口令，标题行重排）：小眼睛挪到标题后面、
+        // 紧挨「本月实发合计」；「当月」按钮挪到最右边（原来小眼睛的位置）；行距 10→6，
+        // 标题行与金额之间的竖向空收紧。
+        return VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 6) {
                 // 1.3.2.016：看当月仍叫「本月实发合计」；看别的月叫「{M}月实发合计」
                 //（默认月是上个月，标题写明是几月，免得以为看的是本月）。
                 Text(PayView.monthIndex(year: ym.year, month: ym.month) == currentMonthIndex ? "本月实发合计" : "\(ym.month)月实发合计")
                     .appFont(size: AppFont.bodySmall)
                     .foregroundColor(.secondary)
+                // 金额一键隐藏（1.3.2.013）：眼睛紧挨标题（1.3.2.018 从最右边挪过来），
+                // 点一下本页全部金额脱敏为 ¥****。
+                HideAmountsEyeButton()
                 Spacer()
-                // 「当月」按钮：不在默认月（上个月）时才画在标题行里；默认月时直接不画——
-                // 标题行高度由标题 + 眼睛定，按钮显隐不改变行高，不用占位。
+                // 「当月」按钮：不在默认月（上个月）时才画在标题行最右边（1.3.2.018 从
+                // 眼睛左边挪过来）；默认月时直接不画——标题行高度由标题 + 眼睛定，
+                // 按钮显隐不改变行高，不用占位。
                 if PayView.monthIndex(year: ym.year, month: ym.month) != defaultMonth {
                     backToTodayButton
                 }
-                // 金额一键隐藏（1.3.2.013）：右上角眼睛，点一下本页全部金额脱敏为 ¥****。
-                HideAmountsEyeButton()
             }
             // 顶卡固定高度（1.3.2.016，老爷令）：有工资和 TBD 两套结构等高——
             // 总数行都是 32pt（TBD 放「—」）；构成条与三列小字在 TBD 时用

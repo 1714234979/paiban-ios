@@ -430,14 +430,45 @@ final class AppStore {
 
     /// 注册（1.2.6）：昵称（displayName，可空）与短信验证码（code，服务端核验）一起交；
     /// 昵称空着就用手机号当显示名（服务端默认同用户名）。
-    func register(username: String, password: String, displayName: String? = nil, code: String? = nil) async throws {
+    func register(username: String, password: String, displayName: String? = nil, code: String? = nil, confirmDeleteCancelled: Bool = false) async throws {
         if !serverReachable, !(await api.resolveServer()) {
             throw APIError.unreachable
         }
         serverBaseURL = api.baseURL
         serverKind = api.serverKind
         serverReachable = true
-        _ = try await api.register(username: username, password: password, displayName: displayName, code: code)
+        _ = try await api.register(username: username, password: password, displayName: displayName, code: code, confirmDeleteCancelled: confirmDeleteCancelled)
+        let me = try await api.fetchMe()
+        user = me
+        isLoggedIn = true
+        isOffline = false
+        viewTeam = me.displayTeam
+        UserDefaults.standard.set(me.id ?? me.username ?? "", forKey: lastUserIdKey)
+        loadCacheForCurrentUser()
+        registerThisDevice()
+        await refreshAll()
+        await checkForUpdateAfterLaunch()
+    }
+
+    /// 注销账号（1.3.2.018）：调服务端注销接口（软删除 + 30 天删除期限），成功后
+    /// 清本地登录态、回登录页。30 天内同一手机号重新注册时，服务端返回
+    /// cancelledAccount 标志，注册页弹出「找回旧账号 / 注册新账号」选择。
+    func cancelAccount() async throws -> APIClient.CancelAccountResult {
+        let result = try await api.cancelAccount()
+        await logout()
+        return result
+    }
+
+    /// 找回已注销的账号（1.3.2.018）：30 天冷静期内同一手机号重新注册时选
+    /// 「找回旧账号数据」走这里。恢复成功后按注册成功一样登录并进引导。
+    func restoreCancelledAccount(username: String, password: String) async throws {
+        if !serverReachable, !(await api.resolveServer()) {
+            throw APIError.unreachable
+        }
+        serverBaseURL = api.baseURL
+        serverKind = api.serverKind
+        serverReachable = true
+        _ = try await api.restoreCancelledAccount(username: username, password: password)
         let me = try await api.fetchMe()
         user = me
         isLoggedIn = true

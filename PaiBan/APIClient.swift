@@ -7,7 +7,16 @@ import UIKit
 /// API 错误：message 直接展示给用户（服务端返回的中文错误原样透传）。
 struct APIError: LocalizedError {
     let message: String
+    /// 注销冷静期标志（1.3.2.018）：注册时服务端返回 cancelledAccount，说明该手机号
+    /// 30 天内注销过账号；带上旧账号的删除期限，注册页据此弹出
+    /// 「找回旧账号数据 / 注册新账号」选择。平时为 nil。
+    let cancelledDeleteAt: String?
     var errorDescription: String? { message }
+
+    init(message: String, cancelledDeleteAt: String? = nil) {
+        self.message = message
+        self.cancelledDeleteAt = cancelledDeleteAt
+    }
 
     static let unreachable = APIError(message: "连不上服务器（云服务器与 NAS 备份都试过了），请检查网络后再试")
     static let notLoggedIn = APIError(message: "未登录，请先登录")
@@ -29,6 +38,11 @@ struct AuthResponse: Decodable {
     let apiKey: String?
     let error: String?
     let note: String?
+    /// 注销冷静期标志（1.3.2.018）：该手机号 30 天内注销过账号，注册时需让用户选择
+    /// 找回旧账号还是注册新账号。服务端未实现该标志时为 nil。
+    let cancelledAccount: Bool?
+    /// 已注销账号的删除期限（cancelledAccount 为 true 时服务端返回，如 "2026-12-28"）。
+    let deleteAt: String?
 }
 
 /// 空 data（只关心 ok/error 的接口）。
@@ -417,7 +431,10 @@ final class APIClient {
     /// 1.2.6：昵称（displayName，可空）与短信验证码（code，服务端核验）一起交；
     /// 昵称空着服务端就用手机号当显示名。
     @discardableResult
-    func register(username: String, password: String, displayName: String? = nil, code: String? = nil) async throws -> PublicUser {
+    /// POST /api/v1/auth/register。1.3.2.018：服务端返回 cancelledAccount 时抛带删除期限的
+    /// APIError（注册页据此弹出「找回旧账号 / 注册新账号」选择）；confirmDeleteCancelled
+    /// 为 true 时告诉服务端「确认删除旧账号数据并注册新账号」（用户在选择里二次确认过）。
+    func register(username: String, password: String, displayName: String? = nil, code: String? = nil, confirmDeleteCancelled: Bool = false) async throws -> PublicUser {
         guard baseURL != nil else { throw APIError.unreachable }
         let url = try url(for: "/api/v1/auth/register")
         var req = URLRequest(url: url)
@@ -428,6 +445,7 @@ final class APIClient {
         ]
         if let displayName, !displayName.isEmpty { body["displayName"] = displayName }
         if let code, !code.isEmpty { body["code"] = code }
+        if confirmDeleteCancelled { body["confirmDeleteCancelled"] = true }
         req.httpBody = try JSONSerialization.data(withJSONObject: body)
         let (data, response): (Data, URLResponse)
         do {
@@ -441,6 +459,9 @@ final class APIClient {
             auth = try decoder.decode(AuthResponse.self, from: data)
         } catch {
             throw APIError(message: "注册失败（HTTP \(status)）")
+        }
+        if auth.cancelledAccount == true {
+            throw APIError(message: "该手机号 30 天内注销过账号", cancelledDeleteAt: auth.deleteAt)
         }
         guard auth.ok, let user = auth.user else {
             throw APIError(message: auth.error ?? "注册失败")
@@ -482,6 +503,29 @@ final class APIClient {
     /// GET /api/v1/me
     func fetchMe() async throws -> UserProfile {
         try await request(path: "/api/v1/me")
+    }
+
+    /// 注销账号返回的 data：{cancelledAt, deleteAt}（1.3.2.018；服务端接口，婉儿另做）。
+    struct CancelAccountResult: Decodable {
+        let cancelledAt: String?
+        let deleteAt: String?
+    }
+
+    /// POST /api/v1/me/cancel —— 注销账号（1.3.2.018）：软删除 + 记录删除期限。
+    /// body {confirm: true}；成功返回 data {cancelledAt, deleteAt}。
+    /// 调用方随后清本地登录态、回登录页。
+    func cancelAccount() async throws -> CancelAccountResult {
+        try await request(path: "/api/v1/me/cancel", method: "POST", jsonBody: ["confirm": true])
+    }
+
+    /// POST /api/v1/me/restore —— 找回已注销的账号（1.3.2.018）：30 天冷静期内，
+    /// 同一手机号重新注册时选「找回旧账号数据」走这里。用刚填的手机号 + 密码验身份，
+    /// 恢复成功返回用户（Envelope data），调用方按注册成功一样登录。
+    func restoreCancelledAccount(username: String, password: String) async throws -> PublicUser {
+        let user: PublicUser = try await request(path: "/api/v1/me/restore", method: "POST",
+                                                 jsonBody: ["username": username, "password": password])
+        KeychainHelper.save(username: username, password: password)
+        return user
     }
 
     /// POST /api/v1/me/device —— 设备直连登记（1.2.7.004）。

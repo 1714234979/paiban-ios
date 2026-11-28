@@ -353,9 +353,10 @@ struct PayGuideView: View {
     @State private var bonusCoefText = ""
     @State private var pensionText = ""
     @State private var position = "员工"
-    @State private var hireYear = 2018
-    @State private var hireMonth = 10
-    @State private var annualLeaveText = "5"
+    // 1.3.2.018（老爷 2026-11-28 21:23/21:25 亲口令）：数值默认改空白；入职时间默认当天。
+    @State private var hireYear = Calendar.current.component(.year, from: Date())
+    @State private var hireMonth = Calendar.current.component(.month, from: Date())
+    @State private var annualLeaveText = ""
     @State private var errorText: String?
     @State private var isBusy = false
 
@@ -449,7 +450,7 @@ struct PayGuideView: View {
             HStack {
                 Text("基本工资")
                 Spacer()
-                TextField("2420", text: $baseSalaryText)
+                TextField("输入金额", text: $baseSalaryText)
                     .keyboardType(.decimalPad)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 120)
@@ -458,7 +459,7 @@ struct PayGuideView: View {
             HStack {
                 Text("奖金系数")
                 Spacer()
-                TextField("1.0", text: $bonusCoefText)
+                TextField("输入系数", text: $bonusCoefText)
                     .keyboardType(.decimalPad)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 120)
@@ -478,7 +479,7 @@ struct PayGuideView: View {
             HStack {
                 Text("养老月扣")
                 Spacer()
-                TextField("475.04", text: $pensionText)
+                TextField("输入金额", text: $pensionText)
                     .keyboardType(.decimalPad)
                     .multilineTextAlignment(.trailing)
                     .frame(width: 120)
@@ -562,17 +563,18 @@ struct PayGuideView: View {
 
     // MARK: 预填与保存
 
-    /// 预填：用户已有的设定（管理员可能先帮填了一部分）；没有就按设置页同一套默认值。
+    /// 预填：用户已有的设定（管理员可能先帮填了一部分）；没有就留空（1.3.2.018，
+    /// 老爷令：数值默认改空白，让用户自己输；入职时间默认当天）。
     private func fillFields() {
         let settings = store.user?.paySettings
-        baseSalaryText = settings?.baseSalary.map { moneyText($0) } ?? "2420"
-        bonusCoefText = settings?.bonusCoef.map { String(format: "%.1f", $0) } ?? "1.0"
-        let base = settings?.contributionBase ?? 5938
-        pensionText = moneyText(PayCalc.round2(base * 0.08))
+        baseSalaryText = settings?.baseSalary.map { moneyText($0) } ?? ""
+        bonusCoefText = settings?.bonusCoef.map { String(format: "%.1f", $0) } ?? ""
+        pensionText = settings?.contributionBase.map { moneyText(PayCalc.round2($0 * 0.08)) } ?? ""
         position = settings?.position ?? "员工"
-        hireYear = settings?.hireYear ?? 2018
-        hireMonth = settings?.hireMonth ?? 10
-        annualLeaveText = settings?.annualLeaveRemaining.map { String($0) } ?? "5"
+        let now = Date()
+        hireYear = settings?.hireYear ?? Calendar.current.component(.year, from: now)
+        hireMonth = settings?.hireMonth ?? Calendar.current.component(.month, from: now)
+        annualLeaveText = settings?.annualLeaveRemaining.map { String($0) } ?? ""
     }
 
     private func moneyText(_ value: Double) -> String {
