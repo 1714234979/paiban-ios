@@ -16,7 +16,7 @@ private func calendarRowSpacing(weeks: Int) -> CGFloat {
 /// 标题视差的页位置上报（1.3.2.007，整改提示词 §3.3）：每页用 GeometryReader 把
 /// 自己在 monthPager 坐标系里的 minX + 页宽报上来，父视图按当前页的位移算标题的
 /// 0.5 倍视差。原生 TabView 不直接暴露拖拽进度，这是取进度的办法。
-private struct PageGeom {
+private struct PageGeom: Equatable {
     var minX: CGFloat
     var width: CGFloat
 }
@@ -820,6 +820,26 @@ struct MonthPageView: View {
     /// 点“今天”后要微闪的日期（1.3.2.007，iOS.docx §3.2）：等于今天的格子闪一次，平时是 nil。
     /// 有默认值，旧的调用处不用改。
     let flashDate: String? = nil
+
+    /// 显式初始化（1.3.2.007：合成的 memberwise init 在这台工具链上不认新加的
+    /// flashDate 参数——疑似 @EnvironmentObject store 干扰了合成；显式写死最稳妥）。
+    init(
+        year: Int,
+        month: Int,
+        preloadedDays: [(day: DaySchedule, kind: GridDayKind)]?,
+        isSelected: @escaping (String) -> Bool,
+        onSelectDay: @escaping (DaySchedule) -> Void,
+        onSelectAdjacentMonth: @escaping (Int, Int) -> Void,
+        flashDate: String? = nil
+    ) {
+        self.year = year
+        self.month = month
+        self.preloadedDays = preloadedDays
+        self.isSelected = isSelected
+        self.onSelectDay = onSelectDay
+        self.onSelectAdjacentMonth = onSelectAdjacentMonth
+        self.flashDate = flashDate
+    }
 
     /// 一格的身份：上月补的 / 本月 / 下月补的（点上月/下月补的跳到对应月）。
     enum GridDayKind { case leading, current, trailing }
