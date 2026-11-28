@@ -32,6 +32,13 @@ struct CalendarView: View {
     }()
     private var pageRange: Range<Int> { windowStartIndex..<(windowStartIndex + 240) }
 
+    /// 预加载窗口（1.3.2.004，老爷 2026-11-28 11:32 亲口定）：
+    /// 当前页前后各 10 个月，共 21 页——“我每翻一页就加载 21 页”。
+    /// 每页的格子在父视图提前算好存在这里，页滑过来时直接用，
+    /// 不在滑动中现算、现拍快照（慢拖卡顿的根：下一页/上一页原来是现加载的）。
+    private static let preloadRadius = 10
+    @State private var preloadedGrids: [Int: [(DaySchedule, MonthPageView.GridDayKind)]] = [:]
+
     /// 共享班表页（1.2.7.001，第 24 条）。
     @State private var showShareSchedule = false
     /// 手动排班页（1.2.7.002）：手动模式时从排班页进。
@@ -39,6 +46,26 @@ struct CalendarView: View {
 
     static func monthIndex(year: Int, month: Int) -> Int { year * 12 + (month - 1) }
     private func yearMonth(from index: Int) -> (year: Int, month: Int) { (index / 12, index % 12 + 1) }
+
+    /// 以 center 为中心预加载 21 页的格子（只算本地数据：monthFor 走缓存/本地 8 天一轮；
+    /// 网络预取由 monthFor 里已有的 prefetchMonth 顺带做，调班/请假一起回来）。
+    /// 窗口外的旧页直接丢掉，只留 21 页；数据变了（日历数据/换班组/显示设置）
+    /// 就整窗重算，已缓存的页直接复用、不重复算。
+    private func preloadAround(_ center: Int) {
+        let lo = max(pageRange.lowerBound, center - Self.preloadRadius)
+        let hi = min(pageRange.upperBound - 1, center + Self.preloadRadius)
+        var next: [Int: [(DaySchedule, MonthPageView.GridDayKind)]] = [:]
+        next.reserveCapacity(hi - lo + 1)
+        for idx in lo...hi {
+            if let cached = preloadedGrids[idx] {
+                next[idx] = cached
+            } else {
+                let ym = yearMonth(from: idx)
+                next[idx] = MonthPageView.buildGridDays(year: ym.year, month: ym.month, store: store)
+            }
+        }
+        preloadedGrids = next
+    }
 
     var body: some View {
         ScrollView {
@@ -93,6 +120,8 @@ struct CalendarView: View {
             let prev = yearMonth(from: pageIndex - 1)
             store.prefetchMonth(year: next.year, month: next.month)
             store.prefetchMonth(year: prev.year, month: prev.month)
+            // 1.3.2.004：进页就把前后 10 个月共 21 页的格子算好，第一次滑就不用现算。
+            preloadAround(pageIndex)
             // 1.1.3：阴历缓存预热 + 工资输入补齐（日历的三薪标与底部统计要用）。
             // 阴历按月分批算（主线程，DateFormatter 不线程安全），每批之间让出主线程，
             // 避免一次算 240 个月堵住界面；滑到新月时阴历已是缓存，不再现算。
@@ -116,6 +145,8 @@ struct CalendarView: View {
         // 再换月 + 预取前后月 + 刷新。标题和底部统计直接跟 pageIndex 走（见 pagerTitle /
         // displayedMonth），不经过 store.currentYearMonth，所以落定前也不错位。
         .onChange(of: pageIndex) { newIndex in
+            // 1.3.2.004：落到哪页就以那页为中心重算 21 页——下一页还没滑到就已经算好了。
+            preloadAround(newIndex)
             refreshTask?.cancel()
             refreshTask = Task {
                 try? await Task.sleep(nanoseconds: 400_000_000)
@@ -130,8 +161,14 @@ struct CalendarView: View {
             }
         }
         .onChange(of: store.viewTeam) { _ in
+            // 1.3.2.004：换班组立刻按新班组重算 21 页（monthFor 按新班组算），再后台刷新。
+            preloadAround(pageIndex)
             Task { await store.refreshMonth() }
         }
+        // 1.3.2.004：日历真数据到了 / 显示设置（周一首日、显示上下月）改了，
+        // 预加载的 21 页整窗重算，已缓存的页直接复用。
+        .onChange(of: store.calendarVersion) { _ in preloadAround(pageIndex) }
+        .onChange(of: store.calendarDisplay) { _ in preloadAround(pageIndex) }
         .sheet(isPresented: $showDayDetail) {
             if let selectedDay {
                 DayDetailView(day: selectedDay)
@@ -156,12 +193,16 @@ struct CalendarView: View {
             if let day = store.todaySchedule {
                 let inputs = store.todayEstimateInputs
                 TodayLiveRow(day: day, earlyRate: inputs.earlyRate, midRate: inputs.midRate, inputs: inputs.inputs, showMoney: store.payAccess)
+                    .transition(.opacity)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .background(AppStyle.navyAdaptive)
         .cornerRadius(16)
+        // 1.3.2.004（老爷 2026-11-28 11:39 亲口定）：休息的班没有预计工资，黑卡只有两行、
+        // 上班的班有四行——切班时黑卡高度是慢慢变的，不再一下子跳（下面的日历跟着顺滑地挪）。
+        .animation(AppMotion.smooth(), value: store.viewTeam)
     }
 
     /// 今天的年月日 + 周几，如“2026年11月24日 星期二”。
@@ -286,6 +327,7 @@ struct CalendarView: View {
                     let ym = yearMonth(from: idx)
                     MonthPageView(
                         year: ym.year, month: ym.month,
+                        preloadedDays: preloadedGrids[idx],
                         isSelected: { selectedDay?.date == $0 },
                         onSelectDay: { day in
                             selectedDay = day
@@ -375,41 +417,72 @@ struct CalendarView: View {
 
     // MARK: 调班 / 请假记录
 
+    /// 当前页那年那月（跟滑页走，不等网络）。
+    private var displayedYearMonth: (year: Int, month: Int) { yearMonth(from: pageIndex) }
+
+    /// 当前页那月的调班记录（月缓存里读）：到了就是数组，没到是 nil（显示“正在加载…”）；
+    /// 看别的班时没有自己的记录，直接给 []（对方的调班不动，见 overlayPartnerRecords）。
+    /// 订阅 recordsVersion：预取回来新数据就重画，不用等整月刷新。
+    private var displayedSwaps: [SwapRecord]? {
+        let _ = store.recordsVersion
+        guard store.viewTeam == store.myTeam else { return [] }
+        let ym = displayedYearMonth
+        return store.swapsFor(year: ym.year, month: ym.month)
+    }
+    /// 当前页那月的请假记录（同上）。
+    private var displayedLeaves: [LeaveRecord]? {
+        let _ = store.recordsVersion
+        guard store.viewTeam == store.myTeam else { return [] }
+        let ym = displayedYearMonth
+        return store.leavesFor(year: ym.year, month: ym.month)
+    }
+    /// 当前页那月的调班记录并成“替班日 + 还班日”一条（跟原来 mergedSwapRows 同算法，
+    /// 只改数据源：原来读 store.swaps（落定刷新才换月），现在读当前页的月缓存）。
+    private var displayedSwapRows: [SwapRow] { mergedRows(for: displayedSwaps ?? []) }
+
     private var recordsSection: some View {
-        // 本月没有任何调班和请假记录时，整张卡片直接藏掉，不显示“没有记录”那行。
-        Group {
-            if !mergedSwapRows.isEmpty || !store.leaves.isEmpty {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("本月调班 / 请假")
-                        .appFont(size: AppFont.headline, weight: 600)
-                    ForEach(mergedSwapRows, id: \.key) { row in
-                        swapRow(row)
-                    }
-                    ForEach(store.leaves, id: \.date) { leave in
-                        HStack(alignment: .top) {
-                            Circle()
-                                .fill(Color.red)
-                                .frame(width: 8, height: 8)
-                            Text(leave.date)
-                                .appFont(size: AppFont.bodySmall)
-                            Text(leave.type ?? "请假")
-                                .appFont(size: AppFont.bodySmall)
-                                .foregroundColor(.red)
-                            Spacer()
-                            if let note = leave.note, !note.isEmpty {
-                                Text(note)
-                                    .appFont(size: AppFont.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
+        // 1.3.2.004（老爷 2026-11-28 11:33 亲口定）：这张卡一直存在，不再没记录就藏掉——
+        // 本月没有调班请假就显示“本月没有调班请假”，数据没到先显示“正在加载…”。
+        // 卡的高度不再忽有忽无，滑页时页面不再往上跳。数据跟当前页走（月缓存，预加载 21 页）。
+        VStack(alignment: .leading, spacing: 8) {
+            Text("本月调班 / 请假")
+                .appFont(size: AppFont.headline, weight: 600)
+            if displayedSwaps == nil || displayedLeaves == nil {
+                Text("正在加载…")
+                    .appFont(size: AppFont.bodySmall)
+                    .foregroundColor(.secondary)
+            } else if displayedSwapRows.isEmpty && (displayedLeaves ?? []).isEmpty {
+                Text("本月没有调班请假")
+                    .appFont(size: AppFont.bodySmall)
+                    .foregroundColor(.secondary)
+            } else {
+                ForEach(displayedSwapRows, id: \.key) { row in
+                    swapRow(row)
                 }
-                .padding(AppStyle.cardPadding)
-                .background(AppStyle.surface1)
-                .cornerRadius(AppStyle.cardRadius)
+                ForEach(displayedLeaves ?? [], id: \.date) { leave in
+                    HStack(alignment: .top) {
+                        Circle()
+                            .fill(Color.red)
+                            .frame(width: 8, height: 8)
+                        Text(leave.date)
+                            .appFont(size: AppFont.bodySmall)
+                        Text(leave.type ?? "请假")
+                            .appFont(size: AppFont.bodySmall)
+                            .foregroundColor(.red)
+                        Spacer()
+                        if let note = leave.note, !note.isEmpty {
+                            Text(note)
+                                .appFont(size: AppFont.caption)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
             }
         }
+        .padding(AppStyle.cardPadding)
+        .background(AppStyle.surface1)
+        .cornerRadius(AppStyle.cardRadius)
     }
 
     /// 调班记录按“替班日 + 还班日”并成一条：coverDate / paybackDate 互相指向的算一对。
@@ -419,8 +492,8 @@ struct CalendarView: View {
         var id: String { key }
     }
 
-    private var mergedSwapRows: [SwapRow] {
-        let sorted = store.swaps.sorted { $0.date < $1.date }
+    private func mergedRows(for swaps: [SwapRecord]) -> [SwapRow] {
+        let sorted = swaps.sorted { $0.date < $1.date }
         var byDate: [String: SwapRecord] = [:]
         for s in sorted { byDate[s.date] = s }
         var visited = Set<String>()
@@ -493,13 +566,17 @@ struct MonthPageView: View {
     @EnvironmentObject private var store: AppStore
     let year: Int
     let month: Int
+    /// 父视图预加载好的本页格子（前后 10 个月共 21 页）：有就直接用，不拍快照、
+    /// 不等出现时现算；没有（窗口外、刚翻过来的新页）才走原来的快照兜底。
+    /// 1.3.2.004（老爷 2026-11-28 11:32 亲口定预加载 21 页）。
+    let preloadedDays: [(DaySchedule, GridDayKind)]?
     let isSelected: (String) -> Bool
     let onSelectDay: (DaySchedule) -> Void
     /// 点到上月/下月补的日期时跳到对应月。
     let onSelectAdjacentMonth: (Int, Int) -> Void
 
     /// 一格的身份：上月补的 / 本月 / 下月补的（点上月/下月补的跳到对应月）。
-    private enum GridDayKind { case leading, current, trailing }
+    enum GridDayKind { case leading, current, trailing }
 
     /// 1.1.5：本页的数据快照——出现时从 store 取一次存在 @State 里，滑动中只读快照，
     /// store 再怎么写（prefetch 回来、setCurrentMonth、refresh）都动不了正在滑的这一页。
@@ -519,12 +596,35 @@ struct MonthPageView: View {
     /// 1.1.4：原来是 LazyVGrid，滑页中预取回来写 @Published、视图重算，
     /// LazyVGrid 懒加载重排、格子错位。改成固定 VStack + HStack：
     /// 每格固定 64pt、7 列写死，格子永远在固定位置。
-    private var gridDays: [(day: DaySchedule, kind: GridDayKind)] {
+    /// 1.3.2.004：格子算法抽成静态纯函数——父视图预加载 21 页时调这一份，
+    /// 本页兜底也调这一份，不另写一份算法（两份算法迟早对不上）。
+    static func buildGridDays(year: Int, month: Int, store: AppStore) -> [(DaySchedule, GridDayKind)] {
+        let prev = month == 1 ? (year - 1, 12) : (year, month - 1)
+        let next = month == 12 ? (year + 1, 1) : (year, month + 1)
+        let mondayFirst = store.calendarDisplay.mondayFirst
+        let firstWeekday = DateUtil.firstWeekday(year: year, month: month)
+        // 每月第一周前面补上月末尾几天（周一为首日时，前导数按周一偏移）。
+        let leading = mondayFirst ? (firstWeekday + 6) % 7 : firstWeekday
         var result: [(DaySchedule, GridDayKind)] = []
-        for d in leadingDays { result.append((d, .leading)) }
-        for d in (monthData.days ?? []) { result.append((d, .current)) }
-        for d in trailingDays { result.append((d, .trailing)) }
+        if leading > 0 {
+            let prevMonth = store.monthFor(year: prev.0, month: prev.1)
+            result += (prevMonth.days ?? []).suffix(leading).map { ($0, GridDayKind.leading) }
+        }
+        let current = store.monthFor(year: year, month: month)
+        result += (current.days ?? []).map { ($0, GridDayKind.current) }
+        // 每月最后一周后面补下月开头几天，补满整周。
+        let days = DateUtil.daysInMonth(year: year, month: month)
+        let remainder = (leading + days) % 7
+        let trailing = remainder == 0 ? 0 : 7 - remainder
+        if trailing > 0 {
+            let nextMonth = store.monthFor(year: next.0, month: next.1)
+            result += (nextMonth.days ?? []).prefix(trailing).map { ($0, GridDayKind.trailing) }
+        }
         return result
+    }
+
+    private var gridDays: [(day: DaySchedule, kind: GridDayKind)] {
+        Self.buildGridDays(year: year, month: month, store: store)
     }
 
     var body: some View {
@@ -538,7 +638,8 @@ struct MonthPageView: View {
         // 日历得重画（之前没订阅，输入到了也不重画，统计要等别的状态变了才冒出来）。
         // 三薪标本身（第 33 条）只按法定表，不依赖工资输入；网格本身（snapDays）是快照，滑动中不动。
         let _ = store.payInputsVersion
-        let days = snapLoaded ? snapDays : gridDays
+        // 1.3.2.004：父视图预加载好的格子直接用（21 页窗口内）；窗口外才走快照兜底。
+        let days = preloadedDays ?? (snapLoaded ? snapDays : gridDays)
         // 格子总数恒等于 行数×7（上月补 + 本月 + 下月补正好拼满整周），行数从快照算。
         let weeks = max(1, days.count / 7)
         VStack(spacing: calendarRowSpacing(weeks: weeks)) {
@@ -563,9 +664,11 @@ struct MonthPageView: View {
         // 不动命中测试），选中态变了整格重栅格化一次即可。
         .clipped()
         .drawingGroup()
-        .task { takeSnapshot() }
-        .onChange(of: store.calendarVersion) { _ in takeSnapshot() }
-        .onChange(of: store.viewTeam) { _ in takeSnapshot() }
+        // 1.3.2.004：有预加载的格子就不用拍快照（父视图算好直接给，不再出现时现算、
+        // 再重画一遍）；只有窗口外的页才走原来的快照兜底。
+        .task { if preloadedDays == nil { takeSnapshot() } }
+        .onChange(of: store.calendarVersion) { _ in if preloadedDays == nil { takeSnapshot() } }
+        .onChange(of: store.viewTeam) { _ in if preloadedDays == nil { takeSnapshot() } }
     }
 
     /// 一格：按身份给不同的点按行为（本月点开详情，上月/下月补的跳到对应月）。
@@ -612,28 +715,6 @@ struct MonthPageView: View {
     }
     private var nextYearMonth: (year: Int, month: Int) {
         month == 12 ? (year + 1, 1) : (year, month + 1)
-    }
-
-    /// 每月第一周前面补上月末尾几天。
-    /// 周一为每周首日时，前导数按周一偏移（0=周日 → 周一首日 = (weekday+6)%7）。
-    private var leadingDays: [DaySchedule] {
-        let firstWeekday = DateUtil.firstWeekday(year: year, month: month)
-        let count = store.calendarDisplay.mondayFirst ? (firstWeekday + 6) % 7 : firstWeekday
-        guard count > 0 else { return [] }
-        let prev = store.monthFor(year: prevYearMonth.year, month: prevYearMonth.month)
-        return Array((prev.days ?? []).suffix(count))
-    }
-
-    /// 每月最后一周后面补下月开头几天，补满整周。
-    private var trailingDays: [DaySchedule] {
-        let firstWeekday = DateUtil.firstWeekday(year: year, month: month)
-        let leading = store.calendarDisplay.mondayFirst ? (firstWeekday + 6) % 7 : firstWeekday
-        let days = DateUtil.daysInMonth(year: year, month: month)
-        let remainder = (leading + days) % 7
-        let count = remainder == 0 ? 0 : 7 - remainder
-        guard count > 0 else { return [] }
-        let next = store.monthFor(year: nextYearMonth.year, month: nextYearMonth.month)
-        return Array((next.days ?? []).prefix(count))
     }
 }
 

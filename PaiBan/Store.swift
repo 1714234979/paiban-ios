@@ -169,6 +169,9 @@ final class AppStore: ObservableObject {
     /// 只有真正的数据变更才 +1 让各页重拍快照——调班/请假保存、刷新成功、换班组。
     /// 滑页中的 prefetch / setCurrentMonth 不碰它，滑稳之前快照一动不动。
     @Published var calendarVersion = 0
+    /// 调班/请假缓存版本号（1.3.2.004）：预取回来新数据就 +1——排班页的记录框直接读
+    /// 月缓存（swapsCache/leavesCache），靠它重画，不用等整月刷新。
+    @Published var recordsVersion = 0
     /// 正在后台取的月份，按「班组-yyyy-MM」记在途的 Task：同一个月只发一次请求，
     /// 再有人要这个月就直接复用正在跑的那个 Task（等它写完缓存），不要重复发请求。
     /// 1.1.4 只用一个 Set 记 key，只能“跳过”重复请求；现在记 Task，refreshMonth
@@ -625,6 +628,12 @@ final class AppStore: ObservableObject {
         return viewTeam == myTeam ? local : overlayPartnerRecords(local, year: year, month: month)
     }
 
+    /// 某月调班记录（月缓存里读，1.3.2.004）：到了返回数组，没到返回 nil——
+    /// 视图显示“正在加载…”，不错当成“没有记录”。预取由 monthFor/prefetchMonth 顺带做。
+    func swapsFor(year: Int, month: Int) -> [SwapRecord]? { swapsCache[payCacheKey(year: year, month: month)] }
+    /// 某月请假记录（同上）。
+    func leavesFor(year: Int, month: Int) -> [LeaveRecord]? { leavesCache[payCacheKey(year: year, month: month)] }
+
     /// 看别的班的日历：本地 8 天一轮的基础上，叠上我自己的调班记录里 partner==这个班的那几条
     /// （对方那天最终上的班 = 记录里的 partnerShift；对方那天是替我上的，记 partner=我这边的班、
     /// partnerShift=我这天最终的班）。请假顶岗的记录也在同一份 overrides 里，一起叠上。
@@ -736,6 +745,8 @@ final class AppStore: ObservableObject {
             if let swaps { swapsCache[mk] = swaps }
             if let leaves { leavesCache[mk] = leaves }
             if let ot { overtimeCache[mk] = ot }
+            // 1.3.2.004：调班/请假缓存到了就 +1，读缓存的记录框立刻重画（不用等整月刷新）。
+            recordsVersion += 1
             isOffline = false
         }
         monthLoadTasks[key] = task

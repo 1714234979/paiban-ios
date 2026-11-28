@@ -294,6 +294,12 @@ enum AppMotion {
     static func standard(_ duration: Double = 0.25) -> Animation {
         .timingCurve(0.2, 0, 0, 1, duration: duration)
     }
+    /// 平滑缓动（1.3.2.004：工资页切月、顶栏黑卡高度变化用）：慢进慢出，不抢不顿。
+    /// 老爷 2026-11-28 11:34 亲口定工资页动画“改成平滑的”（不是再加一个）。
+    /// 默认 0.35s；底栏切页要更快（0.25s，苹果商店那种“迅速又平滑”）。
+    static func smooth(_ duration: Double = 0.35) -> Animation {
+        .timingCurve(0.4, 0, 0.2, 1, duration: duration)
+    }
 }
 
 /// 水墨晕染式出现（视频细节 3）：blur 6→0、120ms、cubic-bezier(.16,1,.3,1)，

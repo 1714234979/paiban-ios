@@ -31,8 +31,28 @@ struct PayView: View {
     }()
     private var pageRange: Range<Int> { windowStartIndex..<(windowStartIndex + 240) }
 
+    /// 邻月工资预热的在途任务（1.3.2.004）：翻得快时旧任务直接取消，只留最新的。
+    @State private var preloadPayTask: Task<Void, Never>?
+
     static func monthIndex(year: Int, month: Int) -> Int { year * 12 + (month - 1) }
     private func yearMonth(from index: Int) -> (year: Int, month: Int) { (index / 12, index % 12 + 1) }
+
+    /// 邻月工资预热（1.3.2.004）：切月动画改成平滑的之后，邻月的工资也要提前算好——
+    /// 不然滑到新月那一刻才现算整月工资（累计个税要从 1 月算起），主线程一顿就是卡。
+    /// 每算一月让出一次主线程，不堵界面；输入没到齐算不出就跳过，等 refreshPay 补。
+    private func preloadPayAround(_ center: Int) {
+        preloadPayTask?.cancel()
+        preloadPayTask = Task {
+            let lo = max(pageRange.lowerBound, center - 10)
+            let hi = min(pageRange.upperBound - 1, center + 10)
+            for idx in lo...hi {
+                if Task.isCancelled { return }
+                let ym = yearMonth(from: idx)
+                _ = store.payFor(year: ym.year, month: ym.month)
+                await Task.yield()
+            }
+        }
+    }
 
     var body: some View {
         // 工资权限兜底（1.2.7.001，第 23 条）：没权限的人工资 Tab 本来就隐藏，
@@ -123,6 +143,8 @@ struct PayView: View {
             let ym = yearMonth(from: newIndex)
             dismissEdit()
             store.setPayMonth(year: ym.year, month: ym.month)
+            // 1.3.2.004：落到哪月就把前后 10 个月的工资提前算好，滑过去直接显示。
+            preloadPayAround(newIndex)
         }
         // 切到别的页面（排班/设置）时，敞着的编辑框自动收起，丢弃未保存的改动。
         .onDisappear { dismissEdit() }
@@ -136,6 +158,8 @@ struct PayView: View {
             if store.pay == nil {
                 await store.refreshPay()
             }
+            // 1.3.2.004：进页就把前后 10 个月的工资提前算好，第一次滑就不用现算。
+            preloadPayAround(pageIndex)
             // 专项扣除询问（第 52 条，2026-11-27）：有工资权限、设定已填完、还没问过、
             // 且还没填专项扣除，第一次进工资页时弹窗问一次「有没有专项附加扣除」。
             if store.payAccess && !store.needsPaySetup && !store.specialDeductionAsked
@@ -187,7 +211,7 @@ struct PayView: View {
     private var monthStepper: some View {
         HStack {
             Button {
-                withAnimation(AppMotion.standard()) {
+                withAnimation(AppMotion.smooth()) {
                     pageIndex = max(pageRange.lowerBound, pageIndex - 1)
                 }
             } label: {
@@ -201,7 +225,7 @@ struct PayView: View {
                 .appFont(size: 20, weight: 700).monospacedDigit()
             Spacer()
             Button {
-                withAnimation(AppMotion.standard()) {
+                withAnimation(AppMotion.smooth()) {
                     pageIndex = min(pageRange.upperBound - 1, pageIndex + 1)
                 }
             } label: {

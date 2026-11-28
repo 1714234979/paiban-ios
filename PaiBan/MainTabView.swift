@@ -58,6 +58,10 @@ struct MainTabView: View {
             .tag(2)
         }
         .tint(Color.accentColor)
+        // 1.3.2.004（老爷 2026-11-28 11:43 亲口定，看苹果商店的底栏切换）：
+        // 底栏切页要迅速又平滑——0.25s 平滑淡入淡出，胶囊指示条跟着系统一起滑过去。
+        // 之前是系统默认的直接切换，没有过渡，看着生硬。
+        .animation(AppMotion.smooth(0.25), value: store.selectedTab)
         // 1.2.8.002：Tab 选中态走自适应强调色（浅色深 navy、深色亮蓝），
         // 别让系统默认去猜；未选中态在 PaiBanApp.init 里用 UITabBar 外观定。
         // 没登录时点小组件进来的深链：登录后进主界面再跳（store.handleDeepLink 先记下来）。
@@ -65,6 +69,11 @@ struct MainTabView: View {
             if let tab = store.pendingDeepLinkTab {
                 store.pendingDeepLinkTab = nil
                 store.selectedTab = tab
+            }
+            // 1.3.2.004：启动时就把工资算好——不然第一次点工资 Tab 才现算现取，
+            // 切换过去要等一下，快不起来。没权限 / 设定没填完时 refreshPay 自己会停。
+            if store.payAccess && store.pay == nil {
+                await store.refreshPay()
             }
         }
         // 工资权限没了（管理员关了）而当前正停在工资 Tab：切回排班。
