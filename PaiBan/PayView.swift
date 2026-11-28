@@ -155,6 +155,43 @@ struct PayView: View {
         )
     }
 
+    /// 某个月的整页内容（1.3.2.010）：黑卡固定页眉 + 明细竖滚。
+    /// 单独抽成函数——整页塞在分页器闭包里会让 body 的类型检查超时（编包报错），
+    /// 拆出来才能编过（.008 日期格拆 6 块是同一个毛病）。
+    /// 黑卡放在页内、ScrollView 外：跟着月份翻页（在页里），但不跟竖滚走
+    ///（不在 ScrollView 里），嵌套 ScrollView 的竖向偏移漂移再也切不到它。
+    /// 明细（monthBreakdown + syncTimeFooter）仍在 ScrollView 里竖滚。
+    private func payMonthPage(offset: Int) -> some View {
+        let ym = yearMonth(from: baseIndex + offset)
+        return VStack(spacing: 16) {
+            headerCard(for: ym)
+            ScrollView {
+                VStack(spacing: 16) {
+                    monthBreakdown(year: ym.year, month: ym.month)
+                    syncTimeFooter
+                }
+                // 底部留白（重做，老爷 2026-11-28 14:36 亲口令）：1.3.2.006 加的 88pt
+                // 删掉——那是给自定义底栏留的，底栏已改回原生 TabView（iOS 26+ 液态玻璃 +
+                // 往下滚自动收起），安全区由原生底栏自动处理，不再手动垫大额留白。
+                // 点编辑框以外的地方就收起（丢弃未保存的改动）。Tap 手势只认轻点，
+                // 拖动（滚动/横滑）不会触发，不跟左右滑切月、上下滚动冲突。
+                .onTapGesture {
+                    if editingField != nil { dismissEdit() }
+                }
+            }
+            // 嵌套 ScrollView 的自动 safe-area 顶边距关掉（1.3.2.010）：
+            // 纵向 ScrollView 嵌在横向分页器里时，系统会按 safe-area 给内容加顶边距，
+            // 是竖向偏移漂移的头号嫌疑；显式写 0，不让它自己加。
+            .contentMargins(.top, 0)
+            // 每页竖滚位置记下来（1.3.2.010）：落定时按阈值纠回顶部（见 onChange），
+            // 漂移再也留不到静止帧上。
+            .scrollPosition(point: scrollPointBinding(for: offset))
+            // 1.3.0.013：滚动指示条常显（老爷 19:24 说「没有滑动框」）——.visible 没用，
+            // 画廊实拍证明它根本不画出来，改走自绘滑块 AlwaysVisibleScrollIndicator。
+            .modifier(AlwaysVisibleScrollIndicator())
+        }
+    }
+
     /// 邻月工资预热（1.3.2.004，1.3.2.010 改顺序与执行方式）：
     /// 中心优先——当前月先算，相邻月其次，外围最后；算到哪月、哪月就能显示。
     /// 原来从 center-10 开始顺算，当前月排第 11 个，快滑连续落定、旧任务被取消时
@@ -281,41 +318,7 @@ struct PayView: View {
             SmoothMonthPager(monthOffsets: monthOffsets, selectedOffset: selectedOffsetBinding, pagePadding: 0, fillHeight: true, onMidpointPageChange: { offset in
                 titleIndex = baseIndex + offset
             }) { offset in
-                let ym = yearMonth(from: baseIndex + offset)
-                // 黑卡改成每页固定页眉（1.3.2.010）：.009 把它放进纵向 ScrollView 顶部，
-                // 嵌套 ScrollView 的竖向偏移一漂移，黑卡就被顶出可视区、顶部横切
-                //（实测静止偏约 42pt，横滑一来回再多约 30pt）；.008 那种固定在分页器
-                // 上方不动的放法老爷否过（黑卡不跟月份走）。现在黑卡放在页内、
-                // ScrollView 外：跟着月份翻页（在页里），但不跟竖滚走（不在 ScrollView
-                // 里），漂移再也切不到它。明细（monthBreakdown + syncTimeFooter）
-                // 仍在 ScrollView 里竖滚。
-                VStack(spacing: 16) {
-                    headerCard(for: ym)
-                    ScrollView {
-                        VStack(spacing: 16) {
-                            monthBreakdown(year: ym.year, month: ym.month)
-                            syncTimeFooter
-                        }
-                        // 底部留白（重做，老爷 2026-11-28 14:36 亲口令）：1.3.2.006 加的 88pt
-                        // 删掉——那是给自定义底栏留的，底栏已改回原生 TabView（iOS 26+ 液态玻璃 +
-                        // 往下滚自动收起），安全区由原生底栏自动处理，不再手动垫大额留白。
-                        // 点编辑框以外的地方就收起（丢弃未保存的改动）。Tap 手势只认轻点，
-                        // 拖动（滚动/横滑）不会触发，不跟左右滑切月、上下滚动冲突。
-                        .onTapGesture {
-                            if editingField != nil { dismissEdit() }
-                        }
-                    }
-                    // 嵌套 ScrollView 的自动 safe-area 顶边距关掉（1.3.2.010）：
-                    // 纵向 ScrollView 嵌在横向分页器里时，系统会按 safe-area 给内容加顶边距，
-                    // 是竖向偏移漂移的头号嫌疑；显式写 0，不让它自己加。
-                    .contentMargins(.top, 0)
-                    // 每页竖滚位置记下来（1.3.2.010）：落定时按阈值纠回顶部（见 onChange），
-                    // 漂移再也留不到静止帧上。
-                    .scrollPosition(point: scrollPointBinding(for: offset))
-                    // 1.3.0.013：滚动指示条常显（老爷 19:24 说「没有滑动框」）——.visible 没用，
-                    // 画廊实拍证明它根本不画出来，改走自绘滑块 AlwaysVisibleScrollIndicator。
-                    .modifier(AlwaysVisibleScrollIndicator())
-                }
+                payMonthPage(offset: offset)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }

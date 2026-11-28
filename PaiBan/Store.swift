@@ -948,7 +948,9 @@ final class AppStore {
         }.value
         // 回主线程核对输入：快照还是不是当前那份（元组全是 Equatable，直接比），
         // 变了说明中途换了输入，这次结果是旧输入算的，丢弃。
-        guard payInputsSnapshot(year: year) == snap else { return nil }
+        // 注意：payInputsSnapshot 回的是 Optional 元组，不能直接和已解包的 snap 比，
+        // 必须先解包再比（否则编不过）。
+        guard let current = payInputsSnapshot(year: year), current == snap else { return nil }
         // 另一路可能同时算好了同一月（refreshPay/上一次预热）：以缓存为准，不覆盖。
         if let cached = payCache[key] { return cached }
         payCache[key] = computed
