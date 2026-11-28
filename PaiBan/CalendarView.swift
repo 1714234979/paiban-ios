@@ -818,8 +818,9 @@ struct MonthPageView: View {
     /// 点到上月/下月补的日期时跳到对应月。
     let onSelectAdjacentMonth: (Int, Int) -> Void
     /// 点“今天”后要微闪的日期（1.3.2.007，iOS.docx §3.2）：等于今天的格子闪一次，平时是 nil。
-    /// 有默认值，旧的调用处不用改。
-    let flashDate: String? = nil
+    /// 注意：let 常量带默认值时不能在 init 里再赋值（会报“只能初始化一次”），
+    /// 所以这里不写默认值，默认值放在下面显式 init 的参数上（flashDate: String? = nil）。
+    let flashDate: String?
 
     /// 显式初始化（1.3.2.007：合成的 memberwise init 在这台工具链上不认新加的
     /// flashDate 参数——疑似 @EnvironmentObject store 干扰了合成；显式写死最稳妥）。
