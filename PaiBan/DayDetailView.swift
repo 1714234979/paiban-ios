@@ -146,6 +146,9 @@ struct DayDetailView: View {
     @State private var editShiftSaving = false
 
     @State private var errorText: String?
+    /// 1.3.2.022：已调班再点调班的提示，单独一个状态（不走共享 errorText，
+    /// 免得挪显示位置时把「这天请假了」「这天已有调班（对方班组）」等其他提示也带错地方）。
+    @State private var swapAlreadyHint: String?
     @State private var doneMessage: String?
 
     /// 连班禁令弹窗（1.3.2.018：黄色大框收进操作栏右上角「? 规则」按钮，点开弹窗看）。
@@ -624,8 +627,9 @@ struct DayDetailView: View {
                     resetFlowStates()
                     if shownDay.overridden == true && shownDay.onLeave != true {
                         // 1.3.2.021：已有调班再点调班，不开表单，轻震一下 + 提示一行字。
+                        // 1.3.2.022：提示改走单独的 swapAlreadyHint，显示在 sheet 最下面。
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                        errorText = "已经进行调班了，如果需要再次更改，请删除此次调班，或者直接更改排班"
+                        swapAlreadyHint = "已经进行调班了，如果需要再次更改，请删除此次调班，或者直接更改排班"
                     } else {
                         showSwapFlow.toggle()
                     }
@@ -689,6 +693,13 @@ struct DayDetailView: View {
             if shownDay.overridden == true && shownDay.onLeave != true {
                 swapStatusCard
             }
+            // 1.3.2.022：已调班再点调班的提示，放 sheet 内容最下面（状态卡之后）。
+            // 单独显示，不动上面共享 errorText 的位置，其他提示不受影响。
+            if let swapAlreadyHint {
+                Text(swapAlreadyHint)
+                    .appFont(size: AppFont.bodySmall)
+                    .foregroundColor(.red)
+            }
         }
         .alert("连班禁令", isPresented: $showBanRules) {
             Button("知道了", role: .cancel) {}
@@ -743,6 +754,7 @@ struct DayDetailView: View {
         showOvertimeForm = false
         showEditShiftForm = false
         errorText = nil
+        swapAlreadyHint = nil
         doneMessage = nil
     }
 
@@ -1451,6 +1463,7 @@ struct DayDetailView: View {
 
     private func convertToLeave() async {
         errorText = nil
+        swapAlreadyHint = nil
         doneMessage = nil
         do {
             try await store.convertSwapToLeave(date: shownDay.date, type: leaveType, note: leaveNote.isEmpty ? nil : leaveNote)
@@ -1463,6 +1476,7 @@ struct DayDetailView: View {
 
     private func cancelSwap() async {
         errorText = nil
+        swapAlreadyHint = nil
         doneMessage = nil
         do {
             try await store.cancelSwap(date: shownDay.date)

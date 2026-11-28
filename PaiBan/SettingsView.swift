@@ -454,7 +454,7 @@ struct AccountSecurityView: View {
             // 脱敏手机号，不在白卡里、直接放灰底上；蓝色「B班」徽标删掉（班组行里已有）。
             Section {
                 HStack(spacing: 14) {
-                    SurnameAvatarView(name: store.displayUsername, size: 64)
+                    SurnameAvatarView(name: store.displayUsername, size: 80)
                     VStack(alignment: .leading, spacing: 4) {
                         Text(store.displayUsername)
                             .font(.title3)
@@ -531,40 +531,40 @@ struct AccountSecurityView: View {
 
         }
         // 退出登录与注销账号挪到页底（1.3.2.019）：不再是 Form 里的中间卡片，
-        // 改放底部 safeAreaInset，上面留空。分隔线用显式通栏矩形——Form 自动
-        // 分隔线会被居中文字带偏、显短断开；矩形通栏不断，跟账号卡的分隔线一样通到底。
+        // 改放底部 safeAreaInset，上面留空。样式按老爷 22:36 发的设计图
+        // （1.3.2.022 重做）：退出登录是白色圆角按钮、深色文字；注销账号是按钮
+        // 下方一行红色文字、居中、直接放灰底上，不套白卡、不要分隔线。
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 8) {
+            VStack(spacing: 12) {
                 if let cancelError {
                     Text(cancelError)
                         .appFont(size: AppFont.bodySmall)
                         .foregroundColor(.red)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
-                VStack(spacing: 0) {
-                    Button(role: .destructive) {
-                        showLogoutConfirm = true
-                    } label: {
-                        Text("退出登录")
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding(.vertical, 12)
-                    }
-                    Rectangle()
-                        .fill(Color(.separator))
-                        .frame(height: 1)
-                    // 注销账号（1.3.2.018）：点开先弹提醒（30 天后删全部数据，30 天内重新注册可找回），
-                    // 确认后调服务端注销接口，成功后清本地登录态、回登录页。
-                    Button(role: .destructive) {
-                        showCancelNotice = true
-                    } label: {
-                        Text("注销账号")
-                            .frame(maxWidth: .infinity, alignment: .center)
-                            .padding(.vertical, 12)
-                    }
-                    .disabled(cancelling)
+                Button {
+                    showLogoutConfirm = true
+                } label: {
+                    Text("退出登录")
+                        .foregroundColor(.primary)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(.vertical, 12)
                 }
+                .buttonStyle(.plain)
                 .background(AppStyle.surface1)
                 .cornerRadius(AppStyle.cardRadius)
+                // 注销账号（1.3.2.018）：点开先弹提醒（30 天后删全部数据，30 天内重新注册可找回），
+                // 确认后调服务端注销接口，成功后清本地登录态、回登录页。
+                Button {
+                    showCancelNotice = true
+                } label: {
+                    Text("注销账号")
+                        .appFont(size: AppFont.bodySmall)
+                        .foregroundColor(.red)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                }
+                .buttonStyle(.plain)
+                .disabled(cancelling)
             }
             .padding(.horizontal, 16)
             .padding(.bottom, 12)
@@ -1553,6 +1553,11 @@ struct ChangelogView: View {
             }
             if UpdateChecker.installedChannel == "beta" {
                 Section("内测版") {
+                    changelog(version: "1.3.2.022", items: [
+                        "当天详情页里，已经调班了再点「调班」的那行提示，挪到 sheet 最下面了（「已调班」那张卡下面）",
+                        "账号与安全页顶部的姓氏头像再大了一点",
+                        "账号与安全页底部的退出登录改成白色圆角按钮了，注销账号改成按钮下面一行红色文字了",
+                    ])
                     changelog(version: "1.3.2.021", items: [
                         "当天详情页里，这天已经调班了再点「调班」，会轻震一下并提示一行字：已经进行调班了，如果需要再次更改，请删除此次调班，或者直接更改排班",
                     ])
