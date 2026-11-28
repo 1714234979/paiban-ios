@@ -209,7 +209,8 @@ struct PayView: View {
     }
 
     /// 「当月」按钮（1.3.2.014 老爷令，1.3.2.017 文案由「回到今天」改成「当月」、
-    /// 并从顶卡底部单独一行挪进标题行）：顶卡标题行里的小胶囊——不在默认月
+    /// 并从顶卡底部单独一行挪进标题行；1.3.2.019：补上和排班页「回到今天」一样的
+    /// 显隐过渡动画——淡入+缩放，之前显隐是硬切的）：顶卡标题行里的小胶囊——不在默认月
     ///（上个月）时才出现，点按回到默认月（走 goToCurrentMonth）。图标
     /// arrow.counterclockwise，跟排班页「今天」按钮同款；文案改短、更紧凑。
     /// 落点不变：还是默认月（上个月），不是当月。样式跟顶卡角标同款（surface2 底
@@ -231,6 +232,7 @@ struct PayView: View {
             .touchTarget(vertical: 2, horizontal: 4)
         }
         .buttonStyle(.plain)
+        .transition(.opacity.combined(with: .scale(scale: 0.9)))
         .accessibilityLabel("回到当月")
     }
 

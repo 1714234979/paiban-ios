@@ -18,8 +18,6 @@ struct SettingsView: View {
     @State private var reminderOn = ShiftReminder.isEnabled
     @State private var showReminderDeniedAlert = false
     @State private var isRefreshingHolidays = false
-    /// 法律文件（1.3.2.017）：设置页底部三个链接点开的全文页。
-    @State private var legalDoc: LegalDocument?
 
     /// 账号与安全入口的副标题：昵称 · 手机号（脱敏，未绑就写未绑定）。
     private var accountSubtitle: String {
@@ -172,17 +170,18 @@ struct SettingsView: View {
                 }
                 .foregroundColor(.primary)
 
-                // 给个好评：标准系统评分弹窗（上架 App 才有效；侧载时无反应、不报错）。
-                Button {
-                    requestReview()
-                } label: {
-                    HStack(spacing: 12) {
-                        settingsIcon("star")
-                        Text("给个好评")
-                        Spacer()
-                    }
-                }
-                .foregroundColor(.primary)
+                // 给个好评（1.3.2.019 先隐藏：没上商店，SKStoreReviewController 点了没用；
+                // 等上架了再放出来。requestReview() 函数本身保留，别删）。
+                // Button {
+                //     requestReview()
+                // } label: {
+                //     HStack(spacing: 12) {
+                //         settingsIcon("star")
+                //         Text("给个好评")
+                //         Spacer()
+                //     }
+                // }
+                // .foregroundColor(.primary)
 
                 // 检查更新：右侧浅灰当前版号；有新版时前面多一个小红点。
                 // 正式/内测切换栏普通用户不再显示，收进底部的「开发者选项」。
@@ -227,22 +226,6 @@ struct SettingsView: View {
                     }
                 }
             }
-
-            // 法律文件（1.3.2.017，参考微博设置页底部）：一行三个可点链接，点开看全文；
-            // 《第三方合作清单》是收集清单里的那节，单独成页。
-            // 1.3.2.018：.017 的 HStack + Divider 写法只有「第三方合作清单」点得开——
-            // Divider 会挤占按钮的布局/点按区域。改成固定 1pt 矩形分隔线 + 每格
-            // contentShape(Rectangle()) + .buttonStyle(.plain)，三个格子各自可点。
-            Section {
-                HStack(spacing: 0) {
-                    legalLink(.privacyPolicy)
-                    legalSeparator
-                    legalLink(.collectionList)
-                    legalSeparator
-                    legalLink(.thirdPartyList)
-                }
-                .frame(maxWidth: .infinity)
-            }
         }
         // 底部安全留白（1.3.2.013）：列表滑到底时，最后一行「关于排班空间」完整露在
         // 液态玻璃 TabBar 上方，不被底栏压住。
@@ -280,16 +263,6 @@ struct SettingsView: View {
         }
         .sheet(isPresented: $showFeedback) {
             FeedbackView()
-        }
-        .sheet(item: $legalDoc) { doc in
-            NavigationStack {
-                LegalDocumentView(document: doc)
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("完成") { legalDoc = nil }
-                        }
-                    }
-            }
         }
         .task {
             // 1.2.9.001（第 35 条）：进设置页检查一次提醒权限——开着但还没定，
@@ -330,24 +303,6 @@ struct SettingsView: View {
                 }
             }
         }
-    }
-
-    /// 法律文件链接（1.3.2.017，1.3.2.018 修点按）：设置页底部一行三个，点开对应全文页。
-    /// 每格整块可点（contentShape + 最小高度 32pt + .plain 样式，不让 List 行高亮干扰）。
-    private func legalLink(_ doc: LegalDocument) -> some View {
-        Button(doc.title) { legalDoc = doc }
-            .font(.subheadline)
-            .foregroundColor(.secondary)
-            .frame(maxWidth: .infinity, minHeight: 32)
-            .contentShape(Rectangle())
-            .buttonStyle(.plain)
-    }
-
-    /// 法律链接之间的固定分隔线（1.3.2.018）：不用 Divider（会挤占按钮布局/点按区）。
-    private var legalSeparator: some View {
-        Rectangle()
-            .fill(Color.secondary.opacity(0.3))
-            .frame(width: 1, height: 16)
     }
 
     /// 外观绑定：跟随系统 / 浅色 / 深色，改完立刻生效。
@@ -530,29 +485,45 @@ struct AccountSecurityView: View {
                 }
             }
 
-            // 退出登录与注销账号并到底部一组（参考微信/支付宝：危险操作放最下面）。
-            Section {
-                Button(role: .destructive) {
-                    showLogoutConfirm = true
-                } label: {
-                    Text("退出登录")
+        }
+        // 退出登录与注销账号挪到页底（1.3.2.019）：不再是 Form 里的中间卡片，
+        // 改放底部 safeAreaInset，上面留空。分隔线用显式通栏矩形——Form 自动
+        // 分隔线会被居中文字带偏、显短断开；矩形通栏不断，跟账号卡的分隔线一样通到底。
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 8) {
+                if let cancelError {
+                    Text(cancelError)
+                        .appFont(size: AppFont.bodySmall)
+                        .foregroundColor(.red)
                         .frame(maxWidth: .infinity, alignment: .center)
                 }
-                // 注销账号（1.3.2.018）：点开先弹提醒（30 天后删全部数据，30 天内重新注册可找回），
-                // 确认后调服务端注销接口，成功后清本地登录态、回登录页。
-                Button(role: .destructive) {
-                    showCancelNotice = true
-                } label: {
-                    Text("注销账号")
-                        .frame(maxWidth: .infinity, alignment: .center)
+                VStack(spacing: 0) {
+                    Button(role: .destructive) {
+                        showLogoutConfirm = true
+                    } label: {
+                        Text("退出登录")
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.vertical, 12)
+                    }
+                    Rectangle()
+                        .fill(Color(.separator))
+                        .frame(height: 1)
+                    // 注销账号（1.3.2.018）：点开先弹提醒（30 天后删全部数据，30 天内重新注册可找回），
+                    // 确认后调服务端注销接口，成功后清本地登录态、回登录页。
+                    Button(role: .destructive) {
+                        showCancelNotice = true
+                    } label: {
+                        Text("注销账号")
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding(.vertical, 12)
+                    }
+                    .disabled(cancelling)
                 }
-                .disabled(cancelling)
+                .background(AppStyle.surface1)
+                .cornerRadius(AppStyle.cardRadius)
             }
-            if let cancelError {
-                Text(cancelError)
-                    .appFont(size: AppFont.bodySmall)
-                    .foregroundColor(.red)
-            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 12)
         }
         .navigationTitle("账号与安全")
         .navigationBarTitleDisplayMode(.inline)
@@ -1339,6 +1310,24 @@ struct AboutView: View {
             Section("功能介绍") {
                 Text("排班空间是一款专为倒班人群打造的排班与薪资助手。支持多种倒班周期、灵活调班请假、法定节假日标注及税后工资预估，并内置离线缓存，无网环境下也能随时查阅排班。")
             }
+            // 法律文件（1.3.2.019：从设置页底部挪过来，老爷令放关于里）。
+            Section("法律文件") {
+                NavigationLink {
+                    LegalDocumentView(document: .privacyPolicy).toolbar(.hidden, for: .tabBar)
+                } label: {
+                    Text(LegalDocument.privacyPolicy.title)
+                }
+                NavigationLink {
+                    LegalDocumentView(document: .collectionList).toolbar(.hidden, for: .tabBar)
+                } label: {
+                    Text(LegalDocument.collectionList.title)
+                }
+                NavigationLink {
+                    LegalDocumentView(document: .thirdPartyList).toolbar(.hidden, for: .tabBar)
+                } label: {
+                    Text(LegalDocument.thirdPartyList.title)
+                }
+            }
             Section {
                 Text("© 2026 排班空间")
                     .font(.caption)
@@ -1505,6 +1494,14 @@ struct ChangelogView: View {
                 ])
             }
             Section("内测版") {
+                changelog(version: "1.3.2.019", items: [
+                    "隐私政策、个人信息收集清单、第三方合作清单三条链接从设置页底挪进「关于」页里了",
+                    "账号与安全页退出登录和注销账号之间的分隔横杠修成通栏不断的了",
+                    "工资页「当月」按钮加上了和排班页「回到今天」一样的显隐动画（淡入+缩放）",
+                    "账号与安全页的退出登录和注销账号挪到那一页的最下边了",
+                    "「给个好评」先隐藏了——没上商店，点了没用，等上架再放出来",
+                    "当天详情页「其他班次」里「休」改回浅青，跟主日历的休统一了",
+                ])
                 changelog(version: "1.3.2.018", items: [
                     "排班页顶卡「预估 ¥XXX」小字加回来了；金额标签改成「预估今日工资」",
                     "工资页顶卡标题行重排：小眼睛紧挨「本月实发合计」，「当月」按钮挪到最右边，标题和金额之间更紧凑",

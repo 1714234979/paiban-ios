@@ -319,8 +319,9 @@ struct DayDetailView: View {
     /// 其他班次：选中这天，其他三个班组按 8 天一轮基础排班算出的班次（横向一排小 chip）。
     /// 只按基础轮换算，不含调班/请假——App 里没有其他用户的调班记录。
     /// 正在看的班组不列在这里，它的班次已在上面头部卡里显示。
-    /// 1.3.2.018：色块降饱和——浅底深字（班次色只做浅底 tint + 深色字，不再用整块饱和色），
-    /// 休息用浅灰（与主日历页的灰色「休」统一，不再用浅青）。
+    /// 1.3.2.018：色块降饱和——浅底深字（班次色只做浅底 tint + 深色字，不再用整块饱和色）。
+    /// 1.3.2.019：休息改回浅青——主日历 DayCell 的「休」是浅青（ShiftStyle teal 0.14 底 +
+    /// 深青字），全站休的既定颜色；.018 改成的浅灰跟主日历不统一，这次改回浅青。
     private var otherTeamsCard: some View {
         HStack(spacing: 8) {
             Text("其他班次")
@@ -352,7 +353,7 @@ struct DayDetailView: View {
 
     /// 一个班组的 chip：班组名 + 班次。1.3.2.018：降饱和——浅底深字：
     /// 上班用班次色的浅底 tint + 班次色深字，不再整块饱和色白字；
-    /// 休息用浅灰底 + 次要色字（与主日历页的灰色「休」统一），显示「休」。
+    /// 休息也走 ShiftStyle（浅青底 + 深青字，跟主日历的「休」一致）。
     private func otherTeamChip(team: String, shift: String) -> some View {
         HStack(spacing: 4) {
             Text("\(team)班")
@@ -362,10 +363,10 @@ struct DayDetailView: View {
         .appFont(size: AppFont.bodySmall)
         .lineLimit(1)
         .minimumScaleFactor(0.85)
-        .foregroundColor(shift == "休息" ? .secondary : ShiftStyle.color(for: shift))
+        .foregroundColor(ShiftStyle.color(for: shift))
         .frame(maxWidth: .infinity)
         .padding(.vertical, 8)
-        .background(shift == "休息" ? AppStyle.surface2 : ShiftStyle.background(for: shift))
+        .background(ShiftStyle.background(for: shift))
         .cornerRadius(8)
     }
 
