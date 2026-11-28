@@ -323,7 +323,23 @@ extension View {
             .padding(.horizontal, horizontal)
             .contentShape(Rectangle())
     }
-    /// 白卡表单（1.3.3.004，115 式干净白卡）：纯白圆角卡，行间只一条分隔线，
+
+/// 输入框底线（1.3.2.018，老爷 2026-11-28 21:21 亲口令：灰底圆角框颜色加深太丑，
+    /// 改成输入框下方只有一条横线——参考他发的微博改名字页样式：无填充、底下一条细线）。
+    /// 给 Form/List 行里的裸 TextField / SecureField 用。全站 27 处共用这一个实现，
+    /// 改这里就全改了（改密码、改昵称、公积金及所有 .fieldBackground() 输入框）。
+    /// 1.3.2.017 的灰底圆角框（surface2）已删，不再用。
+    func fieldBackground() -> some View {
+        padding(.vertical, 6)
+            .background(alignment: .bottom) {
+                Rectangle()
+                    .fill(AppStyle.outline)
+                    .frame(height: 1)
+            }
+    }
+}
+
+/// 白卡表单（1.3.3.004，115 式干净白卡）：纯白圆角卡，行间只一条分隔线，
 /// 行内输入框不再自己画下划线——找回密码、改密码、更换手机号三页共用。
 struct WhiteCard<Content: View>: View {
     let content: Content
@@ -386,21 +402,6 @@ struct OutlinedCodeButton: View {
         }
         .buttonStyle(.plain)
         .disabled(disabled)
-    }
-}
-
-/// 输入框底线（1.3.2.018，老爷 2026-11-28 21:21 亲口令：灰底圆角框颜色加深太丑，
-    /// 改成输入框下方只有一条横线——参考他发的微博改名字页样式：无填充、底下一条细线）。
-    /// 给 Form/List 行里的裸 TextField / SecureField 用。全站 27 处共用这一个实现，
-    /// 改这里就全改了（改密码、改昵称、公积金及所有 .fieldBackground() 输入框）。
-    /// 1.3.2.017 的灰底圆角框（surface2）已删，不再用。
-    func fieldBackground() -> some View {
-        padding(.vertical, 6)
-            .background(alignment: .bottom) {
-                Rectangle()
-                    .fill(AppStyle.outline)
-                    .frame(height: 1)
-            }
     }
 }
 
