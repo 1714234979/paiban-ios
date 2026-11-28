@@ -227,7 +227,7 @@ struct MonthJumpSheet: View {
                             dismiss()
                         } label: {
                             Text("\(m)月")
-                                .font(.system(size: 16, weight: selected ? 700 : 400))
+                                .font(.system(size: 16, weight: selected ? .bold : .regular))
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 12)
                                 .background(selected ? AppStyle.navyAdaptive : AppStyle.surface1, in: RoundedRectangle(cornerRadius: 10))
